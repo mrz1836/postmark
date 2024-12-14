@@ -2,6 +2,7 @@ package postmark
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 )
@@ -22,6 +23,8 @@ type Server struct {
 	SMTPAPIActivated bool `json:"SmtpApiActivated"`
 	// RawEmailEnabled allows raw email to be sent with inbound.
 	RawEmailEnabled bool
+	// DeliveryType specifies the type of environment for your server: Live or Sandbox, defaults to Live
+	DeliveryType string `json:"DeliveryType"`
 	// InboundAddress is the inbound email address
 	InboundAddress string
 	// InboundHookURL to POST to every time an inbound event occurs.
@@ -35,12 +38,44 @@ type Server struct {
 	PostFirstOpenOnly bool
 	// TrackOpens indicates if all emails being sent through this server have open tracking enabled.
 	TrackOpens bool
+	// TrackLinks specifies link tracking in emails: None, HtmlAndText, HtmlOnly, TextOnly, defaults to "None"
+	TrackLinks string `json:"TrackLinks"`
+	// IncludeBounceContentInHook determines if bounce content is included in webhook.
+	IncludeBounceContentInHook bool `json:"IncludeBounceContentInHook"`
 	// InboundDomain is the inbound domain for MX setup
 	InboundDomain string
 	// InboundHash is the inbound hash of your inbound email address.
 	InboundHash string
 	// InboundSpamThreshold is the maximum spam score for an inbound message before it's blocked.
 	InboundSpamThreshold int64
+	// EnableSmtpApiErrorHooks specifies whether SMTP API Errors will be included with bounce webhooks.
+	EnableSmtpApiErrorHooks bool `json:"EnableSmtpApiErrorHooks"`
+}
+
+func (s Server) MarshalJSON() ([]byte, error) {
+	type Aux Server
+
+	// If TrackLinks is empty, set it to "None"
+	trackLinks := s.TrackLinks
+	if trackLinks == "" {
+		trackLinks = "None"
+	}
+
+	// If DeliveryType is empty, set it to default value "Live"
+	deliveryType := s.DeliveryType
+	if deliveryType == "" {
+		deliveryType = "Live"
+	}
+
+	return json.Marshal(&struct {
+		Aux
+		TrackLinks   string `json:"TrackLinks"`
+		DeliveryType string `json:"DeliveryType"`
+	}{
+		Aux:          Aux(s),
+		TrackLinks:   trackLinks,
+		DeliveryType: deliveryType,
+	})
 }
 
 // GetServer fetches a specific server via serverID
@@ -63,4 +98,16 @@ func (client *Client) EditServer(ctx context.Context, serverID string, server Se
 		TokenType: accountToken,
 	}, &server)
 	return server, err
+}
+
+// CreateServer creates a server
+func (client *Client) CreateServer(ctx context.Context, server Server) (Server, error) {
+	res := Server{}
+	err := client.doRequest(ctx, parameters{
+		Method:    http.MethodPost,
+		Path:      "servers",
+		TokenType: accountToken,
+		Payload:   server,
+	}, &res)
+	return res, err
 }
