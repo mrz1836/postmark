@@ -181,6 +181,7 @@ pull_request_rules:
         - author!=tgrosinger
         - author!=morus12
         - author!=vincent-stytch
+        - author!=sanchitrk
     actions:
       comment:
         message: Welcome to our open-source project! 💘
