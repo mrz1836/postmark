@@ -92,12 +92,13 @@ func (client *Client) GetServer(ctx context.Context, serverID string) (Server, e
 
 // EditServer updates details for a specific server with serverID
 func (client *Client) EditServer(ctx context.Context, serverID string, server Server) (Server, error) {
-	// res := Server{}
+	res := Server{}
 	err := client.doRequest(ctx, parameters{
 		Method:    http.MethodPut,
 		Path:      fmt.Sprintf("servers/%s", serverID),
 		TokenType: accountToken,
-	}, &server)
+		Payload:   server,
+	}, &res)
 	return server, err
 }
 
