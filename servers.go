@@ -99,7 +99,7 @@ func (client *Client) EditServer(ctx context.Context, serverID string, server Se
 		TokenType: accountToken,
 		Payload:   server,
 	}, &res)
-	return server, err
+	return res, err
 }
 
 // CreateServer creates a server
