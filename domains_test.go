@@ -34,7 +34,7 @@ func TestGetDomain(t *testing.T) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetDomain(context.Background(), "1234")
+	res, err := client.GetDomain(context.Background(), 1234)
 	if err != nil {
 		t.Fatalf("GetDomain: %s", err.Error())
 	}
@@ -114,7 +114,7 @@ func TestEditDomain(t *testing.T) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.EditDomain(context.Background(), "1234", DomainEditRequest{
+	res, err := client.EditDomain(context.Background(), 1234, DomainEditRequest{
 		ReturnPathDomain: "pm-bounces.example.com",
 	})
 	if err != nil {
@@ -141,7 +141,7 @@ func TestDeleteDomain(t *testing.T) {
 	})
 
 	// Success
-	err := client.DeleteDomain(context.Background(), "1234")
+	err := client.DeleteDomain(context.Background(), 1234)
 	if err != nil {
 		t.Fatalf("DeleteDomain: %s", err.Error())
 	}
@@ -152,7 +152,7 @@ func TestDeleteDomain(t *testing.T) {
 	  "Message": "Invalid JSON"
 	}`
 
-	err = client.DeleteDomain(context.Background(), "1234")
+	err = client.DeleteDomain(context.Background(), 1234)
 	if err == nil {
 		t.Fatalf("DeleteDomain: should have failed")
 	}

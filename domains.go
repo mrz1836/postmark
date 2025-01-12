@@ -7,8 +7,26 @@ import (
 	"net/url"
 )
 
-// Domain contains the details of a domain in Postmark. https://postmarkapp.com/developer/api/domains-api
+// Domain is a domain in Postmark. https://postmarkapp.com/developer/api/domains-api
 type Domain struct {
+	// Name of the domain.
+	Name string `json:"Name" binding:"required"`
+	// Deprecated: See our [blog post](https://postmarkapp.com/blog/why-we-no-longer-ask-for-spf-records) to learn
+	// why this field was deprecated.
+	SPFVerified bool `json:"SPFVerified"`
+	// Specifies whether DKIM has ever been verified for the domain or not. Once DKIM is verified, this response will
+	// stay true, even if the record is later removed from DNS.
+	DKIMVerified bool `json:"DKIMVerified"`
+	// DKIM is using a strength weaker than 1024 bit. If so, it’s possible to request a new DKIM using the
+	// [RequestNewDKIM](https://postmarkapp.com/developer/api/domains-api#rotate-dkim) function below.
+	WeakDKIM bool `json:"WeakDKIM"`
+	// The verification state of the Return-Path domain. Tells you if the Return-Path is actively being used or still
+	// needs further action to be used.
+	ReturnPathDomainVerified bool `json:"ReturnPathDomainVerified"`
+}
+
+// DomainDetails contains the full details of a domain in Postmark. https://postmarkapp.com/developer/api/domains-api
+type DomainDetails struct {
 	// Name of the domain.
 	Name string `json:"Name" binding:"required"`
 	// Deprecated: See our [blog post](https://postmarkapp.com/blog/why-we-no-longer-ask-for-spf-records) to learn
@@ -99,22 +117,22 @@ func (client *Client) GetDomains(ctx context.Context, count, offset int64) (Doma
 }
 
 // GetDomain fetches a specific domain via domainID
-func (client *Client) GetDomain(ctx context.Context, domainID string) (Domain, error) {
-	res := Domain{}
+func (client *Client) GetDomain(ctx context.Context, domainID int64) (DomainDetails, error) {
+	res := DomainDetails{}
 	err := client.doRequest(ctx, parameters{
 		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("domains/%s", domainID),
+		Path:      fmt.Sprintf("domains/%d", domainID),
 		TokenType: accountToken,
 	}, &res)
 	return res, err
 }
 
 // EditDomain updates details for a specific domain with domainID
-func (client *Client) EditDomain(ctx context.Context, domainID string, request DomainEditRequest) (Domain, error) {
-	res := Domain{}
+func (client *Client) EditDomain(ctx context.Context, domainID int64, request DomainEditRequest) (DomainDetails, error) {
+	res := DomainDetails{}
 	err := client.doRequest(ctx, parameters{
 		Method:    http.MethodPut,
-		Path:      fmt.Sprintf("domains/%s", domainID),
+		Path:      fmt.Sprintf("domains/%d", domainID),
 		TokenType: accountToken,
 		Payload:   request,
 	}, &res)
@@ -122,8 +140,8 @@ func (client *Client) EditDomain(ctx context.Context, domainID string, request D
 }
 
 // CreateDomain creates a domain
-func (client *Client) CreateDomain(ctx context.Context, request DomainCreateRequest) (Domain, error) {
-	res := Domain{}
+func (client *Client) CreateDomain(ctx context.Context, request DomainCreateRequest) (DomainDetails, error) {
+	res := DomainDetails{}
 	err := client.doRequest(ctx, parameters{
 		Method:    http.MethodPost,
 		Path:      "domains",
@@ -134,11 +152,11 @@ func (client *Client) CreateDomain(ctx context.Context, request DomainCreateRequ
 }
 
 // DeleteDomain deletes a specific domain via domainID
-func (client *Client) DeleteDomain(ctx context.Context, domainID string) error {
+func (client *Client) DeleteDomain(ctx context.Context, domainID int64) error {
 	res := APIError{}
 	err := client.doRequest(ctx, parameters{
 		Method:    http.MethodDelete,
-		Path:      fmt.Sprintf("domains/%s", domainID),
+		Path:      fmt.Sprintf("domains/%d", domainID),
 		TokenType: accountToken,
 	}, &res)
 
@@ -150,22 +168,22 @@ func (client *Client) DeleteDomain(ctx context.Context, domainID string) error {
 }
 
 // VerifyDKIMStatus verifies DKIM keys for the specified domain.
-func (client *Client) VerifyDKIMStatus(ctx context.Context, domainID string) (Domain, error) {
-	res := Domain{}
+func (client *Client) VerifyDKIMStatus(ctx context.Context, domainID int64) (DomainDetails, error) {
+	res := DomainDetails{}
 	err := client.doRequest(ctx, parameters{
 		Method:    http.MethodPut,
-		Path:      fmt.Sprintf("domains/%s/verifyDkim", domainID),
+		Path:      fmt.Sprintf("domains/%d/verifyDkim", domainID),
 		TokenType: accountToken,
 	}, &res)
 	return res, err
 }
 
 // VerifyReturnPath verifies Return-Path DNS record for the specified domain.
-func (client *Client) VerifyReturnPath(ctx context.Context, domainID string) (Domain, error) {
-	res := Domain{}
+func (client *Client) VerifyReturnPath(ctx context.Context, domainID int64) (DomainDetails, error) {
+	res := DomainDetails{}
 	err := client.doRequest(ctx, parameters{
 		Method:    http.MethodPut,
-		Path:      fmt.Sprintf("domains/%s/verifyReturnPath", domainID),
+		Path:      fmt.Sprintf("domains/%d/verifyReturnPath", domainID),
 		TokenType: accountToken,
 	}, &res)
 	return res, err
@@ -175,11 +193,11 @@ func (client *Client) VerifyReturnPath(ctx context.Context, domainID string) (Do
 // values will be in DKIMPendingHost and DKIMPendingTextValue fields. After the new DKIM value is verified in DNS,
 // the pending values will migrate to DKIMTextValue and DKIMPendingTextValue and Postmark will begin to sign emails with
 // the new DKIM key.
-func (client *Client) RotateDKIM(ctx context.Context, domainID string) (Domain, error) {
-	res := Domain{}
+func (client *Client) RotateDKIM(ctx context.Context, domainID int64) (DomainDetails, error) {
+	res := DomainDetails{}
 	err := client.doRequest(ctx, parameters{
 		Method:    http.MethodPost,
-		Path:      fmt.Sprintf("domains/%s/rotatedkim", domainID),
+		Path:      fmt.Sprintf("domains/%d/rotatedkim", domainID),
 		TokenType: accountToken,
 	}, &res)
 	return res, err
