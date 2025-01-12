@@ -70,7 +70,7 @@ func TestEditServer(t *testing.T) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.EditServer(context.Background(), "1234", Server{
+	res, err := client.EditServer(context.Background(), "1234", ServerEditRequest{
 		Name: "Production Testing",
 	})
 	if err != nil {
