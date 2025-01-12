@@ -166,11 +166,11 @@ func (s Server) MarshalJSON() ([]byte, error) {
 }
 
 // GetServer fetches a specific server via serverID
-func (client *Client) GetServer(ctx context.Context, serverID string) (Server, error) {
+func (client *Client) GetServer(ctx context.Context, serverID int64) (Server, error) {
 	res := Server{}
 	err := client.doRequest(ctx, parameters{
 		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("servers/%s", serverID),
+		Path:      fmt.Sprintf("servers/%d", serverID),
 		TokenType: accountToken,
 	}, &res)
 	return res, err
@@ -199,11 +199,11 @@ func (client *Client) GetServers(ctx context.Context, count, offset int64, name 
 }
 
 // EditServer updates details for a specific server with serverID
-func (client *Client) EditServer(ctx context.Context, serverID string, request ServerEditRequest) (Server, error) {
+func (client *Client) EditServer(ctx context.Context, serverID int64, request ServerEditRequest) (Server, error) {
 	res := Server{}
 	err := client.doRequest(ctx, parameters{
 		Method:    http.MethodPut,
-		Path:      fmt.Sprintf("servers/%s", serverID),
+		Path:      fmt.Sprintf("servers/%d", serverID),
 		TokenType: accountToken,
 		Payload:   request,
 	}, &res)
@@ -220,4 +220,20 @@ func (client *Client) CreateServer(ctx context.Context, request ServerCreateRequ
 		Payload:   request,
 	}, &res)
 	return res, err
+}
+
+// DeleteServer removes a server.
+func (client *Client) DeleteServer(ctx context.Context, serverID int64) error {
+	res := APIError{}
+	err := client.doRequest(ctx, parameters{
+		Method:    http.MethodDelete,
+		Path:      fmt.Sprintf("servers/%d", serverID),
+		TokenType: accountToken,
+	}, &res)
+
+	if res.ErrorCode != 0 {
+		return res
+	}
+
+	return err
 }
