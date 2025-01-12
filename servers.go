@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 )
 
 // Server represents a server registered in your Postmark account
@@ -29,10 +30,12 @@ type Server struct {
 	InboundAddress string `json:"InboundAddress"`
 	// InboundHookURL to POST to every time an inbound event occurs.
 	InboundHookURL string `json:"InboundHookUrl"`
-	// BounceHookURL to POST to every time a bounce event occurs.
+	// Deprecated: Use the Bounce Webhook API instead.
 	BounceHookURL string `json:"BounceHookUrl"`
-	// OpenHookURL to POST to every time an open event occurs.
+	// Deprecated: Use the Open Tracking Webhook API instead.
 	OpenHookURL string `json:"OpenHookUrl"`
+	// Deprecated: Use the Delivery Webhook API instead.
+	DeliveryHookURL string `json:"DeliveryHookUrl"`
 	// PostFirstOpenOnly - If set to true, only the first open by a particular recipient will initiate the open webhook. Any
 	// subsequent opens of the same email by the same recipient will not initiate the webhook.
 	PostFirstOpenOnly bool `json:"PostFirstOpenOnly"`
@@ -50,6 +53,89 @@ type Server struct {
 	InboundSpamThreshold int64 `json:"InboundSpamThreshold"`
 	// EnableSMTPAPIErrorHooks specifies whether SMTP API Errors will be included with bounce webhooks.
 	EnableSMTPAPIErrorHooks bool `json:"EnableSmtpApiErrorHooks"`
+}
+
+// ServerCreateRequest represents the fields to create a server
+type ServerCreateRequest struct {
+	// Name of server
+	Name string `json:"Name" binding:"required"`
+	// Color of the server in the server list, for quick identification. Purple Blue Turquoise Green Red Yellow Grey Orange
+	Color string `json:"Color"`
+	// SMTPAPIActivated specifies whether SMTP is enabled on this server.
+	SMTPAPIActivated bool `json:"SmtpApiActivated"`
+	// When enabled, the raw email content will be included with inbound webhook payloads under the RawEmail key.
+	RawEmailEnabled bool `json:"RawEmailEnabled"`
+	// Specifies the type of environment for your server. Possible options: Live Sandbox. Defaults to Live if not
+	// specified. This cannot be changed after the server has been created.
+	DeliveryType string `json:"DeliveryType"`
+	// URL to POST to every time an inbound event occurs.
+	InboundHookURL string `json:"InboundHookUrl"`
+	// Deprecated: Use the Bounce Webhook API instead.
+	BounceHookURL string `json:"BounceHookUrl"`
+	// Deprecated: Use the Open Tracking Webhook API instead.
+	OpenHookURL string `json:"OpenHookUrl"`
+	// Deprecated: Use the Delivery Webhook API instead.
+	DeliveryHookURL string `json:"DeliveryHookUrl"`
+	// Deprecated: Use the Click Webhook API instead.
+	ClickHookURL string `json:"ClickHookUrl"`
+	// PostFirstOpenOnly - If set to true, only the first open by a particular recipient will initiate the open webhook. Any
+	// subsequent opens of the same email by the same recipient will not initiate the webhook.
+	PostFirstOpenOnly bool `json:"PostFirstOpenOnly"`
+	// InboundDomain is the inbound domain for MX setup
+	InboundDomain string `json:"InboundDomain"`
+	// InboundSpamThreshold is the maximum spam score for an inbound message before it's blocked.
+	InboundSpamThreshold int64 `json:"InboundSpamThreshold"`
+	// TrackOpens indicates if all emails being sent through this server have open tracking enabled.
+	TrackOpens bool `json:"TrackOpens"`
+	// TrackLinks specifies link tracking in emails: None, HtmlAndText, HtmlOnly, TextOnly, defaults to "None"
+	TrackLinks string `json:"TrackLinks"`
+	// IncludeBounceContentInHook determines if bounce content is included in webhook.
+	IncludeBounceContentInHook bool `json:"IncludeBounceContentInHook"`
+	// EnableSMTPAPIErrorHooks specifies whether SMTP API Errors will be included with bounce webhooks.
+	EnableSMTPAPIErrorHooks bool `json:"EnableSmtpApiErrorHooks"`
+}
+
+// ServerEditRequest represents the fields that can be updated for a server
+type ServerEditRequest struct {
+	// Name of server
+	Name string `json:"Name" binding:"required"`
+	// Color of the server in the server list, for quick identification. Purple Blue Turquoise Green Red Yellow Grey Orange
+	Color string `json:"Color"`
+	// SMTPAPIActivated specifies whether SMTP is enabled on this server.
+	SMTPAPIActivated bool `json:"SmtpApiActivated"`
+	// When enabled, the raw email content will be included with inbound webhook payloads under the RawEmail key.
+	RawEmailEnabled bool `json:"RawEmailEnabled"`
+	// URL to POST to every time an inbound event occurs.
+	InboundHookURL string `json:"InboundHookUrl"`
+	// Deprecated: Use the Bounce Webhook API instead.
+	BounceHookURL string `json:"BounceHookUrl"`
+	// Deprecated: Use the Open Tracking Webhook API instead.
+	OpenHookURL string `json:"OpenHookUrl"`
+	// Deprecated: Use the Delivery Webhook API instead.
+	DeliveryHookURL string `json:"DeliveryHookUrl"`
+	// Deprecated: Use the Click Webhook API instead.
+	ClickHookURL string `json:"ClickHookUrl"`
+	// PostFirstOpenOnly - If set to true, only the first open by a particular recipient will initiate the open webhook. Any
+	// subsequent opens of the same email by the same recipient will not initiate the webhook.
+	PostFirstOpenOnly bool `json:"PostFirstOpenOnly"`
+	// InboundDomain is the inbound domain for MX setup
+	InboundDomain string `json:"InboundDomain"`
+	// InboundSpamThreshold is the maximum spam score for an inbound message before it's blocked.
+	InboundSpamThreshold int64 `json:"InboundSpamThreshold"`
+	// TrackOpens indicates if all emails being sent through this server have open tracking enabled.
+	TrackOpens bool `json:"TrackOpens"`
+	// TrackLinks specifies link tracking in emails: None, HtmlAndText, HtmlOnly, TextOnly, defaults to "None"
+	TrackLinks string `json:"TrackLinks"`
+	// IncludeBounceContentInHook determines if bounce content is included in webhook.
+	IncludeBounceContentInHook bool `json:"IncludeBounceContentInHook"`
+	// EnableSMTPAPIErrorHooks specifies whether SMTP API Errors will be included with bounce webhooks.
+	EnableSMTPAPIErrorHooks bool `json:"EnableSmtpApiErrorHooks"`
+}
+
+// ServersList is just a list of Server as they are in the response
+type ServersList struct {
+	TotalCount int
+	Servers    []Server
 }
 
 // MarshalJSON customizes the JSON representation of the Server struct by setting default values for specific fields.
@@ -90,26 +176,48 @@ func (client *Client) GetServer(ctx context.Context, serverID string) (Server, e
 	return res, err
 }
 
+// GetServers fetches a list of servers on the account, limited by count and paged by offset
+// Optionally filter by a specific server name. Note that this is a string search, so MyServer will match
+// MyServer, MyServer Production, and MyServer Test.
+func (client *Client) GetServers(ctx context.Context, count, offset int64, name string) (ServersList, error) {
+	res := ServersList{}
+
+	values := &url.Values{}
+	values.Add("count", fmt.Sprintf("%d", count))
+	values.Add("offset", fmt.Sprintf("%d", offset))
+
+	if name != "" {
+		values.Add("name", name)
+	}
+
+	err := client.doRequest(ctx, parameters{
+		Method:    "GET",
+		Path:      fmt.Sprintf("servers?%s", values.Encode()),
+		TokenType: accountToken,
+	}, &res)
+	return res, err
+}
+
 // EditServer updates details for a specific server with serverID
-func (client *Client) EditServer(ctx context.Context, serverID string, server Server) (Server, error) {
+func (client *Client) EditServer(ctx context.Context, serverID string, request ServerEditRequest) (Server, error) {
 	res := Server{}
 	err := client.doRequest(ctx, parameters{
 		Method:    http.MethodPut,
 		Path:      fmt.Sprintf("servers/%s", serverID),
 		TokenType: accountToken,
-		Payload:   server,
+		Payload:   request,
 	}, &res)
 	return res, err
 }
 
 // CreateServer creates a server
-func (client *Client) CreateServer(ctx context.Context, server Server) (Server, error) {
+func (client *Client) CreateServer(ctx context.Context, request ServerCreateRequest) (Server, error) {
 	res := Server{}
 	err := client.doRequest(ctx, parameters{
 		Method:    http.MethodPost,
 		Path:      "servers",
 		TokenType: accountToken,
-		Payload:   server,
+		Payload:   request,
 	}, &res)
 	return res, err
 }
