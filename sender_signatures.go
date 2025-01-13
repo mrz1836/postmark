@@ -140,7 +140,7 @@ func (client *Client) GetSenderSignatures(ctx context.Context, count, offset int
 }
 
 // GetSenderSignature gets all the details for a specific sender signature.
-func (client *Client) GetSenderSignature(ctx context.Context, signatureID int) (SenderSignatureDetails, error) {
+func (client *Client) GetSenderSignature(ctx context.Context, signatureID int64) (SenderSignatureDetails, error) {
 	var res SenderSignatureDetails
 	err := client.doRequest(ctx, parameters{
 		Method:    http.MethodGet,
@@ -163,7 +163,7 @@ func (client *Client) CreateSenderSignature(ctx context.Context, request SenderS
 }
 
 // EditSenderSignature updates an existing sender signature and returns the full details of the updated sender signature.
-func (client *Client) EditSenderSignature(ctx context.Context, signatureID int, request SenderSignatureEditRequest) (SenderSignatureDetails, error) {
+func (client *Client) EditSenderSignature(ctx context.Context, signatureID int64, request SenderSignatureEditRequest) (SenderSignatureDetails, error) {
 	var res SenderSignatureDetails
 	err := client.doRequest(ctx, parameters{
 		Method:    http.MethodPut,
@@ -175,7 +175,7 @@ func (client *Client) EditSenderSignature(ctx context.Context, signatureID int, 
 }
 
 // DeleteSenderSignature removes a sender from the server.
-func (client *Client) DeleteSenderSignature(ctx context.Context, signatureID int) error {
+func (client *Client) DeleteSenderSignature(ctx context.Context, signatureID int64) error {
 	res := APIError{}
 	err := client.doRequest(ctx, parameters{
 		Method:    http.MethodDelete,
@@ -191,7 +191,7 @@ func (client *Client) DeleteSenderSignature(ctx context.Context, signatureID int
 }
 
 // ResendSenderSignatureConfirmation resends the confirmation email for a sender signature.
-func (client *Client) ResendSenderSignatureConfirmation(ctx context.Context, signatureID int) error {
+func (client *Client) ResendSenderSignatureConfirmation(ctx context.Context, signatureID int64) error {
 	res := APIError{}
 	err := client.doRequest(ctx, parameters{
 		Method:    http.MethodPost,
