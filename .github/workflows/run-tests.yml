@@ -38,7 +38,7 @@ jobs:
       - name: Run linter and tests
         run: make test-ci
       - name: Update code coverage
-        uses: codecov/codecov-action@v5.1.2
+        uses: codecov/codecov-action@v5.3.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           flags: unittests
