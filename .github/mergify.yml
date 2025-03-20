@@ -183,6 +183,7 @@ pull_request_rules:
         - author!=vincent-stytch
         - author!=sanchitrk
         - author!=mcarey1590
+        - author!=divolgin
     actions:
       comment:
         message: Welcome to our open-source project! 💘
