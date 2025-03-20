@@ -23,6 +23,8 @@ type Domain struct {
 	// The verification state of the Return-Path domain. Tells you if the Return-Path is actively being used or still
 	// needs further action to be used.
 	ReturnPathDomainVerified bool `json:"ReturnPathDomainVerified"`
+	// Unique ID of the Domain.
+	ID int64
 }
 
 // DomainDetails contains the full details of a domain in Postmark. https://postmarkapp.com/developer/api/domains-api
@@ -101,7 +103,7 @@ type DomainsList struct {
 }
 
 // GetDomains gets a list of domains, limited by count and paged by offset
-func (client *Client) GetDomains(ctx context.Context, count, offset int64) (DomainsList, error) {
+func (client *Client) GetDomains(ctx context.Context, count, offset int) (DomainsList, error) {
 	res := DomainsList{}
 
 	values := &url.Values{}
