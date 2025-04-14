@@ -1,3 +1,4 @@
+// Package main is an example of how to use the Postmark Go client.
 package main
 
 import (
