@@ -38,7 +38,7 @@ jobs:
       - name: Run linter and tests
         run: make test-ci
       - name: Update code coverage
-        uses: codecov/codecov-action@v5.4.0
+        uses: codecov/codecov-action@v5.4.0 #5.4.1 is broken at the moment
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           flags: unittests
