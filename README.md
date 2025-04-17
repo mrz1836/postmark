@@ -3,6 +3,7 @@
 
 [![Go](https://img.shields.io/github/go-mod/go-version/mrz1836/postmark)](https://golang.org/)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/mrz1836/postmark/run-tests.yml?branch=master&logo=github&v=3)](https://github.com/mrz1836/postmark/actions)
+[![codecov](https://codecov.io/gh/mrz1836/postmark/graph/badge.svg?token=j1KI99qHyW)](https://codecov.io/gh/mrz1836/postmark)
 [![Go Report Card](https://goreportcard.com/badge/github.com/mrz1836/postmark)](https://goreportcard.com/report/github.com/mrz1836/postmark)
 [![Release](https://img.shields.io/github/release-pre/mrz1836/postmark.svg?style=flat&v=1)](https://github.com/mrz1836/postmark/releases)
 [![GoDoc](https://godoc.org/github.com/mrz1836/postmark?status.svg)](https://pkg.go.dev/github.com/mrz1836/postmark)
@@ -93,7 +94,7 @@ client.HTTPClient = urlfetch.Client(ctx)
     * [x] `POST /templates/validate`
 * [x] Suppressions
     * [x] `GET /suppressions/dump`
-    * [x] `POST /suppressions` 
+    * [x] `POST /suppressions`
     * [x] `POST /suppressions/delete`
 * [x] Servers
     * [x] `GET /servers/:id`
