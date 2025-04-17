@@ -2,6 +2,7 @@ package postmark
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -236,4 +237,59 @@ func TestDeleteServer(t *testing.T) {
 	if err == nil {
 		t.Fatalf("DeleteServer: should have failed")
 	}
+}
+
+func TestServer_MarshalJSON(t *testing.T) {
+	t.Run("sets default values when empty", func(t *testing.T) {
+		server := Server{
+			ID:   123,
+			Name: "My Server",
+			// TrackLinks and DeliveryType are empty
+		}
+
+		data, err := json.Marshal(server)
+		if err != nil {
+			t.Fatalf("unexpected error during marshal: %v", err)
+		}
+
+		var result map[string]interface{}
+		err = json.Unmarshal(data, &result)
+		if err != nil {
+			t.Fatalf("unexpected error during unmarshal: %v", err)
+		}
+
+		if result["TrackLinks"] != "None" {
+			t.Errorf("expected TrackLinks to be 'None', got %v", result["TrackLinks"])
+		}
+		if result["DeliveryType"] != "Live" {
+			t.Errorf("expected DeliveryType to be 'Live', got %v", result["DeliveryType"])
+		}
+	})
+
+	t.Run("preserves existing values", func(t *testing.T) {
+		server := Server{
+			ID:           456,
+			Name:         "Another Server",
+			TrackLinks:   "HtmlOnly",
+			DeliveryType: "Sandbox",
+		}
+
+		data, err := json.Marshal(server)
+		if err != nil {
+			t.Fatalf("unexpected error during marshal: %v", err)
+		}
+
+		var result map[string]interface{}
+		err = json.Unmarshal(data, &result)
+		if err != nil {
+			t.Fatalf("unexpected error during unmarshal: %v", err)
+		}
+
+		if result["TrackLinks"] != "HtmlOnly" {
+			t.Errorf("expected TrackLinks to be 'HtmlOnly', got %v", result["TrackLinks"])
+		}
+		if result["DeliveryType"] != "Sandbox" {
+			t.Errorf("expected DeliveryType to be 'Sandbox', got %v", result["DeliveryType"])
+		}
+	})
 }
