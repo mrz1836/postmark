@@ -8,7 +8,7 @@ codecov:
 coverage:
   status:
     patch: false
-  range: 70..90     # First number represents red, and second represents green
+  range: 70..90     # The first number represents red, and the second represents green
   # (default is 70..100)
   round: down       # up, down, or nearest
   precision: 2      # Number of decimal places, between 0 and 5
@@ -19,7 +19,7 @@ coverage:
 ignore:
   - "*/.make/.*"
   - "*/.github/.*"
-  - "*/examples/.*"
+  - "examples/**"
 
 # Parsers
 # --------------
