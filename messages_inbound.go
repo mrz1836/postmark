@@ -69,8 +69,8 @@ func (client *Client) GetInboundMessage(ctx context.Context, messageID string) (
 }
 
 type inboundMessagesResponse struct {
-	TotalCount int64
-	Messages   []InboundMessage
+	TotalCount int64            `json:"TotalCount"`
+	Messages   []InboundMessage `json:"InboundMessages"`
 }
 
 // GetInboundMessages fetches a list of inbound message on the server
