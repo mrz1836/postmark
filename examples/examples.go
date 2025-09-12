@@ -103,4 +103,77 @@ func main() {
 	for _, pushedTemplate := range pushResponse.Templates {
 		log.Printf("Template '%s' would be %s", pushedTemplate.Name, pushedTemplate.Action)
 	}
+
+	// Example 8: Bounce API examples
+	demonstrateBounceAPI(client)
+}
+
+// demonstrateBounceAPI shows examples of using the Bounce API
+func demonstrateBounceAPI(client *postmark.Client) {
+	// Get delivery stats to understand bounce metrics
+	deliveryStats, err := client.GetDeliveryStats(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Inactive emails: %d", deliveryStats.InactiveMails)
+	for _, bounceType := range deliveryStats.Bounces {
+		log.Printf("Bounce type '%s': %d bounces", bounceType.Name, bounceType.Count)
+	}
+
+	// Get bounces with filtering options
+	bounces, totalCount, err := client.GetBounces(context.Background(), 50, 0, map[string]interface{}{
+		"type":        "HardBounce",
+		"inactive":    true,
+		"emailFilter": "@example.com",
+		"tag":         "password-reset",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Found %d bounces out of %d total", len(bounces), totalCount)
+	for _, bounce := range bounces {
+		log.Printf("Bounce ID %d: %s (%s) - %s", bounce.ID, bounce.Email, bounce.Type, bounce.Description)
+	}
+
+	// Process specific bounce details if available
+	if len(bounces) > 0 {
+		processBounceDetails(client, bounces[0].ID)
+	}
+
+	// Get tags that have generated bounces
+	bouncedTags, err := client.GetBouncedTags(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Tags with bounces (%d): %v", len(bouncedTags), bouncedTags)
+}
+
+// processBounceDetails demonstrates detailed bounce operations
+func processBounceDetails(client *postmark.Client, bounceID int64) {
+	// Get detailed bounce information
+	bounceDetails, err := client.GetBounce(context.Background(), bounceID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Bounce details for ID %d: Type=%s, MessageID=%s, Subject=%s",
+		bounceDetails.ID, bounceDetails.Type, bounceDetails.MessageID, bounceDetails.Subject)
+
+	// Get bounce dump if available
+	if bounceDetails.DumpAvailable {
+		dumpContent, err := client.GetBounceDump(context.Background(), bounceDetails.ID)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("Bounce dump for ID %d: %d characters", bounceDetails.ID, len(dumpContent))
+	}
+
+	// Activate bounce if possible
+	if bounceDetails.CanActivate {
+		activatedBounce, message, err := client.ActivateBounce(context.Background(), bounceDetails.ID)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("Bounce activation result: %s (ID: %d, Now Active: %v)",
+			message, activatedBounce.ID, !activatedBounce.Inactive)
+	}
 }
