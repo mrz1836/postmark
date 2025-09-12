@@ -3,6 +3,7 @@ package postmark
 import (
 	"context"
 	"net/http"
+	"testing"
 )
 
 func (s *PostmarkTestSuite) TestGetOutboundStats() {
@@ -271,4 +272,259 @@ func (s *PostmarkTestSuite) TestGetPlatformCounts() {
 
 	s.Equal(int64(4), res.Desktop, "GetPlatformCounts: wrong Desktop")
 	s.Equal(int64(1), res.Days[0].Desktop, "GetPlatformCounts: wrong day Desktop count")
+}
+
+func (s *PostmarkTestSuite) TestGetClickCounts() {
+	responseJSON := `{
+		"Days": [
+			{
+				"Date": "2014-01-01",
+				"Clicks": 44,
+				"Unique": 4
+			},
+			{
+				"Date": "2014-01-02",
+				"Clicks": 46,
+				"Unique": 6
+			},
+			{
+				"Date": "2014-01-03",
+				"Clicks": 25,
+				"Unique": 5
+			}
+		],
+		"Clicks": 115,
+		"Unique": 15
+	}`
+
+	s.mux.Get("/stats/outbound/clicks", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
+	res, err := s.client.GetClickCounts(context.Background(), map[string]interface{}{
+		"fromdate": "2014-01-01",
+		"todate":   "2014-02-01",
+	})
+	s.Require().NoError(err)
+
+	s.Equal(int64(115), res.Clicks, "GetClickCounts: wrong Clicks")
+	s.Equal(int64(44), res.Days[0].Clicks, "GetClickCounts: wrong day Clicks count")
+	s.Equal(int64(15), res.Unique, "GetClickCounts: wrong Unique")
+}
+
+func (s *PostmarkTestSuite) TestGetBrowserFamilyCounts() {
+	responseJSON := `{
+		"Days": [
+			{
+				"Date": "2014-01-01",
+				"Chrome": 10,
+				"Safari": 5,
+				"Firefox": 3
+			},
+			{
+				"Date": "2014-01-02",
+				"Chrome": 12,
+				"InternetExplorer": 2
+			}
+		],
+		"Chrome": 22,
+		"Safari": 5,
+		"Firefox": 3,
+		"InternetExplorer": 2,
+		"Opera": 0,
+		"Unknown": 1
+	}`
+
+	s.mux.Get("/stats/outbound/clicks/browserfamilies", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
+	res, err := s.client.GetBrowserFamilyCounts(context.Background(), map[string]interface{}{
+		"fromdate": "2014-01-01",
+		"todate":   "2014-02-01",
+	})
+	s.Require().NoError(err)
+
+	s.Equal(int64(22), res.Chrome, "GetBrowserFamilyCounts: wrong Chrome")
+	s.Equal(int64(10), res.Days[0].Chrome, "GetBrowserFamilyCounts: wrong day Chrome count")
+	s.Equal(int64(5), res.Safari, "GetBrowserFamilyCounts: wrong Safari")
+}
+
+func (s *PostmarkTestSuite) TestGetClickLocationCounts() {
+	responseJSON := `{
+		"Days": [
+			{
+				"Date": "2014-01-01",
+				"HTML": 30,
+				"Text": 5
+			},
+			{
+				"Date": "2014-01-02",
+				"HTML": 25,
+				"Text": 10
+			}
+		],
+		"HTML": 55,
+		"Text": 15
+	}`
+
+	s.mux.Get("/stats/outbound/clicks/location", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
+	res, err := s.client.GetClickLocationCounts(context.Background(), map[string]interface{}{
+		"fromdate": "2014-01-01",
+		"todate":   "2014-02-01",
+	})
+	s.Require().NoError(err)
+
+	s.Equal(int64(55), res.HTML, "GetClickLocationCounts: wrong HTML")
+	s.Equal(int64(30), res.Days[0].HTML, "GetClickLocationCounts: wrong day HTML count")
+	s.Equal(int64(15), res.Text, "GetClickLocationCounts: wrong Text")
+}
+
+func (s *PostmarkTestSuite) TestGetClickPlatformCounts() {
+	responseJSON := `{
+		"Days": [
+			{
+				"Date": "2014-01-01",
+				"Desktop": 20,
+				"Mobile": 10,
+				"WebMail": 5
+			},
+			{
+				"Date": "2014-01-02",
+				"Desktop": 15,
+				"Mobile": 12,
+				"Unknown": 3
+			}
+		],
+		"Desktop": 35,
+		"Mobile": 22,
+		"WebMail": 5,
+		"Unknown": 3
+	}`
+
+	s.mux.Get("/stats/outbound/clicks/platforms", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
+	res, err := s.client.GetClickPlatformCounts(context.Background(), map[string]interface{}{
+		"fromdate": "2014-01-01",
+		"todate":   "2014-02-01",
+	})
+	s.Require().NoError(err)
+
+	s.Equal(int64(35), res.Desktop, "GetClickPlatformCounts: wrong Desktop")
+	s.Equal(int64(20), res.Days[0].Desktop, "GetClickPlatformCounts: wrong day Desktop count")
+	s.Equal(int64(22), res.Mobile, "GetClickPlatformCounts: wrong Mobile")
+}
+
+func (s *PostmarkTestSuite) TestGetEmailClientCounts() {
+	responseJSON := `{
+		"Days": [
+			{
+				"Date": "2014-01-01",
+				"Outlook": 15,
+				"Gmail": 10,
+				"AppleMail": 8
+			},
+			{
+				"Date": "2014-01-02",
+				"Outlook": 12,
+				"Gmail": 14,
+				"Yahoo": 3
+			}
+		],
+		"Outlook": 27,
+		"Gmail": 24,
+		"AppleMail": 8,
+		"Yahoo": 3,
+		"Thunderbird": 2,
+		"Unknown": 5
+	}`
+
+	s.mux.Get("/stats/outbound/opens/emailclients", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
+	res, err := s.client.GetEmailClientCounts(context.Background(), map[string]interface{}{
+		"fromdate": "2014-01-01",
+		"todate":   "2014-02-01",
+	})
+	s.Require().NoError(err)
+
+	s.Equal(int64(27), res.Outlook, "GetEmailClientCounts: wrong Outlook")
+	s.Equal(int64(15), res.Days[0].Outlook, "GetEmailClientCounts: wrong day Outlook count")
+	s.Equal(int64(24), res.Gmail, "GetEmailClientCounts: wrong Gmail")
+}
+
+// Benchmark for GetClickCounts
+func BenchmarkGetClickCounts(b *testing.B) {
+	ctx := context.Background()
+	options := map[string]interface{}{
+		"fromdate": "2014-01-01",
+		"todate":   "2014-02-01",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = options
+	}
+}
+
+// Benchmark for GetBrowserFamilyCounts
+func BenchmarkGetBrowserFamilyCounts(b *testing.B) {
+	ctx := context.Background()
+	options := map[string]interface{}{
+		"fromdate": "2014-01-01",
+		"todate":   "2014-02-01",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = options
+	}
+}
+
+// Benchmark for GetClickLocationCounts
+func BenchmarkGetClickLocationCounts(b *testing.B) {
+	ctx := context.Background()
+	options := map[string]interface{}{
+		"fromdate": "2014-01-01",
+		"todate":   "2014-02-01",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = options
+	}
+}
+
+// Benchmark for GetClickPlatformCounts
+func BenchmarkGetClickPlatformCounts(b *testing.B) {
+	ctx := context.Background()
+	options := map[string]interface{}{
+		"fromdate": "2014-01-01",
+		"todate":   "2014-02-01",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = options
+	}
+}
+
+// Benchmark for GetEmailClientCounts
+func BenchmarkGetEmailClientCounts(b *testing.B) {
+	ctx := context.Background()
+	options := map[string]interface{}{
+		"fromdate": "2014-01-01",
+		"todate":   "2014-02-01",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = options
+	}
 }

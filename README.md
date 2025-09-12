@@ -215,10 +215,11 @@ extra baggage.
 	* [x] [`GET /stats/outbound/tracked`](https://postmarkapp.com/developer/api/stats-api#get-tracked-email-counts) - Get tracked email counts ([stats.go](stats.go))
 	* [x] [`GET /stats/outbound/opens`](https://postmarkapp.com/developer/api/stats-api#get-email-open-counts) - Get email open counts ([stats.go](stats.go))
 	* [x] [`GET /stats/outbound/opens/platforms`](https://postmarkapp.com/developer/api/stats-api#get-email-platform-usage) - Get email platform usage ([stats.go](stats.go))
-	* [ ] [`GET /stats/outbound/opens/emailclients`](https://postmarkapp.com/developer/api/stats-api#get-email-client-usage) - Get email client usage
-	* [ ] [`GET /stats/outbound/clicks`](https://postmarkapp.com/developer/api/stats-api#get-click-counts) - Get click counts
-	* [ ] [`GET /stats/outbound/clicks/browserfamilies`](https://postmarkapp.com/developer/api/stats-api#get-browser-usage) - Get browser usage
-	* [ ] [`GET /stats/outbound/clicks/platforms`](https://postmarkapp.com/developer/api/stats-api#get-browser-platform-usage) - Get browser platform usage
+	* [x] [`GET /stats/outbound/opens/emailclients`](https://postmarkapp.com/developer/api/stats-api#get-email-client-usage) - Get email client usage ([stats.go](stats.go))
+	* [x] [`GET /stats/outbound/clicks`](https://postmarkapp.com/developer/api/stats-api#get-click-counts) - Get click counts ([stats.go](stats.go))
+	* [x] [`GET /stats/outbound/clicks/browserfamilies`](https://postmarkapp.com/developer/api/stats-api#get-browser-usage) - Get browser usage ([stats.go](stats.go))
+	* [x] [`GET /stats/outbound/clicks/platforms`](https://postmarkapp.com/developer/api/stats-api#get-browser-platform-usage) - Get browser platform usage ([stats.go](stats.go))
+	* [x] [`GET /stats/outbound/clicks/location`](https://postmarkapp.com/developer/api/stats-api#get-click-location) - Get click location ([stats.go](stats.go))
 
 * [x] **[Webhooks API](https://postmarkapp.com/developer/api/webhooks-api)**
 	* [x] [`GET /webhooks`](https://postmarkapp.com/developer/api/webhooks-api#list-webhooks) - List webhooks ([webhooks.go](webhooks.go))

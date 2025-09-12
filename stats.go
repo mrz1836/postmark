@@ -284,3 +284,228 @@ func (client *Client) GetPlatformCounts(ctx context.Context, options map[string]
 	}, &res)
 	return res, err
 }
+
+// ClickDay - click stats for a specific day
+type ClickDay struct {
+	// Date - self-explanatory
+	Date string
+	// Clicks - number of total clicks
+	Clicks int64
+	// Unique - number of unique clicks
+	Unique int64
+}
+
+// ClickCounts - click stats for a period
+type ClickCounts struct {
+	// Days - List of objects that each represent click counts by date.
+	Days []ClickDay
+	// Clicks - Indicates total number of clicks. This total includes recipients who clicked your links multiple times.
+	Clicks int64
+	// Unique - Indicates total number of uniquely clicked links.
+	Unique int64
+}
+
+// GetClickCounts - Gets total counts of recipients who clicked links in your emails. This is only recorded when link tracking is enabled for that email.
+// Available options: http://developer.postmarkapp.com/developer-api-stats.html#click-counts
+func (client *Client) GetClickCounts(ctx context.Context, options map[string]interface{}) (ClickCounts, error) {
+	res := ClickCounts{}
+	values := &url.Values{}
+	for k, v := range options {
+		values.Add(k, fmt.Sprintf("%v", v))
+	}
+
+	err := client.doRequest(ctx, parameters{
+		Method:    "GET",
+		Path:      fmt.Sprintf("stats/outbound/clicks?%s", values.Encode()),
+		TokenType: serverToken,
+	}, &res)
+	return res, err
+}
+
+// BrowserFamilyDay - browser family usage stats for a specific day
+type BrowserFamilyDay struct {
+	// Date - self-explanatory
+	Date string
+	// Chrome - number of clicks from Chrome browser
+	Chrome int64
+	// Safari - number of clicks from Safari browser
+	Safari int64
+	// Firefox - number of clicks from Firefox browser
+	Firefox int64
+	// InternetExplorer - number of clicks from Internet Explorer browser
+	InternetExplorer int64
+	// Opera - number of clicks from Opera browser
+	Opera int64
+	// Unknown - number of clicks from unknown browsers
+	Unknown int64
+}
+
+// BrowserFamilyCounts - browser family usage stats for a period
+type BrowserFamilyCounts struct {
+	// Days - List of objects that each represent browser family usage by date.
+	Days []BrowserFamilyDay
+	// Chrome - total number of clicks from Chrome browser
+	Chrome int64
+	// Safari - total number of clicks from Safari browser
+	Safari int64
+	// Firefox - total number of clicks from Firefox browser
+	Firefox int64
+	// InternetExplorer - total number of clicks from Internet Explorer browser
+	InternetExplorer int64
+	// Opera - total number of clicks from Opera browser
+	Opera int64
+	// Unknown - total number of clicks from unknown browsers
+	Unknown int64
+}
+
+// GetBrowserFamilyCounts - Gets total counts of clicks by browser family. This is only recorded when link tracking is enabled for that email.
+// Available options: http://developer.postmarkapp.com/developer-api-stats.html#browser-usage
+func (client *Client) GetBrowserFamilyCounts(ctx context.Context, options map[string]interface{}) (BrowserFamilyCounts, error) {
+	res := BrowserFamilyCounts{}
+	values := &url.Values{}
+	for k, v := range options {
+		values.Add(k, fmt.Sprintf("%v", v))
+	}
+
+	err := client.doRequest(ctx, parameters{
+		Method:    "GET",
+		Path:      fmt.Sprintf("stats/outbound/clicks/browserfamilies?%s", values.Encode()),
+		TokenType: serverToken,
+	}, &res)
+	return res, err
+}
+
+// ClickLocationDay - click location stats for a specific day
+type ClickLocationDay struct {
+	// Date - self-explanatory
+	Date string
+	// HTML - number of clicks from HTML part of the email
+	HTML int64
+	// Text - number of clicks from text part of the email
+	Text int64
+}
+
+// ClickLocationCounts - click location stats for a period
+type ClickLocationCounts struct {
+	// Days - List of objects that each represent click location counts by date.
+	Days []ClickLocationDay
+	// HTML - total number of clicks from HTML part of the email
+	HTML int64
+	// Text - total number of clicks from text part of the email
+	Text int64
+}
+
+// GetClickLocationCounts - Gets total counts of clicks by email format. This is only recorded when link tracking is enabled for that email.
+// Available options: http://developer.postmarkapp.com/developer-api-stats.html#click-location
+func (client *Client) GetClickLocationCounts(ctx context.Context, options map[string]interface{}) (ClickLocationCounts, error) {
+	res := ClickLocationCounts{}
+	values := &url.Values{}
+	for k, v := range options {
+		values.Add(k, fmt.Sprintf("%v", v))
+	}
+
+	err := client.doRequest(ctx, parameters{
+		Method:    "GET",
+		Path:      fmt.Sprintf("stats/outbound/clicks/location?%s", values.Encode()),
+		TokenType: serverToken,
+	}, &res)
+	return res, err
+}
+
+// ClickPlatformDay - click platform usage stats for a specific day
+type ClickPlatformDay struct {
+	// Date - self-explanatory
+	Date string
+	// Desktop - number of clicks from Desktop platforms
+	Desktop int64
+	// Mobile - number of clicks from Mobile platforms
+	Mobile int64
+	// Unknown - number of clicks from unknown platforms
+	Unknown int64
+	// WebMail - number of clicks from WebMail platforms
+	WebMail int64
+}
+
+// ClickPlatformCounts - click platform usage stats for a period
+type ClickPlatformCounts struct {
+	// Days - List of objects that each represent click platform usage by date.
+	Days []ClickPlatformDay
+	// Desktop - total number of clicks from Desktop platforms
+	Desktop int64
+	// Mobile - total number of clicks from Mobile platforms
+	Mobile int64
+	// Unknown - total number of clicks from unknown platforms
+	Unknown int64
+	// WebMail - total number of clicks from WebMail platforms
+	WebMail int64
+}
+
+// GetClickPlatformCounts - Gets total counts of clicks by platform. This is only recorded when link tracking is enabled for that email.
+// Available options: http://developer.postmarkapp.com/developer-api-stats.html#browser-platform-usage
+func (client *Client) GetClickPlatformCounts(ctx context.Context, options map[string]interface{}) (ClickPlatformCounts, error) {
+	res := ClickPlatformCounts{}
+	values := &url.Values{}
+	for k, v := range options {
+		values.Add(k, fmt.Sprintf("%v", v))
+	}
+
+	err := client.doRequest(ctx, parameters{
+		Method:    "GET",
+		Path:      fmt.Sprintf("stats/outbound/clicks/platforms?%s", values.Encode()),
+		TokenType: serverToken,
+	}, &res)
+	return res, err
+}
+
+// EmailClientDay - email client usage stats for a specific day
+type EmailClientDay struct {
+	// Date - self-explanatory
+	Date string
+	// Outlook - number of opens from Outlook email client
+	Outlook int64
+	// Gmail - number of opens from Gmail email client
+	Gmail int64
+	// AppleMail - number of opens from Apple Mail email client
+	AppleMail int64
+	// Thunderbird - number of opens from Thunderbird email client
+	Thunderbird int64
+	// Yahoo - number of opens from Yahoo email client
+	Yahoo int64
+	// Unknown - number of opens from unknown email clients
+	Unknown int64
+}
+
+// EmailClientCounts - email client usage stats for a period
+type EmailClientCounts struct {
+	// Days - List of objects that each represent email client usage by date.
+	Days []EmailClientDay
+	// Outlook - total number of opens from Outlook email client
+	Outlook int64
+	// Gmail - total number of opens from Gmail email client
+	Gmail int64
+	// AppleMail - total number of opens from Apple Mail email client
+	AppleMail int64
+	// Thunderbird - total number of opens from Thunderbird email client
+	Thunderbird int64
+	// Yahoo - total number of opens from Yahoo email client
+	Yahoo int64
+	// Unknown - total number of opens from unknown email clients
+	Unknown int64
+}
+
+// GetEmailClientCounts - Gets total counts of opens by email client. This is only recorded when open tracking is enabled for that email.
+// Available options: http://developer.postmarkapp.com/developer-api-stats.html#email-client-usage
+func (client *Client) GetEmailClientCounts(ctx context.Context, options map[string]interface{}) (EmailClientCounts, error) {
+	res := EmailClientCounts{}
+	values := &url.Values{}
+	for k, v := range options {
+		values.Add(k, fmt.Sprintf("%v", v))
+	}
+
+	err := client.doRequest(ctx, parameters{
+		Method:    "GET",
+		Path:      fmt.Sprintf("stats/outbound/opens/emailclients?%s", values.Encode()),
+		TokenType: serverToken,
+	}, &res)
+	return res, err
+}

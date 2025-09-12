@@ -138,6 +138,9 @@ func main() {
 
 	// Example 12: Bounce API examples
 	demonstrateBounceAPI(client)
+
+	// Example 13: Stats API examples
+	demonstrateStatsAPI(client)
 }
 
 // demonstrateBounceAPI shows examples of using the Bounce API
@@ -431,4 +434,98 @@ func demonstrateDomainsAPI(client *postmark.Client) {
 		log.Fatal(err)
 	}
 	log.Printf("Deleted sender signature: %s", updatedSignature.FromEmail)
+}
+
+func demonstrateStatsAPI(client *postmark.Client) {
+	ctx := context.Background()
+	options := map[string]interface{}{
+		"fromdate": "2024-01-01",
+		"todate":   "2024-12-31",
+		"tag":      "newsletter",
+	}
+
+	demonstrateBasicStatsAPI(ctx, client, options)
+	demonstrateClickStatsAPI(ctx, client, options)
+}
+
+func demonstrateBasicStatsAPI(ctx context.Context, client *postmark.Client, options map[string]interface{}) {
+	if outboundStats, err := client.GetOutboundStats(ctx, options); err != nil {
+		log.Printf("Error getting outbound stats: %v", err)
+	} else {
+		log.Printf("Outbound Stats - Sent: %d, Bounced: %d, Opens: %d, Unique Opens: %d",
+			outboundStats.Sent, outboundStats.Bounced, outboundStats.Opens, outboundStats.UniqueOpens)
+	}
+
+	if sentCounts, err := client.GetSentCounts(ctx, options); err != nil {
+		log.Printf("Error getting sent counts: %v", err)
+	} else {
+		log.Printf("Total Sent: %d, Days with data: %d", sentCounts.Sent, len(sentCounts.Days))
+	}
+
+	if bounceCounts, err := client.GetBounceCounts(ctx, options); err != nil {
+		log.Printf("Error getting bounce counts: %v", err)
+	} else {
+		log.Printf("Hard Bounces: %d, Soft Bounces: %d, SMTP Errors: %d",
+			bounceCounts.HardBounce, bounceCounts.SoftBounce, bounceCounts.SMTPApiError)
+	}
+
+	if spamCounts, err := client.GetSpamCounts(ctx, options); err != nil {
+		log.Printf("Error getting spam counts: %v", err)
+	} else {
+		log.Printf("Total Spam Complaints: %d", spamCounts.SpamComplaint)
+	}
+
+	if trackedCounts, err := client.GetTrackedCounts(ctx, options); err != nil {
+		log.Printf("Error getting tracked counts: %v", err)
+	} else {
+		log.Printf("Total Tracked Emails: %d", trackedCounts.Tracked)
+	}
+
+	if openCounts, err := client.GetOpenCounts(ctx, options); err != nil {
+		log.Printf("Error getting open counts: %v", err)
+	} else {
+		log.Printf("Total Opens: %d, Unique Opens: %d", openCounts.Opens, openCounts.Unique)
+	}
+
+	if platformCounts, err := client.GetPlatformCounts(ctx, options); err != nil {
+		log.Printf("Error getting platform counts: %v", err)
+	} else {
+		log.Printf("Opens by Platform - Desktop: %d, Mobile: %d, WebMail: %d, Unknown: %d",
+			platformCounts.Desktop, platformCounts.Mobile, platformCounts.WebMail, platformCounts.Unknown)
+	}
+
+	if emailClientCounts, err := client.GetEmailClientCounts(ctx, options); err != nil {
+		log.Printf("Error getting email client counts: %v", err)
+	} else {
+		log.Printf("Opens by Email Client - Outlook: %d, Gmail: %d, AppleMail: %d, Yahoo: %d",
+			emailClientCounts.Outlook, emailClientCounts.Gmail, emailClientCounts.AppleMail, emailClientCounts.Yahoo)
+	}
+}
+
+func demonstrateClickStatsAPI(ctx context.Context, client *postmark.Client, options map[string]interface{}) {
+	if clickCounts, err := client.GetClickCounts(ctx, options); err != nil {
+		log.Printf("Error getting click counts: %v", err)
+	} else {
+		log.Printf("Total Clicks: %d, Unique Clicks: %d", clickCounts.Clicks, clickCounts.Unique)
+	}
+
+	if browserCounts, err := client.GetBrowserFamilyCounts(ctx, options); err != nil {
+		log.Printf("Error getting browser family counts: %v", err)
+	} else {
+		log.Printf("Clicks by Browser - Chrome: %d, Safari: %d, Firefox: %d, IE: %d",
+			browserCounts.Chrome, browserCounts.Safari, browserCounts.Firefox, browserCounts.InternetExplorer)
+	}
+
+	if locationCounts, err := client.GetClickLocationCounts(ctx, options); err != nil {
+		log.Printf("Error getting click location counts: %v", err)
+	} else {
+		log.Printf("Clicks by Location - HTML: %d, Text: %d", locationCounts.HTML, locationCounts.Text)
+	}
+
+	if clickPlatformCounts, err := client.GetClickPlatformCounts(ctx, options); err != nil {
+		log.Printf("Error getting click platform counts: %v", err)
+	} else {
+		log.Printf("Clicks by Platform - Desktop: %d, Mobile: %d, WebMail: %d, Unknown: %d",
+			clickPlatformCounts.Desktop, clickPlatformCounts.Mobile, clickPlatformCounts.WebMail, clickPlatformCounts.Unknown)
+	}
 }
