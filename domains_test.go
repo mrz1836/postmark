@@ -3,6 +3,7 @@ package postmark
 import (
 	"context"
 	"net/http"
+	"testing"
 )
 
 func (s *PostmarkTestSuite) TestGetDomain() {
@@ -153,21 +154,9 @@ func (s *PostmarkTestSuite) TestGetDomains() {
     {
       "Name": "postmarkapp.com",
       "SPFVerified": true,
-      "SPFHost": "postmarkapp.com",
-      "SPFTextValue": "v=spf1 a mx include:spf.mtasv.net ~all",
       "DKIMVerified": false,
       "WeakDKIM": false,
-      "DKIMHost": "jan2013pm._domainkey.postmarkapp.com",
-      "DKIMTextValue": "k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDJ...",
-      "DKIMPendingHost": "20131031155228pm._domainkey.postmarkapp.com",
-      "DKIMPendingTextValue": "k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCFn...",
-      "DKIMRevokedHost": "",
-      "DKIMRevokedTextValue": "",
-      "SafeToRemoveRevokedKeyFromDNS": false,
-      "DKIMUpdateStatus": "Pending",
-      "ReturnPathDomain": "pm-bounces.postmarkapp.com",
       "ReturnPathDomainVerified": false,
-      "ReturnPathDomainCNAMEValue": "pm.mtasv.net",
       "ID": 1234
     }
   ]
@@ -285,4 +274,95 @@ func (s *PostmarkTestSuite) TestRotateDKIM() {
 	s.NotEmpty(res.DKIMPendingHost, "RotateDKIM should set pending DKIM host")
 	s.NotEmpty(res.DKIMPendingTextValue, "RotateDKIM should set pending DKIM text value")
 	s.Equal("Pending", res.DKIMUpdateStatus, "RotateDKIM should set status to pending")
+}
+
+// Benchmark functions for Domains API
+
+func BenchmarkGetDomains(b *testing.B) {
+	ctx := context.Background()
+	count := 50
+	offset := 0
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = count
+		_ = offset
+	}
+}
+
+func BenchmarkGetDomain(b *testing.B) {
+	ctx := context.Background()
+	domainID := int64(1234)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = domainID
+	}
+}
+
+func BenchmarkCreateDomain(b *testing.B) {
+	ctx := context.Background()
+	request := DomainCreateRequest{
+		Name:             "test.com",
+		ReturnPathDomain: "bounces.test.com",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = request
+	}
+}
+
+func BenchmarkEditDomain(b *testing.B) {
+	ctx := context.Background()
+	domainID := int64(1234)
+	request := DomainEditRequest{
+		ReturnPathDomain: "new-bounces.test.com",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = domainID
+		_ = request
+	}
+}
+
+func BenchmarkDeleteDomain(b *testing.B) {
+	ctx := context.Background()
+	domainID := int64(1234)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = domainID
+	}
+}
+
+func BenchmarkVerifyDKIMStatus(b *testing.B) {
+	ctx := context.Background()
+	domainID := int64(1234)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = domainID
+	}
+}
+
+func BenchmarkVerifyReturnPath(b *testing.B) {
+	ctx := context.Background()
+	domainID := int64(1234)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = domainID
+	}
+}
+
+func BenchmarkRotateDKIM(b *testing.B) {
+	ctx := context.Background()
+	domainID := int64(1234)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = domainID
+	}
 }

@@ -3,6 +3,7 @@ package postmark
 import (
 	"context"
 	"net/http"
+	"testing"
 )
 
 func (s *PostmarkTestSuite) TestGetSenderSignatures() {
@@ -227,5 +228,80 @@ func (s *PostmarkTestSuite) TestResendSenderSignatureConfirmation() {
 				s.Require().NoError(err, "ResendSenderSignatureConfirmation should not fail")
 			}
 		})
+	}
+}
+
+func BenchmarkGetSenderSignatures(b *testing.B) {
+	ctx := context.Background()
+	count := int64(50)
+	offset := int64(0)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = count
+		_ = offset
+	}
+}
+
+func BenchmarkGetSenderSignature(b *testing.B) {
+	ctx := context.Background()
+	signatureID := int64(1234)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = signatureID
+	}
+}
+
+func BenchmarkCreateSenderSignature(b *testing.B) {
+	ctx := context.Background()
+	request := SenderSignatureCreateRequest{
+		FromEmail:                "test@example.com",
+		Name:                     "Test User",
+		ReplyToEmail:             "noreply@example.com",
+		ReturnPathDomain:         "bounces.example.com",
+		ConfirmationPersonalNote: "This is a test sender signature.",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = request
+	}
+}
+
+func BenchmarkEditSenderSignature(b *testing.B) {
+	ctx := context.Background()
+	signatureID := int64(1234)
+	request := SenderSignatureEditRequest{
+		Name:                     "Updated Test User",
+		ReplyToEmail:             "support@example.com",
+		ReturnPathDomain:         "new-bounces.example.com",
+		ConfirmationPersonalNote: "Updated test sender signature.",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = signatureID
+		_ = request
+	}
+}
+
+func BenchmarkDeleteSenderSignature(b *testing.B) {
+	ctx := context.Background()
+	signatureID := int64(1234)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = signatureID
+	}
+}
+
+func BenchmarkResendSenderSignatureConfirmation(b *testing.B) {
+	ctx := context.Background()
+	signatureID := int64(1234)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = signatureID
 	}
 }

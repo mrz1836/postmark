@@ -133,7 +133,10 @@ func main() {
 	// Example 10: Message Streams API examples
 	demonstrateMessageStreamsAPI(client)
 
-	// Example 11: Bounce API examples
+	// Example 11: Domains API examples
+	demonstrateDomainsAPI(client)
+
+	// Example 12: Bounce API examples
 	demonstrateBounceAPI(client)
 }
 
@@ -283,4 +286,149 @@ func demonstrateMessageStreamsAPI(client *postmark.Client) {
 	}
 	log.Printf("Unarchived stream: %s (Archived: %v)",
 		unarchivedStream.Name, unarchivedStream.ArchivedAt != nil)
+}
+
+// demonstrateDomainsAPI shows examples of using the Domains API
+func demonstrateDomainsAPI(client *postmark.Client) {
+	// List all domains
+	domains, err := client.GetDomains(context.Background(), 50, 0)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Found %d domains out of %d total", len(domains.Domains), domains.TotalCount)
+	for _, domain := range domains.Domains {
+		log.Printf("Domain: %s (ID: %d) - DKIM: %v, ReturnPath: %v",
+			domain.Name, domain.ID, domain.DKIMVerified, domain.ReturnPathDomainVerified)
+	}
+
+	// Create a new domain
+	createRequest := postmark.DomainCreateRequest{
+		Name:             "example.com",
+		ReturnPathDomain: "bounces.example.com",
+	}
+
+	newDomain, err := client.CreateDomain(context.Background(), createRequest)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Created domain: %s (ID: %d)", newDomain.Name, newDomain.ID)
+
+	// Get detailed information about the domain
+	domainDetails, err := client.GetDomain(context.Background(), newDomain.ID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Domain details - Name: %s, DKIM Host: %s, Return Path: %s",
+		domainDetails.Name, domainDetails.DKIMHost, domainDetails.ReturnPathDomain)
+
+	// Edit the domain (update return path)
+	editRequest := postmark.DomainEditRequest{
+		ReturnPathDomain: "pm-bounces.example.com",
+	}
+
+	updatedDomain, err := client.EditDomain(context.Background(), newDomain.ID, editRequest)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Updated domain return path to: %s", updatedDomain.ReturnPathDomain)
+
+	// Verify DKIM status
+	dkimVerified, err := client.VerifyDKIMStatus(context.Background(), newDomain.ID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("DKIM verification for %s: %v (Status: %s)",
+		dkimVerified.Name, dkimVerified.DKIMVerified, dkimVerified.DKIMUpdateStatus)
+
+	// Verify Return-Path
+	returnPathVerified, err := client.VerifyReturnPath(context.Background(), newDomain.ID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Return Path verification for %s: %v (CNAME: %s)",
+		returnPathVerified.Name, returnPathVerified.ReturnPathDomainVerified, returnPathVerified.ReturnPathDomainCNAMEValue)
+
+	// Rotate DKIM keys (if needed for security)
+	rotatedDKIM, err := client.RotateDKIM(context.Background(), newDomain.ID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("DKIM rotation initiated for %s - Pending Host: %s",
+		rotatedDKIM.Name, rotatedDKIM.DKIMPendingHost)
+
+	// Delete the domain (cleanup example)
+	err = client.DeleteDomain(context.Background(), newDomain.ID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Deleted domain: %s", newDomain.Name)
+
+	// Example: Sender Signatures API
+	log.Println("\n=== Sender Signatures API Examples ===")
+
+	// List sender signatures
+	senderSignatures, err := client.GetSenderSignatures(context.Background(), 50, 0)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Total sender signatures: %d", senderSignatures.TotalCount)
+	for _, signature := range senderSignatures.SenderSignatures {
+		log.Printf("Signature: %s <%s> (ID: %d) - Confirmed: %v",
+			signature.Name, signature.FromEmail, signature.ID, signature.Confirmed)
+	}
+
+	// Create a new sender signature
+	createSignatureRequest := postmark.SenderSignatureCreateRequest{
+		FromEmail:                "noreply@example.com",
+		Name:                     "Example Service",
+		ReplyToEmail:             "support@example.com",
+		ReturnPathDomain:         "pm-bounces.example.com",
+		ConfirmationPersonalNote: "This is a sender signature for Example Service notifications.",
+	}
+
+	newSignature, err := client.CreateSenderSignature(context.Background(), createSignatureRequest)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Created sender signature: %s <%s> (ID: %d)",
+		newSignature.Name, newSignature.FromEmail, newSignature.ID)
+
+	// Get detailed information about the sender signature
+	signatureDetails, err := client.GetSenderSignature(context.Background(), newSignature.ID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Signature details - Name: %s, Domain: %s, DKIM Status: %s, Confirmed: %v",
+		signatureDetails.Name, signatureDetails.Domain, signatureDetails.DKIMUpdateStatus, signatureDetails.Confirmed)
+
+	// Edit the sender signature
+	editSignatureRequest := postmark.SenderSignatureEditRequest{
+		Name:                     "Updated Example Service",
+		ReplyToEmail:             "help@example.com",
+		ReturnPathDomain:         "bounces.example.com",
+		ConfirmationPersonalNote: "Updated sender signature for Example Service.",
+	}
+
+	updatedSignature, err := client.EditSenderSignature(context.Background(), newSignature.ID, editSignatureRequest)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Updated sender signature name to: %s", updatedSignature.Name)
+
+	// Resend confirmation email (if not confirmed)
+	if !updatedSignature.Confirmed {
+		err = client.ResendSenderSignatureConfirmation(context.Background(), newSignature.ID)
+		if err != nil {
+			log.Printf("Failed to resend confirmation: %v", err)
+		} else {
+			log.Printf("Resent confirmation email for signature: %s", updatedSignature.FromEmail)
+		}
+	}
+
+	// Delete the sender signature (cleanup example)
+	err = client.DeleteSenderSignature(context.Background(), newSignature.ID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Deleted sender signature: %s", updatedSignature.FromEmail)
 }
