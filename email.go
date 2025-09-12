@@ -39,6 +39,8 @@ type Email struct {
 	Metadata map[string]string `json:",omitempty"`
 	// MessageStream: MessageStream will default to the outbound message stream ID (Default Transactional Stream) if no message stream ID is provided.
 	MessageStream string `json:",omitempty"`
+	// InlineCSS: By default, if the HTML body contains CSS, we will apply the style blocks as inline attributes. Set to false to opt out.
+	InlineCSS bool `json:",omitempty"`
 }
 
 // Header - an email header

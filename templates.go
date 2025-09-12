@@ -186,7 +186,7 @@ type TemplatedEmail struct {
 	// MessageStream: MessageStream will default to the outbound message stream ID (Default Transactional Stream) if no message stream ID is provided.
 	MessageStream string `json:",omitempty"`
 	// Metadata: Custom metadata key/value pairs.
-	Metadata map[string]interface{} `json:",omitempty"`
+	Metadata map[string]string `json:",omitempty"`
 }
 
 // SendTemplatedEmail sends an email using a template (TemplateID)

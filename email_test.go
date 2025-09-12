@@ -23,6 +23,7 @@ func getTestEmail() Email {
 			},
 		},
 		TrackOpens: true,
+		InlineCSS:  true,
 		Attachments: []Attachment{
 			{
 				Name:        "readme.txt",
