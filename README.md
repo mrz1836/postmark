@@ -169,86 +169,110 @@ client.HTTPClient = urlfetch.Client(ctx)
 <summary><strong><code>Supported API Coverage</code></strong></summary>
 <br/>
 
-* [x] Emails
-	* [x] `POST /email`
-	* [x] `POST /email/batch`
-	* [x] `POST /email/withTemplate`
-	* [x] `POST /email/batchWithTemplates`
-* [x] Bounces
-	* [x] `GET /deliverystats`
-	* [x] `GET /bounces`
-	* [x] `GET /bounces/:id`
-	* [x] `GET /bounces/:id/dump`
-	* [x] `PUT /bounces/:id/activate`
-	* [x] `GET /bounces/tags`
-* [x] Templates
-	* [x] `GET /templates`
-	* [x] `POST /templates`
-	* [x] `GET /templates/:id`
-	* [x] `PUT /templates/:id`
-	* [x] `DELETE /templates/:id`
-	* [x] `POST /templates/validate`
-* [x] Suppressions
-	* [x] `GET /suppressions/dump`
-	* [x] `POST /suppressions`
-	* [x] `POST /suppressions/delete`
-* [x] Servers
-	* [x] `GET /servers/:id`
-	* [x] `PUT /servers/:id`
-* [x] Outbound Messages
-	* [x] `GET /messages/outbound`
-	* [x] `GET /messages/outbound/:id/details`
-	* [x] `GET /messages/outbound/:id/dump`
-	* [x] `GET /messages/outbound/opens`
-	* [x] `GET /messages/outbound/opens/:id`
-* [x] Inbound Messages
-	* [x] `GET /messages/inbound`
-	* [x] `GET /messages/inbound/:id/details`
-	* [x] `PUT /messages/inbound/:id/bypass`
-	* [x] `PUT /messages/inbound/:id/retry`
-* [x] Message Streams
-	* [x] `GET /message-streams`
-	* [x] `POST /message-streams`
-	* [x] `GET /message-streams/{stream_ID}`
-	* [x] `PATCH /message-streams/{stream_ID}`
-	* [x] `POST /message-streams/{stream_ID}/archive`
-	* [x] `POST /message-streams/{stream_ID}/unarchive`
-* [ ] Sender signatures
-	* [x] `GET /senders`
-	* [ ] Get a sender signature’s details
-	* [ ] Create a signature
-	* [ ] Edit a signature
-	* [ ] Delete a signature
-	* [ ] Resend a confirmation
-	* [ ] Verify an SPF record
-	* [ ] Request a new DKIM
-* [ ] Stats
-	* [x] `GET /stats/outbound`
-	* [x] `GET /stats/outbound/sends`
-	* [x] `GET /stats/outbound/bounces`
-	* [x] `GET /stats/outbound/spam`
-	* [x] `GET /stats/outbound/tracked`
-	* [x] `GET /stats/outbound/opens`
-	* [x] `GET /stats/outbound/platform`
-	* [ ] Get email client usage
-	* [ ] Get email read times
-* [ ] Triggers
-	* [ ] Tags triggers
-		* [ ] Create a trigger for a tag
-		* [ ] Get a single trigger
-		* [ ] Edit a single trigger
-		* [ ] Delete a single trigger
-		* [ ] Search triggers
-	* [ ] Inbound rules triggers
-		* [ ] Create a trigger for inbound rule
-		* [ ] Delete a single trigger
-		* [ ] List triggers
-* [x] Webhooks
-	* [x] List webhooks
-	* [x] Get webhooks
-	* [x] Create webhooks
-	* [x] Edit webhooks
-	* [x] Delete webhooks
+* [x] **[Email API](https://postmarkapp.com/developer/api/email-api)**
+	* [x] [`POST /email`](https://postmarkapp.com/developer/api/email-api#send-a-single-email) - Send a single email ([email.go](email.go))
+	* [x] [`POST /email/batch`](https://postmarkapp.com/developer/api/email-api#send-batch-emails) - Send batch emails ([email.go](email.go))
+
+* [x] **[Templates API](https://postmarkapp.com/developer/api/templates-api)**
+	* [x] [`POST /email/withTemplate`](https://postmarkapp.com/developer/api/templates-api#email-with-template) - Send email with template ([templates.go](templates.go))
+	* [x] [`POST /email/batchWithTemplates`](https://postmarkapp.com/developer/api/templates-api#send-batch-with-templates) - Send batch with templates ([templates.go](templates.go))
+	* [ ] [`PUT /templates/push`](https://postmarkapp.com/developer/api/templates-api#push-templates) - Push templates to another server
+	* [x] [`GET /templates/{templateIdOrAlias}`](https://postmarkapp.com/developer/api/templates-api#get-template) - Get a template ([templates.go](templates.go))
+	* [x] [`POST /templates`](https://postmarkapp.com/developer/api/templates-api#create-template) - Create a template ([templates.go](templates.go))
+	* [x] [`PUT /templates/{templateIdOrAlias}`](https://postmarkapp.com/developer/api/templates-api#edit-template) - Edit a template ([templates.go](templates.go))
+	* [x] [`GET /templates`](https://postmarkapp.com/developer/api/templates-api#list-templates) - List templates ([templates.go](templates.go))
+	* [x] [`DELETE /templates/{templateIdOrAlias}`](https://postmarkapp.com/developer/api/templates-api#delete-template) - Delete a template ([templates.go](templates.go))
+	* [x] [`POST /templates/validate`](https://postmarkapp.com/developer/api/templates-api#validate-template) - Validate a template ([templates.go](templates.go))
+
+* [x] **[Bounce API](https://postmarkapp.com/developer/api/bounce-api)**
+	* [x] [`GET /deliverystats`](https://postmarkapp.com/developer/api/bounce-api#get-delivery-stats) - Get delivery stats ([bounce.go](bounce.go))
+	* [x] [`GET /bounces`](https://postmarkapp.com/developer/api/bounce-api#get-bounces) - Get bounces ([bounce.go](bounce.go))
+	* [x] [`GET /bounces/{bounceid}`](https://postmarkapp.com/developer/api/bounce-api#get-bounce) - Get a single bounce ([bounce.go](bounce.go))
+	* [x] [`GET /bounces/{bounceid}/dump`](https://postmarkapp.com/developer/api/bounce-api#get-bounce-dump) - Get bounce dump ([bounce.go](bounce.go))
+	* [x] [`PUT /bounces/{bounceid}/activate`](https://postmarkapp.com/developer/api/bounce-api#activate-bounce) - Activate a bounce ([bounce.go](bounce.go))
+	* [x] [`GET /bounces/tags`](https://postmarkapp.com/developer/api/bounce-api#get-bounced-tags) - Get bounced tags ([bounce.go](bounce.go))
+
+* [x] **[Messages API](https://postmarkapp.com/developer/api/messages-api)**
+	* [x] [`GET /messages/outbound`](https://postmarkapp.com/developer/api/messages-api#outbound-message-search) - Search outbound messages ([messages_outbound.go](messages_outbound.go))
+	* [x] [`GET /messages/outbound/{messageid}/details`](https://postmarkapp.com/developer/api/messages-api#outbound-message-details) - Get outbound message details ([messages_outbound.go](messages_outbound.go))
+	* [x] [`GET /messages/outbound/{messageid}/dump`](https://postmarkapp.com/developer/api/messages-api#outbound-message-dump) - Get outbound message dump ([messages_outbound.go](messages_outbound.go))
+	* [x] [`GET /messages/outbound/opens`](https://postmarkapp.com/developer/api/messages-api#message-opens) - Get message opens ([messages_outbound.go](messages_outbound.go))
+	* [x] [`GET /messages/outbound/opens/{messageid}`](https://postmarkapp.com/developer/api/messages-api#opens-for-single-message) - Get opens for single message ([messages_outbound.go](messages_outbound.go))
+	* [ ] [`GET /messages/outbound/clicks`](https://postmarkapp.com/developer/api/messages-api#message-clicks) - Get message clicks
+	* [ ] [`GET /messages/outbound/clicks/{messageid}`](https://postmarkapp.com/developer/api/messages-api#clicks-for-single-message) - Get clicks for single message
+	* [x] [`GET /messages/inbound`](https://postmarkapp.com/developer/api/messages-api#inbound-message-search) - Search inbound messages ([messages_inbound.go](messages_inbound.go))
+	* [x] [`GET /messages/inbound/{messageid}/details`](https://postmarkapp.com/developer/api/messages-api#inbound-message-details) - Get inbound message details ([messages_inbound.go](messages_inbound.go))
+	* [x] [`PUT /messages/inbound/{messageid}/bypass`](https://postmarkapp.com/developer/api/messages-api#bypass-inbound-message-rules) - Bypass inbound message rules ([messages_inbound.go](messages_inbound.go))
+	* [x] [`PUT /messages/inbound/{messageid}/retry`](https://postmarkapp.com/developer/api/messages-api#retry-inbound-message-processing) - Retry inbound message processing ([messages_inbound.go](messages_inbound.go))
+
+* [x] **[Message Streams API](https://postmarkapp.com/developer/api/message-streams-api)**
+	* [x] [`GET /message-streams`](https://postmarkapp.com/developer/api/message-streams-api#list-message-streams) - List message streams ([message_streams.go](message_streams.go))
+	* [x] [`GET /message-streams/{stream_ID}`](https://postmarkapp.com/developer/api/message-streams-api#get-message-stream) - Get a message stream ([message_streams.go](message_streams.go))
+	* [x] [`PATCH /message-streams/{stream_ID}`](https://postmarkapp.com/developer/api/message-streams-api#edit-message-stream) - Edit a message stream ([message_streams.go](message_streams.go))
+	* [x] [`POST /message-streams`](https://postmarkapp.com/developer/api/message-streams-api#create-message-stream) - Create a message stream ([message_streams.go](message_streams.go))
+	* [x] [`POST /message-streams/{stream_ID}/archive`](https://postmarkapp.com/developer/api/message-streams-api#archive-message-stream) - Archive a message stream ([message_streams.go](message_streams.go))
+	* [x] [`POST /message-streams/{stream_ID}/unarchive`](https://postmarkapp.com/developer/api/message-streams-api#unarchive-message-stream) - Unarchive a message stream ([message_streams.go](message_streams.go))
+
+* [x] **[Domains API](https://postmarkapp.com/developer/api/domains-api)**
+	* [x] [`GET /domains`](https://postmarkapp.com/developer/api/domains-api#list-domains) - List domains ([domains.go](domains.go))
+	* [x] [`GET /domains/{domainid}`](https://postmarkapp.com/developer/api/domains-api#get-domain-details) - Get domain details ([domains.go](domains.go))
+	* [x] [`POST /domains`](https://postmarkapp.com/developer/api/domains-api#create-domain) - Create a domain ([domains.go](domains.go))
+	* [x] [`PUT /domains/{domainid}`](https://postmarkapp.com/developer/api/domains-api#edit-domain) - Edit a domain ([domains.go](domains.go))
+	* [x] [`DELETE /domains/{domainid}`](https://postmarkapp.com/developer/api/domains-api#delete-domain) - Delete a domain ([domains.go](domains.go))
+	* [x] [`PUT /domains/{domainid}/verifyDkim`](https://postmarkapp.com/developer/api/domains-api#verify-dkim) - Verify DKIM status ([domains.go](domains.go))
+	* [x] [`PUT /domains/{domainid}/verifyReturnPath`](https://postmarkapp.com/developer/api/domains-api#verify-return-path) - Verify return-path status ([domains.go](domains.go))
+	* [x] [`POST /domains/{domainid}/rotatedkim`](https://postmarkapp.com/developer/api/domains-api#rotate-dkim) - Rotate DKIM keys ([domains.go](domains.go))
+
+* [x] **[Sender Signatures API](https://postmarkapp.com/developer/api/signatures-api)**
+	* [x] [`GET /senders`](https://postmarkapp.com/developer/api/signatures-api#list-sender-signatures) - List sender signatures ([sender_signatures.go](sender_signatures.go))
+	* [x] [`GET /senders/{signatureid}`](https://postmarkapp.com/developer/api/signatures-api#get-sender-signature-details) - Get sender signature details ([sender_signatures.go](sender_signatures.go))
+	* [x] [`POST /senders`](https://postmarkapp.com/developer/api/signatures-api#create-signature) - Create a signature ([sender_signatures.go](sender_signatures.go))
+	* [x] [`PUT /senders/{signatureid}`](https://postmarkapp.com/developer/api/signatures-api#edit-signature) - Edit a signature ([sender_signatures.go](sender_signatures.go))
+	* [x] [`DELETE /senders/{signatureid}`](https://postmarkapp.com/developer/api/signatures-api#delete-signature) - Delete a signature ([sender_signatures.go](sender_signatures.go))
+	* [x] [`POST /senders/{signatureid}/resend`](https://postmarkapp.com/developer/api/signatures-api#resend-confirmation) - Resend confirmation ([sender_signatures.go](sender_signatures.go))
+
+* [x] **[Stats API](https://postmarkapp.com/developer/api/stats-api)**
+	* [x] [`GET /stats/outbound`](https://postmarkapp.com/developer/api/stats-api#get-outbound-overview) - Get outbound overview ([stats.go](stats.go))
+	* [x] [`GET /stats/outbound/sends`](https://postmarkapp.com/developer/api/stats-api#get-sent-counts) - Get sent counts ([stats.go](stats.go))
+	* [x] [`GET /stats/outbound/bounces`](https://postmarkapp.com/developer/api/stats-api#get-bounce-counts) - Get bounce counts ([stats.go](stats.go))
+	* [x] [`GET /stats/outbound/spam`](https://postmarkapp.com/developer/api/stats-api#get-spam-complaints) - Get spam complaints ([stats.go](stats.go))
+	* [x] [`GET /stats/outbound/tracked`](https://postmarkapp.com/developer/api/stats-api#get-tracked-email-counts) - Get tracked email counts ([stats.go](stats.go))
+	* [x] [`GET /stats/outbound/opens`](https://postmarkapp.com/developer/api/stats-api#get-email-open-counts) - Get email open counts ([stats.go](stats.go))
+	* [x] [`GET /stats/outbound/opens/platforms`](https://postmarkapp.com/developer/api/stats-api#get-email-platform-usage) - Get email platform usage ([stats.go](stats.go))
+	* [ ] [`GET /stats/outbound/opens/emailclients`](https://postmarkapp.com/developer/api/stats-api#get-email-client-usage) - Get email client usage
+	* [ ] [`GET /stats/outbound/clicks`](https://postmarkapp.com/developer/api/stats-api#get-click-counts) - Get click counts
+	* [ ] [`GET /stats/outbound/clicks/browserfamilies`](https://postmarkapp.com/developer/api/stats-api#get-browser-usage) - Get browser usage
+	* [ ] [`GET /stats/outbound/clicks/platforms`](https://postmarkapp.com/developer/api/stats-api#get-browser-platform-usage) - Get browser platform usage
+
+* [x] **[Webhooks API](https://postmarkapp.com/developer/api/webhooks-api)**
+	* [x] [`GET /webhooks`](https://postmarkapp.com/developer/api/webhooks-api#list-webhooks) - List webhooks ([webhooks.go](webhooks.go))
+	* [x] [`GET /webhooks/{Id}`](https://postmarkapp.com/developer/api/webhooks-api#get-webhook) - Get a webhook ([webhooks.go](webhooks.go))
+	* [x] [`POST /webhooks`](https://postmarkapp.com/developer/api/webhooks-api#create-webhook) - Create a webhook ([webhooks.go](webhooks.go))
+	* [x] [`PUT /webhooks/{Id}`](https://postmarkapp.com/developer/api/webhooks-api#edit-webhook) - Edit a webhook ([webhooks.go](webhooks.go))
+	* [x] [`DELETE /webhooks/{Id}`](https://postmarkapp.com/developer/api/webhooks-api#delete-webhook) - Delete a webhook ([webhooks.go](webhooks.go))
+
+* [x] **[Suppressions API](https://postmarkapp.com/developer/api/suppressions-api)**
+	* [x] [`GET /message-streams/{stream_id}/suppressions/dump`](https://postmarkapp.com/developer/api/suppressions-api#suppression-dump) - Suppression dump ([suppressions.go](suppressions.go))
+	* [x] [`POST /message-streams/{stream_id}/suppressions`](https://postmarkapp.com/developer/api/suppressions-api#create-suppression) - Create suppressions ([suppressions.go](suppressions.go))
+	* [x] [`POST /message-streams/{stream_id}/suppressions/delete`](https://postmarkapp.com/developer/api/suppressions-api#delete-suppression) - Delete suppressions ([suppressions.go](suppressions.go))
+
+* [x] **[Servers API](https://postmarkapp.com/developer/api/servers-api)**
+	* [x] [`GET /server`](https://postmarkapp.com/developer/api/servers-api#get-server) - Get current server ([server.go](server.go))
+	* [x] [`PUT /server`](https://postmarkapp.com/developer/api/servers-api#edit-server) - Edit current server ([server.go](server.go))
+	* [x] [`GET /servers/{serverid}`](https://postmarkapp.com/developer/api/servers-api#get-server) - Get a server ([servers.go](servers.go))
+	* [x] [`POST /servers`](https://postmarkapp.com/developer/api/servers-api#create-server) - Create a server ([servers.go](servers.go))
+	* [x] [`PUT /servers/{serverid}`](https://postmarkapp.com/developer/api/servers-api#edit-server) - Edit a server ([servers.go](servers.go))
+	* [x] [`GET /servers`](https://postmarkapp.com/developer/api/servers-api#list-servers) - List servers ([servers.go](servers.go))
+	* [x] [`DELETE /servers/{serverid}`](https://postmarkapp.com/developer/api/servers-api#delete-server) - Delete a server ([servers.go](servers.go))
+
+* [ ] **[Inbound Rules Triggers API](https://postmarkapp.com/developer/api/inbound-rules-triggers-api)**
+	* [ ] [`GET /triggers/inboundrules`](https://postmarkapp.com/developer/api/inbound-rules-triggers-api#list-inbound-rule-triggers) - List inbound rule triggers
+	* [ ] [`POST /triggers/inboundrules`](https://postmarkapp.com/developer/api/inbound-rules-triggers-api#create-inbound-rule-trigger) - Create an inbound rule trigger
+	* [ ] [`DELETE /triggers/inboundrules/{triggerid}`](https://postmarkapp.com/developer/api/inbound-rules-triggers-api#delete-trigger) - Delete a single trigger
+
+* [ ] **[Data Removal API](https://postmarkapp.com/developer/api/data-removals-api)**
+	* [ ] [`POST /data-removals`](https://postmarkapp.com/developer/api/data-removals-api#create-data-removal-request) - Create a data removal request
+	* [ ] [`GET /data-removals/{id}`](https://postmarkapp.com/developer/api/data-removals-api#check-data-removal-status) - Check a data removal request status
 
 </details>
 
