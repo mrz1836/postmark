@@ -1,0 +1,742 @@
+# ------------------------------------------------------------------------------------
+#  Setup Configuration (Reusable Workflow) (GoFortress)
+#
+#  Purpose: Set up the CI configuration, parse environment variables, and generate
+#  test matrices for the main workflow. This workflow handles all the initial
+#  configuration logic.
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: GoFortress (Setup Configuration)
+
+on:
+  workflow_call:
+    inputs:
+      env-json:
+        description: "JSON string of environment variables"
+        required: true
+        type: string
+      primary-runner:
+        description: "Primary runner OS"
+        required: true
+        type: string
+      base-file-found:
+        description: "Whether .env.base file was found"
+        required: false
+        type: string
+        default: "false"
+      custom-file-found:
+        description: "Whether .env.custom file was found"
+        required: false
+        type: string
+        default: "false"
+      base-var-count:
+        description: "Number of variables loaded from .env.base"
+        required: false
+        type: string
+        default: "0"
+      custom-var-count:
+        description: "Number of variables loaded from .env.custom"
+        required: false
+        type: string
+        default: "0"
+      config-mode:
+        description: "Configuration mode: new or base-only"
+        required: false
+        type: string
+        default: "new"
+    secrets:
+      github-token:
+        description: "GitHub token for API access"
+        required: true
+    outputs:
+      benchmarks-enabled:
+        description: "Whether benchmarks are enabled"
+        value: ${{ jobs.setup-config.outputs.benchmarks-enabled }}
+      benchmark-matrix:
+        description: "Benchmark matrix JSON"
+        value: ${{ jobs.setup-config.outputs.benchmark-matrix }}
+      code-coverage-enabled:
+        description: "Whether code coverage is enabled"
+        value: ${{ jobs.setup-config.outputs.code-coverage-enabled }}
+      coverage-provider:
+        description: "Coverage service provider (internal or codecov)"
+        value: ${{ jobs.setup-config.outputs.coverage-provider }}
+      fuzz-testing-enabled:
+        description: "Whether fuzz testing is enabled"
+        value: ${{ jobs.setup-config.outputs.fuzz-testing-enabled }}
+      go-primary-version:
+        description: "Primary Go version"
+        value: ${{ jobs.setup-config.outputs.go-primary-version }}
+      go-secondary-version:
+        description: "Secondary Go version"
+        value: ${{ jobs.setup-config.outputs.go-secondary-version }}
+      go-versions:
+        description: "Unique Go versions array"
+        value: ${{ jobs.setup-config.outputs.go-versions }}
+      go-lint-enabled:
+        description: "Whether Go linting is enabled"
+        value: ${{ jobs.setup-config.outputs.go-lint-enabled }}
+      yaml-lint-enabled:
+        description: "Whether YAML linting is enabled"
+        value: ${{ jobs.setup-config.outputs.yaml-lint-enabled }}
+      magefile-exists:
+        description: "Whether .mage.yaml exists"
+        value: ${{ jobs.setup-config.outputs.magefile-exists }}
+      primary-runner:
+        description: "Primary runner OS"
+        value: ${{ jobs.setup-config.outputs.primary-runner }}
+      race-detection-enabled:
+        description: "Whether race detection is enabled"
+        value: ${{ jobs.setup-config.outputs.race-detection-enabled }}
+      secondary-runner:
+        description: "Secondary runner OS"
+        value: ${{ jobs.setup-config.outputs.secondary-runner }}
+      security-scans-enabled:
+        description: "Whether security scans are enabled"
+        value: ${{ jobs.setup-config.outputs.security-scans-enabled }}
+      nancy-enabled:
+        description: "Whether Nancy dependency checks are enabled"
+        value: ${{ jobs.setup-config.outputs.nancy-enabled }}
+      govulncheck-enabled:
+        description: "Whether govulncheck vulnerability scanning is enabled"
+        value: ${{ jobs.setup-config.outputs.govulncheck-enabled }}
+      gitleaks-enabled:
+        description: "Whether Gitleaks secret scanning is enabled"
+        value: ${{ jobs.setup-config.outputs.gitleaks-enabled }}
+      is-release-run:
+        description: "Whether this is a release-eligible run (tag starting with v)"
+        value: ${{ jobs.setup-config.outputs.is-release-run }}
+      start-epoch:
+        description: "Workflow start epoch time"
+        value: ${{ jobs.setup-config.outputs.start-epoch }}
+      start-time:
+        description: "Workflow start time"
+        value: ${{ jobs.setup-config.outputs.start-time }}
+      static-analysis-enabled:
+        description: "Whether static analysis is enabled"
+        value: ${{ jobs.setup-config.outputs.static-analysis-enabled }}
+      test-matrix:
+        description: "Test matrix JSON"
+        value: ${{ jobs.setup-config.outputs.test-matrix }}
+      warm-cache-matrix:
+        description: "Warm cache matrix JSON"
+        value: ${{ jobs.setup-config.outputs.warm-cache-matrix }}
+      pre-commit-enabled:
+        description: "Whether pre-commit checks are enabled"
+        value: ${{ jobs.setup-config.outputs.pre-commit-enabled }}
+      gofortress-version:
+        description: "GoFortress workflow system version"
+        value: ${{ jobs.setup-config.outputs.gofortress-version }}
+      gofortress-released:
+        description: "GoFortress release date"
+        value: ${{ jobs.setup-config.outputs.gofortress-released }}
+      redis-enabled:
+        description: "Whether Redis service is enabled"
+        value: ${{ jobs.setup-config.outputs.redis-enabled }}
+      redis-version:
+        description: "Redis Docker image version"
+        value: ${{ jobs.setup-config.outputs.redis-version }}
+      redis-host:
+        description: "Redis host for tests"
+        value: ${{ jobs.setup-config.outputs.redis-host }}
+      redis-port:
+        description: "Redis port for tests"
+        value: ${{ jobs.setup-config.outputs.redis-port }}
+      redis-health-retries:
+        description: "Redis health check retry count"
+        value: ${{ jobs.setup-config.outputs.redis-health-retries }}
+      redis-health-interval:
+        description: "Redis health check interval in seconds"
+        value: ${{ jobs.setup-config.outputs.redis-health-interval }}
+      redis-health-timeout:
+        description: "Redis health check timeout in seconds"
+        value: ${{ jobs.setup-config.outputs.redis-health-timeout }}
+      redis-cache-force-pull:
+        description: "Whether to force pull Redis images even when cached"
+        value: ${{ jobs.setup-config.outputs.redis-cache-force-pull }}
+      redis-trust-service-health:
+        description: "Trust GitHub Actions service container health checks (skip redis-cli verification)"
+        value: ${{ jobs.setup-config.outputs.redis-trust-service-health }}
+      redis-service-mode:
+        description: "Redis service mode (auto, always, never)"
+        value: ${{ jobs.setup-config.outputs.redis-service-mode }}
+
+# Security: Restrictive default permissions with job-level overrides for least privilege access
+permissions:
+  contents: read
+
+jobs:
+  # ----------------------------------------------------------------------------------
+  # Setup the configuration for the CI environment
+  # ----------------------------------------------------------------------------------
+  setup-config:
+    name: 🔧 Setup CI Config
+    runs-on: ${{ inputs.primary-runner }}
+    outputs:
+      benchmarks-enabled: ${{ steps.config.outputs.benchmarks-enabled }}
+      benchmark-matrix: ${{ steps.matrix.outputs.matrix }}
+      code-coverage-enabled: ${{ steps.config.outputs.code-coverage-enabled }}
+      coverage-provider: ${{ steps.config.outputs.coverage-provider }}
+      fuzz-testing-enabled: ${{ steps.config.outputs.fuzz-testing-enabled }}
+      go-primary-version: ${{ steps.config.outputs.go-primary-version }}
+      go-secondary-version: ${{ steps.config.outputs.go-secondary-version }}
+      go-versions: ${{ steps.versions.outputs.versions }}
+      go-lint-enabled: ${{ steps.config.outputs.go-lint-enabled }}
+      yaml-lint-enabled: ${{ steps.config.outputs.yaml-lint-enabled }}
+      magefile-exists: ${{ steps.config.outputs.magefile-exists }}
+      primary-runner: ${{ steps.config.outputs.primary-runner }}
+      race-detection-enabled: ${{ steps.config.outputs.race-detection-enabled }}
+      secondary-runner: ${{ steps.config.outputs.secondary-runner }}
+      security-scans-enabled: ${{ steps.config.outputs.security-scans-enabled }}
+      nancy-enabled: ${{ steps.config.outputs.nancy-enabled }}
+      govulncheck-enabled: ${{ steps.config.outputs.govulncheck-enabled }}
+      gitleaks-enabled: ${{ steps.config.outputs.gitleaks-enabled }}
+      is-release-run: ${{ steps.config.outputs.is-release-run }}
+      start-epoch: ${{ steps.timer.outputs.start-epoch }}
+      start-time: ${{ steps.timer.outputs.start-time }}
+      static-analysis-enabled: ${{ steps.config.outputs.static-analysis-enabled }}
+      test-matrix: ${{ steps.matrix.outputs.matrix }}
+      warm-cache-matrix: ${{ steps.matrix.outputs.matrix }}
+      pre-commit-enabled: ${{ steps.config.outputs.pre-commit-enabled }}
+      gofortress-version: ${{ steps.extract-version.outputs.version }}
+      gofortress-released: ${{ steps.extract-version.outputs.released }}
+      redis-enabled: ${{ steps.redis-config.outputs.redis-enabled }}
+      redis-version: ${{ steps.redis-config.outputs.redis-version }}
+      redis-host: ${{ steps.redis-config.outputs.redis-host }}
+      redis-port: ${{ steps.redis-config.outputs.redis-port }}
+      redis-health-retries: ${{ steps.redis-config.outputs.redis-health-retries }}
+      redis-health-interval: ${{ steps.redis-config.outputs.redis-health-interval }}
+      redis-health-timeout: ${{ steps.redis-config.outputs.redis-health-timeout }}
+      redis-cache-force-pull: ${{ steps.redis-config.outputs.redis-cache-force-pull }}
+      redis-trust-service-health: ${{ steps.redis-config.outputs.redis-trust-service-health }}
+      redis-service-mode: ${{ steps.redis-config.outputs.redis-service-mode }}
+
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Start timer to record workflow start time
+      # ————————————————————————————————————————————————————————————————
+      - name: ⏱️ Record start time
+        id: timer
+        run: |
+          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          START_EPOCH=$(date +%s)
+          echo "start-time=$START_TIME" >> $GITHUB_OUTPUT
+          echo "start-epoch=$START_EPOCH" >> $GITHUB_OUTPUT
+          echo "🚀 Workflow started at: $START_TIME"
+
+      # ————————————————————————————————————————————————————————————————
+      # Parse environment variables from JSON
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Parse environment variables
+        id: parse-env
+        env:
+          ENV_JSON: ${{ inputs.env-json }}
+        run: |
+          echo "📋 Parsing environment variables..."
+
+          # Extract each variable from JSON and set as output
+          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
+            echo "$key=$value" >> $GITHUB_ENV
+          done
+
+          echo "✅ Environment variables parsed successfully"
+
+      # ————————————————————————————————————————————————————————————————
+      # Checkout code (sparse checkout)
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Checkout (sparse)
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: |
+            .mage.yaml
+            go.mod
+            go.sum
+            .github/workflows/fortress.yml
+            .github/actions/configure-redis
+
+      # ————————————————————————————————————————————————————————————————
+      # Extract GoFortress version metadata from fortress.yml
+      # ————————————————————————————————————————————————————————————————
+      - name: 📋 Extract GoFortress Version
+        id: extract-version
+        run: |
+          # Extract version metadata from the fortress.yml file
+          FORTRESS_FILE=".github/workflows/fortress.yml"
+
+          echo "🔍 Looking for GoFortress version in: $FORTRESS_FILE"
+
+          if [ -f "$FORTRESS_FILE" ]; then
+            echo "✅ Found fortress.yml file"
+
+            # Extract version information from the main header (format: #  Version: X.Y.Z | Released: YYYY-MM-DD)
+            VERSION_LINE=$(grep "#  Version:" "$FORTRESS_FILE" | head -1)
+
+            if [ -n "$VERSION_LINE" ]; then
+              FORTRESS_VERSION=$(echo "$VERSION_LINE" | sed 's/.*Version: //' | sed 's/ |.*//')
+              FORTRESS_RELEASED=$(echo "$VERSION_LINE" | sed 's/.*Released: //' | tr -d ' ')
+
+              echo "🏰 GoFortress Version: $FORTRESS_VERSION"
+              echo "📅 Released: $FORTRESS_RELEASED"
+
+              # Set outputs for use in other steps
+              echo "version=$FORTRESS_VERSION" >> $GITHUB_OUTPUT
+              echo "released=$FORTRESS_RELEASED" >> $GITHUB_OUTPUT
+            else
+              echo "⚠️ Version line not found in fortress.yml"
+              echo "version=unknown" >> $GITHUB_OUTPUT
+              echo "released=unknown" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "❌ fortress.yml not found at $FORTRESS_FILE"
+            echo "📂 Current directory contents:"
+            ls -la
+            echo "📂 .github/workflows/ contents:"
+            ls -la .github/workflows/ || echo "Directory not found"
+            echo "version=unknown" >> $GITHUB_OUTPUT
+            echo "released=unknown" >> $GITHUB_OUTPUT
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Get Go versions and set up the matrix
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔍 Get Unique Go Versions
+        id: versions
+        run: |
+          # Create array of unique versions
+          VERSIONS=$(jq -n \
+          --arg v1 "${{ env.GO_PRIMARY_VERSION }}" \
+          --arg v2 "${{ env.GO_SECONDARY_VERSION }}" \
+          '[$v1, $v2] | unique | sort')
+
+          VERSIONS=$(echo "$VERSIONS" | jq -c .)
+          echo "versions=$VERSIONS" >> "$GITHUB_OUTPUT"
+          echo "✅ Unique Go versions: $VERSIONS"
+
+      # ————————————————————————————————————————————————————————————————
+      # Generate the test matrix based on Go versions and runner OSes
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Generate Optimized Matrix
+        id: matrix
+        shell: bash
+        run: |
+          echo "🎯 Generating test matrix..."
+
+          # ------------------------------------------------------------
+          # Prepare runner list (max 2)
+          # ------------------------------------------------------------
+          PRIMARY="${{ env.PRIMARY_RUNNER }}"
+          SECONDARY="${{ env.SECONDARY_RUNNER }}"
+          RUNNERS=("$PRIMARY")
+          if [[ "$SECONDARY" != "$PRIMARY" ]]; then
+            RUNNERS+=("$SECONDARY")
+          fi
+
+          # ------------------------------------------------------------
+          # Get Go versions from previous step
+          # ------------------------------------------------------------
+          VERSIONS='${{ steps.versions.outputs.versions }}'
+          VERSION_COUNT=$(echo "$VERSIONS" | jq 'length')
+
+          # Start with an empty matrix
+          MATRIX='{"include": []}'
+
+          # ------------------------------------------------------------
+          # Build the matrix
+          # ------------------------------------------------------------
+          for OS in "${RUNNERS[@]}"; do
+            if [[ "$OS" == *"ubuntu"* ]]; then
+              OS_SHORT="Linux"
+            else
+              OS_SHORT="macOS"
+            fi
+
+            for i in $(seq 0 $((VERSION_COUNT - 1))); do
+              GO_VERSION=$(echo "$VERSIONS" | jq -r ".[$i]")
+              IS_PRIMARY=$([[ "$GO_VERSION" == "${{ env.GO_PRIMARY_VERSION }}" ]] && echo "true" || echo "false")
+
+              # Determine name (simplified without fuzz setting)
+              if [[ "$OS_SHORT" == "Linux" && "$IS_PRIMARY" == "true" ]]; then
+                NAME="$OS_SHORT (Primary Go $GO_VERSION)"
+              else
+                if [[ "$VERSION_COUNT" -eq 1 ]]; then
+                  NAME="$OS_SHORT"
+                else
+                  NAME="$OS_SHORT Go $GO_VERSION"
+                fi
+              fi
+
+              # Append to matrix
+              MATRIX=$(echo "$MATRIX" | jq \
+                --arg os "$OS" \
+                --arg go "$GO_VERSION" \
+                --arg name "$NAME" \
+                '.include += [{
+                  "os": $os,
+                  "go-version": $go,
+                  "name": $name
+                }]')
+            done
+          done
+
+          # ------------------------------------------------------------
+          # Output the matrix
+          # ------------------------------------------------------------
+          echo "matrix=$(echo "$MATRIX" | jq -c .)" >> "$GITHUB_OUTPUT"
+          echo "✅ Matrix generated successfully"
+
+      # ————————————————————————————————————————————————————————————————
+      # Configure environment variables
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Configure CI Environment Configuration
+        id: config
+        run: |
+          echo "🎯 Configuring environment variables for CI..."
+
+          # Validate and export Go versions
+          echo "go-primary-version=${{ env.GO_PRIMARY_VERSION }}" >> $GITHUB_OUTPUT
+          echo "go-secondary-version=${{ env.GO_SECONDARY_VERSION }}" >> $GITHUB_OUTPUT
+
+          # Export runners (for reference in steps, not job level)
+          echo "primary-runner=${{ env.PRIMARY_RUNNER }}" >> $GITHUB_OUTPUT
+          echo "secondary-runner=${{ env.SECONDARY_RUNNER }}" >> $GITHUB_OUTPUT
+
+          # Check if .mage.yaml exists
+          if [ -f ".mage.yaml" ]; then
+            echo "magefile-exists=true" >> $GITHUB_OUTPUT
+            echo "✅ .mage.yaml found"
+          else
+            echo "magefile-exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️ No .mage.yaml found"
+            if [ "${{ env.MAGEFILE_REQUIRED }}" == "true" ]; then
+              echo "❌ .mage.yaml is required but not found!"
+              exit 1
+            fi
+          fi
+
+          # Feature flags
+          echo "benchmarks-enabled=${{ env.ENABLE_BENCHMARKS }}" >> $GITHUB_OUTPUT
+          echo "code-coverage-enabled=${{ env.ENABLE_CODE_COVERAGE }}" >> $GITHUB_OUTPUT
+          echo "coverage-provider=${{ env.GO_COVERAGE_PROVIDER }}" >> $GITHUB_OUTPUT
+
+          # Validate coverage provider configuration
+          if [ "${{ env.ENABLE_CODE_COVERAGE }}" == "true" ]; then
+            PROVIDER="${{ env.GO_COVERAGE_PROVIDER }}"
+            if [ "$PROVIDER" != "internal" ] && [ "$PROVIDER" != "codecov" ]; then
+              echo "❌ Invalid GO_COVERAGE_PROVIDER: $PROVIDER"
+              echo "   Valid options are: internal, codecov"
+              exit 1
+            fi
+
+            # Check for codecov token requirement
+            if [ "$PROVIDER" == "codecov" ]; then
+              if [ "${{ env.CODECOV_TOKEN_REQUIRED }}" == "true" ] && [ -z "${{ secrets.CODECOV_TOKEN }}" ]; then
+                echo "⚠️ WARNING: CODECOV_TOKEN_REQUIRED is true but CODECOV_TOKEN secret may not be set"
+                echo "   Codecov upload may fail without a token for private repositories"
+              fi
+              echo "✅ Coverage provider: Codecov"
+            else
+              echo "✅ Coverage provider: Internal (go-coverage with GitHub Pages)"
+            fi
+          fi
+
+          echo "go-lint-enabled=${{ env.ENABLE_GO_LINT }}" >> $GITHUB_OUTPUT
+          echo "yaml-lint-enabled=${{ env.ENABLE_YAML_LINT }}" >> $GITHUB_OUTPUT
+          echo "race-detection-enabled=${{ env.ENABLE_RACE_DETECTION }}" >> $GITHUB_OUTPUT
+          echo "benchmark-mode=${{ env.BENCHMARK_MODE }}" >> $GITHUB_OUTPUT
+          echo "benchmark-timeout=${{ env.BENCHMARK_TIMEOUT }}" >> $GITHUB_OUTPUT
+          # Security scans - enable if any individual tool is enabled
+          if [[ "${{ env.ENABLE_SECURITY_SCAN_NANCY }}" == "true" || "${{ env.ENABLE_SECURITY_SCAN_GOVULNCHECK }}" == "true" || "${{ env.ENABLE_SECURITY_SCAN_GITLEAKS }}" == "true" ]]; then
+            echo "security-scans-enabled=true" >> $GITHUB_OUTPUT
+          else
+            echo "security-scans-enabled=false" >> $GITHUB_OUTPUT
+          fi
+          echo "nancy-enabled=${{ env.ENABLE_SECURITY_SCAN_NANCY }}" >> $GITHUB_OUTPUT
+          echo "govulncheck-enabled=${{ env.ENABLE_SECURITY_SCAN_GOVULNCHECK }}" >> $GITHUB_OUTPUT
+          echo "gitleaks-enabled=${{ env.ENABLE_SECURITY_SCAN_GITLEAKS }}" >> $GITHUB_OUTPUT
+          echo "static-analysis-enabled=${{ env.ENABLE_STATIC_ANALYSIS }}" >> $GITHUB_OUTPUT
+          echo "fuzz-testing-enabled=${{ env.ENABLE_FUZZ_TESTING }}" >> $GITHUB_OUTPUT
+          echo "pre-commit-enabled=${{ env.ENABLE_GO_PRE_COMMIT }}" >> $GITHUB_OUTPUT
+
+          # Detect if this is a release run
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "is-release-run=true" >> $GITHUB_OUTPUT
+            echo "🚀 Release detected: Tag ${{ github.ref_name }}"
+          else
+            echo "is-release-run=false" >> $GITHUB_OUTPUT
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Configure Redis service settings using composite action
+      # ————————————————————————————————————————————————————————————————
+      - name: 🗄️ Configure Redis Service
+        id: redis-config
+        uses: ./.github/actions/configure-redis
+        with:
+          env-json: ${{ inputs.env-json }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Build the final summary of the configuration
+      # ————————————————————————————————————————————————————————————————
+      - name: 📋 Build Configuration Summary
+        id: config-summary
+        env:
+          ENV_JSON: ${{ inputs.env-json }}
+        run: |
+          UNIQUE_GO_VERSIONS='${{ steps.versions.outputs.versions }}'
+          MATRIX_JSON='${{ steps.matrix.outputs.matrix }}'
+
+          # Count environment variables
+          ENV_COUNT=$(echo "$ENV_JSON" | jq 'keys | length')
+
+          # Get current timestamp
+          SUMMARY_TIME=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          # Start building the summary
+          echo "# GoFortress CI Configuration Report" >> $GITHUB_STEP_SUMMARY
+          echo "_Generated at: ${SUMMARY_TIME}_" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🏰 GoFortress System Information" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **System Version** | \`${{ steps.extract-version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Release Date** | ${{ steps.extract-version.outputs.released }} |" >> $GITHUB_STEP_SUMMARY
+
+          # Count all fortress workflow files (including main fortress.yml)
+          FORTRESS_FILES=$(find .github/workflows -name "fortress*.yml" | wc -l | tr -d ' ')
+          echo "| **Workflow Components** | ${FORTRESS_FILES} fortress modules |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<br><br>" >> $GITHUB_STEP_SUMMARY
+
+          # Workflow Trigger Information
+          echo "## 🎯 Workflow Trigger" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Trigger Type** | \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Reference** | \`${{ github.ref }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Branch/Tag** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit SHA** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Is Tag Push** | $([ "${{ startsWith(github.ref, 'refs/tags/') }}" == "true" ] && echo "✅ Yes" || echo "❌ No") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Is Release Eligible** | $([ "${{ startsWith(github.ref, 'refs/tags/v') }}" == "true" ] && echo "🚀 **Yes - Release will run if tests pass**" || echo "❌ No") |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<br><br>" >> $GITHUB_STEP_SUMMARY
+
+          # Configuration Statistics (moved up for overview)
+          echo "## 📈 Configuration Overview" >> $GITHUB_STEP_SUMMARY
+          ENABLED_FEATURES=$(echo "$ENV_JSON" | jq -r '[to_entries | .[] | select(.key | startswith("ENABLE_")) | select(.value == "true")] | length')
+          DISABLED_FEATURES=$(echo "$ENV_JSON" | jq -r '[to_entries | .[] | select(.key | startswith("ENABLE_")) | select(.value == "false")] | length')
+          MATRIX_COUNT=$(echo "$MATRIX_JSON" | jq '.include | length')
+
+          echo "- **Workflow Start Time**: ${{ steps.timer.outputs.start-time }}" >> $GITHUB_STEP_SUMMARY
+
+          # Configuration File Discovery
+          BASE_FOUND="${{ inputs.base-file-found }}"
+          CUSTOM_FOUND="${{ inputs.custom-file-found }}"
+          BASE_COUNT="${{ inputs.base-var-count }}"
+          CUSTOM_COUNT="${{ inputs.custom-var-count }}"
+          CONFIG_MODE="${{ inputs.config-mode }}"
+
+          # Show configuration sources
+          if [[ "$CUSTOM_FOUND" == "true" ]]; then
+            echo "- **Configuration Sources**: 📂 Base (\`.env.base\`: $BASE_COUNT vars) + 🎨 Custom (\`.env.custom\`: $CUSTOM_COUNT overrides)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Configuration Sources**: 📂 Base only (\`.env.base\`: $BASE_COUNT variables)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "- **Total Environment Variables**: $ENV_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Enabled Features**: $ENABLED_FEATURES" >> $GITHUB_STEP_SUMMARY
+          echo "- **Disabled Features**: $DISABLED_FEATURES" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test Matrix Combinations**: $MATRIX_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- **Unique Go Versions**: $(echo "$UNIQUE_GO_VERSIONS" | jq 'length')" >> $GITHUB_STEP_SUMMARY
+          echo "- **Runner Operating Systems**: $([ "${{ env.PRIMARY_RUNNER }}" == "${{ env.SECONDARY_RUNNER }}" ] && echo "1" || echo "2")" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<br><br>" >> $GITHUB_STEP_SUMMARY
+
+          # Core Configuration
+          echo "## 🛠 Core CI Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value | Description |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|-------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Primary Runner** | \`${{ env.PRIMARY_RUNNER }}\` | Main OS for CI jobs |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Secondary Runner** | \`${{ env.SECONDARY_RUNNER }}\` | Additional OS for compatibility testing |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Primary Go Version** | \`${{ env.GO_PRIMARY_VERSION }}\` | Main Go version for builds |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Secondary Go Version** | \`${{ env.GO_SECONDARY_VERSION }}\` | Additional Go version for testing |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Unique Go Versions** | $UNIQUE_GO_VERSIONS | Deduplicated list of Go versions |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<br><br>" >> $GITHUB_STEP_SUMMARY
+
+          # Test Matrix
+          echo "## 🧪 Generated Test Matrix" >> $GITHUB_STEP_SUMMARY
+          echo "**Total test configurations**: $MATRIX_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| # | OS | Go Version | Configuration Name |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|----|-----------|--------------------|" >> $GITHUB_STEP_SUMMARY
+
+          echo "$MATRIX_JSON" | jq -r '.include | to_entries | .[] | "| \(.key + 1) | \(.value.os) | \(.value["go-version"]) | \(.value.name) |"' >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<br><br>" >> $GITHUB_STEP_SUMMARY
+
+          # Feature Flags
+          echo "## 🚀 Feature Flags" >> $GITHUB_STEP_SUMMARY
+          echo "| Feature | Status | Impact |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Benchmarks** | $([ "${{ env.ENABLE_BENCHMARKS }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Performance benchmarks will $([ "${{ env.ENABLE_BENCHMARKS }}" == "true" ] && echo "run in **${{ env.BENCHMARK_MODE }}** mode" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Code Coverage** | $([ "${{ env.ENABLE_CODE_COVERAGE }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Coverage will $([ "${{ env.ENABLE_CODE_COVERAGE }}" == "true" ] && echo "use $([ "${{ env.GO_COVERAGE_PROVIDER }}" == "codecov" ] && echo "**Codecov**" || echo "**go-coverage**") (${{ env.GO_COVERAGE_THRESHOLD }}% threshold)" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Fuzz Testing** | $([ "${{ env.ENABLE_FUZZ_TESTING }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Fuzz tests will $([ "${{ env.ENABLE_FUZZ_TESTING }}" == "true" ] && echo "run in parallel job on Linux with primary Go version" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Gitleaks (Secret Scan)** | $([ "${{ env.ENABLE_SECURITY_SCAN_GITLEAKS }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Gitleaks will $([ "${{ env.ENABLE_SECURITY_SCAN_GITLEAKS }}" == "true" ] && echo "scan for leaked secrets" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Go Linting** | $([ "${{ env.ENABLE_GO_LINT }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | golangci-lint via MAGE-X will $([ "${{ env.ENABLE_GO_LINT }}" == "true" ] && echo "analyze code quality" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Govulncheck** | $([ "${{ env.ENABLE_SECURITY_SCAN_GOVULNCHECK }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | govulncheck via MAGE-X will $([ "${{ env.ENABLE_SECURITY_SCAN_GOVULNCHECK }}" == "true" ] && echo "scan for Go vulnerabilities" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Nancy (Dep Checks)** | $([ "${{ env.ENABLE_SECURITY_SCAN_NANCY }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Nancy will $([ "${{ env.ENABLE_SECURITY_SCAN_NANCY }}" == "true" ] && echo "scan dependencies for vulnerabilities" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Pre-Commit System** | $([ "${{ env.ENABLE_GO_PRE_COMMIT }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | GoFortress pre-commit hooks will $([ "${{ env.ENABLE_GO_PRE_COMMIT }}" == "true" ] && echo "run 17x faster than Python alternatives" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Race Detection** | $([ "${{ env.ENABLE_RACE_DETECTION }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Tests will $([ "${{ env.ENABLE_RACE_DETECTION }}" == "true" ] && echo "run with -race flag" || echo "run without race detection") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Static Analysis** | $([ "${{ env.ENABLE_STATIC_ANALYSIS }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Static analysis will $([ "${{ env.ENABLE_STATIC_ANALYSIS }}" == "true" ] && echo "check for code issues" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **YAML Linting** | $([ "${{ env.ENABLE_YAML_LINT }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | yamlfmt via MAGE-X will $([ "${{ env.ENABLE_YAML_LINT }}" == "true" ] && echo "validate YAML/JSON formatting" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Redis Service** | $([ "${{ steps.redis-config.outputs.redis-enabled }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Redis ${{ env.REDIS_VERSION }} will $([ "${{ steps.redis-config.outputs.redis-enabled }}" == "true" ] && echo "run as service container for tests" || echo "not be available") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Go Docs Publishing** | $([ "${{ env.ENABLE_GODOCS_PUBLISHING }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Go documentation will $([ "${{ env.ENABLE_GODOCS_PUBLISHING }}" == "true" ] && echo "be syndicated to pkg.go.dev on releases" || echo "not be published") |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<br><br>" >> $GITHUB_STEP_SUMMARY
+
+          # Benchmark Configuration (only show if benchmarks are enabled)
+          if [[ "${{ env.ENABLE_BENCHMARKS }}" == "true" ]]; then
+            echo "## 🏃 Benchmark Configuration" >> $GITHUB_STEP_SUMMARY
+            echo "| Setting | Value | Description |" >> $GITHUB_STEP_SUMMARY
+            echo "|---------|-------|-------------|" >> $GITHUB_STEP_SUMMARY
+            echo "| **Benchmark Mode** | \`${{ env.BENCHMARK_MODE }}\` | $(case "${{ env.BENCHMARK_MODE }}" in quick) echo "Quick runs (50ms)" ;; full) echo "Comprehensive runs (10s)" ;; *) echo "Normal runs (100ms)" ;; esac) |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Benchmark Timeout** | \`${{ env.BENCHMARK_TIMEOUT }}\` minutes | Maximum time allowed for benchmark execution |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Available Modes** | quick, normal, full | Set via \`BENCHMARK_MODE\` in configuration |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<br><br>" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Coverage Configuration (only show if coverage is enabled)
+          if [[ "${{ env.ENABLE_CODE_COVERAGE }}" == "true" ]]; then
+            echo "## 📊 Coverage System Configuration" >> $GITHUB_STEP_SUMMARY
+            echo "| Setting | Value | Description |" >> $GITHUB_STEP_SUMMARY
+            echo "|---------|-------|-------------|" >> $GITHUB_STEP_SUMMARY
+
+            # Show provider-specific configuration
+            if [[ "${{ env.GO_COVERAGE_PROVIDER }}" == "codecov" ]]; then
+              echo "| **Coverage System** | \`Codecov\` | External coverage service |" >> $GITHUB_STEP_SUMMARY
+              echo "| **Token Required** | $([ "${{ env.CODECOV_TOKEN_REQUIRED }}" == "true" ] && echo "✅ Yes" || echo "❌ No") | CODECOV_TOKEN secret requirement |" >> $GITHUB_STEP_SUMMARY
+              echo "| **Coverage Threshold** | \`${{ env.GO_COVERAGE_THRESHOLD }}%\` | Minimum acceptable coverage |" >> $GITHUB_STEP_SUMMARY
+
+              # Always show codecov config location when using codecov provider
+              echo "| **Codecov Config Location** | $([ -f "codecov.yml" ] && echo "\`codecov.yml\`" || ([ -f ".codecov.yml" ] && echo "\`.codecov.yml\`" || echo "❌ Not Found")) | Codecov configuration file in repository root |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| **Coverage System** | \`Internal go-coverage\` | Self-hosted coverage tracking with GitHub Pages |" >> $GITHUB_STEP_SUMMARY
+              echo "| **Coverage Threshold** | \`${{ env.GO_COVERAGE_THRESHOLD }}%\` | Minimum acceptable coverage |" >> $GITHUB_STEP_SUMMARY
+              echo "| **Badge Style** | \`${{ env.GO_COVERAGE_BADGE_STYLE }}\` | Coverage badge appearance |" >> $GITHUB_STEP_SUMMARY
+              echo "| **Badge Logo** | \`${{ env.GO_COVERAGE_BADGE_LOGO }}\` | Badge logo/icon |" >> $GITHUB_STEP_SUMMARY
+              echo "| **Report Theme** | \`${{ env.GO_COVERAGE_REPORT_THEME }}\` | HTML report styling |" >> $GITHUB_STEP_SUMMARY
+              echo "| **PR Comments** | $([ "${{ env.GO_COVERAGE_POST_COMMENTS }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Coverage comments on pull requests |" >> $GITHUB_STEP_SUMMARY
+              echo "| **History Retention** | \`${{ env.GO_COVERAGE_HISTORY_RETENTION }}\` days | Coverage data retention period |" >> $GITHUB_STEP_SUMMARY
+              echo "| **Exclude Paths** | \`${{ env.GO_COVERAGE_EXCLUDE_PATHS }}\` | Paths excluded from coverage |" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<br><br>" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Redis Service Configuration (only show if redis is enabled)
+          if [[ "${{ steps.redis-config.outputs.redis-enabled }}" == "true" ]]; then
+            echo "## 🗄️ Redis Service Configuration" >> $GITHUB_STEP_SUMMARY
+            echo "| Setting | Value | Description |" >> $GITHUB_STEP_SUMMARY
+            echo "|---------|-------|-------------|" >> $GITHUB_STEP_SUMMARY
+            echo "| **Service Status** | \`✅ Enabled\` | Redis service container will be available for tests and benchmarks |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Service Mode** | \`${{ steps.redis-config.outputs.redis-service-mode }}\` | How Redis enablement was determined (auto/always/never) |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Redis Version** | \`${{ steps.redis-config.outputs.redis-version }}\` | Docker image version used for service container |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Connection Host** | \`${{ steps.redis-config.outputs.redis-host }}\` | Redis server hostname for test connections |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Connection Port** | \`${{ steps.redis-config.outputs.redis-port }}\` | Redis server port for test connections |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Health Check Retries** | \`${{ steps.redis-config.outputs.redis-health-retries }}\` | Number of health check retries before considering service unhealthy |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Health Check Interval** | \`${{ steps.redis-config.outputs.redis-health-interval }}\` seconds | Time between health check attempts |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Health Check Timeout** | \`${{ steps.redis-config.outputs.redis-health-timeout }}\` seconds | Maximum time allowed for each health check |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Force Pull Image** | $([ "${{ steps.redis-config.outputs.redis-cache-force-pull }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Always pull latest Docker image vs using cache |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Trust Service Health** | $([ "${{ steps.redis-config.outputs.redis-trust-service-health }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Trust Docker service health checks vs custom script |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Service Container** | Docker with native health checks | Uses GitHub Actions native service containers for reliability |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<br><br>" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Pre-Commit System Configuration (only show if pre-commit is enabled)
+          if [[ "${{ env.ENABLE_GO_PRE_COMMIT }}" == "true" ]]; then
+            echo "## 🪝 Pre-Commit System Configuration" >> $GITHUB_STEP_SUMMARY
+            echo "| Setting | Value | Description |" >> $GITHUB_STEP_SUMMARY
+            echo "|---------|-------|-------------|" >> $GITHUB_STEP_SUMMARY
+            echo "| **Pre-Commit System** | \`go-pre-commit\` | Pure Go implementation, 17x faster execution |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Timeout** | \`${{ env.GO_PRE_COMMIT_TIMEOUT_SECONDS }}\` seconds | Maximum time allowed for all checks |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Parallel Workers** | \`${{ env.GO_PRE_COMMIT_PARALLEL_WORKERS }}\` | Concurrent check execution (0 = auto CPU count) |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Fail Fast Mode** | $([ "${{ env.GO_PRE_COMMIT_FAIL_FAST }}" == "true" ] && echo "⚡ Enabled" || echo "📝 Disabled") | Stop on first failure vs run all checks |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Log Level** | \`${{ env.GO_PRE_COMMIT_LOG_LEVEL }}\` | Debug/info logging output level |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Max File Size** | \`${{ env.GO_PRE_COMMIT_MAX_FILE_SIZE_MB }}\` MB | Maximum file size limit for processing |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Max Open Files** | \`${{ env.GO_PRE_COMMIT_MAX_FILES_OPEN }}\` | Maximum concurrent file handles |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Exclude Patterns** | \`${{ env.GO_PRE_COMMIT_EXCLUDE_PATTERNS }}\` | Patterns excluded from pre-commit checks |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Color Output** | $([ "${{ env.GO_PRE_COMMIT_COLOR_OUTPUT }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Terminal color support |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Tool Versions** | golangci-lint: \`${{ env.GO_PRE_COMMIT_GOLANGCI_LINT_VERSION }}\`, gofumpt: \`${{ env.GO_PRE_COMMIT_FUMPT_VERSION }}\` | Pinned tool versions for consistency |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<br><br>" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Build Requirements
+          echo "## 🔨 Build Requirements" >> $GITHUB_STEP_SUMMARY
+          echo "| Requirement | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **.mage.yaml** | $([ "${{ steps.config.outputs.magefile-exists }}" == "true" ] && echo "✅ Found" || echo "⚠️ Not Found") | Required: $([ "${{ env.MAGEFILE_REQUIRED }}" == "true" ] && echo "Yes" || echo "No") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Verbose Output** | $([ "${{ env.ENABLE_VERBOSE_TEST_OUTPUT }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Test output verbosity |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<br><br>" >> $GITHUB_STEP_SUMMARY
+
+          # Security Tools Configuration
+          echo "## 🔒 Security Tools Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "| Tool | Version | Configuration |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|---------|---------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Gitleaks** | \`${{ env.GITLEAKS_VERSION }}\` | Notify: \`${{ env.GITLEAKS_NOTIFY_USER_LIST }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Govulncheck** | \`${{ env.GOVULNCHECK_VERSION }}\` | Go vulnerability scanner |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Nancy** | \`${{ env.NANCY_VERSION }}\` | Excludes: \`${{ env.NANCY_EXCLUDES }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<br><br>" >> $GITHUB_STEP_SUMMARY
+
+          # GitHub Token Configuration
+          echo "## 🔑 Authentication" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Preferred Token** | \`${{ env.PREFERRED_GITHUB_TOKEN }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Token Type** | $([ "${{ env.PREFERRED_GITHUB_TOKEN }}" == "GH_PAT_TOKEN" ] && echo "Personal Access Token (5000 req/hour)" || echo "Default GITHUB_TOKEN (1000 req/hour)") |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<br><br>" >> $GITHUB_STEP_SUMMARY
+
+          # Custom Project Variables
+          echo "## 🎨 Custom Project Configuration" >> $GITHUB_STEP_SUMMARY
+          PROJECT_VARS=$(echo "$ENV_JSON" | jq -r 'to_entries | map(select(.key | startswith("CUSTOM_"))) | length')
+          if [ "$PROJECT_VARS" -gt 0 ]; then
+            echo "Found **$PROJECT_VARS** CUSTOM-specific environment variables:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Variable | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "$ENV_JSON" | jq -r 'to_entries | map(select(.key | startswith("CUSTOM_"))) | sort_by(.key) | .[] | "| **\(.key)** | `\(.value)` |"' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "_No project-specific (CUSTOM_*) variables found._" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<br><br>" >> $GITHUB_STEP_SUMMARY
+
+          # All Environment Variables (moved to end as reference)
+          echo "## 🔍 All Environment Variables" >> $GITHUB_STEP_SUMMARY
+          echo "<details>" >> $GITHUB_STEP_SUMMARY
+          echo "<summary>Click to expand all $ENV_COUNT environment variables</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Variable | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+
+          # Sort and display all env vars
+          echo "$ENV_JSON" | jq -r 'to_entries | sort_by(.key) | .[] | "| **\(.key)** | `\(.value)` |"' >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Footer
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "🎯 **Configuration completed successfully** at $(date -u +"%H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_GoFortress CI/CD Pipeline - Built Strong. Tested Harder._" >> $GITHUB_STEP_SUMMARY

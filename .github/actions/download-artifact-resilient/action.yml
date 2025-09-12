@@ -1,0 +1,194 @@
+# ------------------------------------------------------------------------------------
+#  Download Artifact with Resilience (Composite Action) (GoFortress)
+#
+#  Purpose: Provide resilient artifact downloads with automatic retry logic,
+#  exponential backoff, and comprehensive error handling to prevent CI failures
+#  due to transient network issues with GitHub's artifact service.
+#
+#  This action handles:
+#    - Automatic retry logic with configurable attempts and delays
+#    - Exponential backoff to reduce service load during issues
+#    - Comprehensive error logging and debugging information
+#    - Graceful fallback for missing or unavailable artifacts
+#    - Timeout handling for large artifact downloads
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: "Download Artifact with Resilience"
+description: "Downloads GitHub Actions artifacts with retry logic and error handling"
+
+inputs:
+  pattern:
+    description: "Artifact name pattern to download"
+    required: true
+  path:
+    description: "Destination path for downloaded artifacts"
+    required: false
+    default: "artifacts"
+  merge-multiple:
+    description: "Merge multiple artifacts into single directory"
+    required: false
+    default: "true"
+  max-retries:
+    description: "Maximum number of retry attempts (defaults to env.ARTIFACT_DOWNLOAD_RETRIES or 3)"
+    required: false
+    default: "3"
+  retry-delay:
+    description: "Initial retry delay in seconds - uses exponential backoff (defaults to env.ARTIFACT_DOWNLOAD_RETRY_DELAY or 10)"
+    required: false
+    default: "10"
+  timeout:
+    description: "Download timeout in seconds (defaults to env.ARTIFACT_DOWNLOAD_TIMEOUT or 300)"
+    required: false
+    default: "300"
+  continue-on-error:
+    description: "Continue workflow execution even if download fails (defaults to env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR or true)"
+    required: false
+    default: "true"
+
+outputs:
+  success:
+    description: "Whether the artifact download was successful"
+    value: ${{ steps.download.outputs.success }}
+  artifacts-found:
+    description: "Number of artifacts found and downloaded"
+    value: ${{ steps.download.outputs.artifacts-found }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: 📥 Download artifacts with resilience
+      id: download
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        ARTIFACT_PATTERN: ${{ inputs.pattern }}
+        ARTIFACT_PATH: ${{ inputs.path }}
+        MERGE_MULTIPLE: ${{ inputs.merge-multiple }}
+        MAX_RETRIES: ${{ inputs.max-retries }}
+        RETRY_DELAY: ${{ inputs.retry-delay }}
+        DOWNLOAD_TIMEOUT: ${{ inputs.timeout }}
+        CONTINUE_ON_ERROR: ${{ inputs.continue-on-error }}
+      run: |
+        echo "🔄 Starting resilient artifact download..."
+        echo "📋 Configuration:"
+        echo "  • Pattern: $ARTIFACT_PATTERN"
+        echo "  • Path: $ARTIFACT_PATH"
+        echo "  • Merge Multiple: $MERGE_MULTIPLE"
+        echo "  • Max Retries: $MAX_RETRIES"
+        echo "  • Initial Retry Delay: ${RETRY_DELAY}s"
+        echo "  • Download Timeout: ${DOWNLOAD_TIMEOUT}s"
+        echo ""
+
+        # Initialize variables
+        RETRY_COUNT=0
+        CURRENT_DELAY=$RETRY_DELAY
+        DOWNLOAD_SUCCESS=false
+        ARTIFACTS_FOUND=0
+
+        # Create destination directory
+        mkdir -p "$ARTIFACT_PATH"
+
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+          ATTEMPT_NUM=$((RETRY_COUNT + 1))
+          echo "📥 Attempt $ATTEMPT_NUM/$MAX_RETRIES - Downloading artifacts matching '$ARTIFACT_PATTERN'..."
+
+          # Convert glob pattern to regex for jq test() function
+          REGEX_PATTERN=$(echo "$ARTIFACT_PATTERN" | sed 's/\*/\.\*/g')
+
+          # Check if artifacts exist first (avoid unnecessary retries)
+          echo "🔍 Checking artifact availability..."
+          if ! gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts | jq -e ".artifacts[] | select(.name | test(\"$REGEX_PATTERN\"))" > /dev/null 2>&1; then
+            echo "⚠️ No artifacts found matching pattern '$ARTIFACT_PATTERN'"
+            echo "📋 Available artifacts:"
+            gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts | jq -r '.artifacts[].name' | sed 's/^/  • /' || echo "  No artifacts available"
+
+            if [ "$CONTINUE_ON_ERROR" = "true" ]; then
+              echo "::warning title=No Artifacts Found::No artifacts found matching pattern '$ARTIFACT_PATTERN'"
+              DOWNLOAD_SUCCESS=false
+              break
+            else
+              echo "::error title=No Artifacts Found::No artifacts found matching pattern '$ARTIFACT_PATTERN'"
+              exit 1
+            fi
+          fi
+
+          # Count available artifacts
+          AVAILABLE_ARTIFACTS=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts | jq "[.artifacts[] | select(.name | test(\"$REGEX_PATTERN\"))] | length")
+          echo "📊 Found $AVAILABLE_ARTIFACTS artifact(s) matching pattern"
+
+          # Attempt download with timeout
+          echo "⏳ Downloading with ${DOWNLOAD_TIMEOUT}s timeout..."
+
+          # Always use --pattern flag since "coverage-data" is treated as a pattern
+          # Using --name with patterns causes gh CLI to download all artifacts when no exact match found
+          DOWNLOAD_CMD="gh run download ${{ github.run_id }} --pattern \"$ARTIFACT_PATTERN\" --dir \"$ARTIFACT_PATH\""
+
+          if timeout "$DOWNLOAD_TIMEOUT" bash -c "$DOWNLOAD_CMD"; then
+            echo "✅ Successfully downloaded artifacts on attempt $ATTEMPT_NUM"
+            DOWNLOAD_SUCCESS=true
+            ARTIFACTS_FOUND=$AVAILABLE_ARTIFACTS
+
+            # Verify downloaded files
+            if [ -d "$ARTIFACT_PATH" ] && [ "$(find "$ARTIFACT_PATH" -type f 2>/dev/null | wc -l)" -gt 0 ]; then
+              echo "📁 Downloaded files:"
+              # Use a more robust approach to avoid broken pipe issues
+              TEMP_FILE_LIST=$(mktemp)
+              find "$ARTIFACT_PATH" -type f 2>/dev/null > "$TEMP_FILE_LIST"
+              TOTAL_FILES=$(wc -l < "$TEMP_FILE_LIST")
+              head -10 "$TEMP_FILE_LIST" | sed 's/^/  • /'
+              if [ "$TOTAL_FILES" -gt 10 ]; then
+                echo "  • ... and $((TOTAL_FILES - 10)) more files"
+              fi
+              rm -f "$TEMP_FILE_LIST"
+            else
+              echo "⚠️ Download completed but no files found in destination"
+            fi
+            break
+          else
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+
+            if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+              echo "❌ Download failed (timeout or network error)"
+              echo "⏳ Retrying in ${CURRENT_DELAY}s (attempt $RETRY_COUNT/$MAX_RETRIES)..."
+              echo "   Using exponential backoff - next delay will be $((CURRENT_DELAY * 2))s"
+              sleep "$CURRENT_DELAY"
+
+              # Exponential backoff - double the delay for next retry
+              CURRENT_DELAY=$((CURRENT_DELAY * 2))
+
+              # Cap maximum delay at 60 seconds
+              if [ $CURRENT_DELAY -gt 60 ]; then
+                CURRENT_DELAY=60
+              fi
+            else
+              echo "❌ Download failed after $MAX_RETRIES attempts"
+
+              if [ "$CONTINUE_ON_ERROR" = "true" ]; then
+                echo "::warning title=Artifact Download Failed::Failed to download artifacts matching '$ARTIFACT_PATTERN' after $MAX_RETRIES attempts"
+                DOWNLOAD_SUCCESS=false
+              else
+                echo "::error title=Artifact Download Failed::Failed to download artifacts matching '$ARTIFACT_PATTERN' after $MAX_RETRIES attempts"
+                exit 1
+              fi
+            fi
+          fi
+        done
+
+        # Set outputs
+        if [ "$DOWNLOAD_SUCCESS" = "true" ]; then
+          echo "success=true" >> $GITHUB_OUTPUT
+        else
+          echo "success=false" >> $GITHUB_OUTPUT
+        fi
+        echo "artifacts-found=$ARTIFACTS_FOUND" >> $GITHUB_OUTPUT
+
+        # Final status
+        echo ""
+        echo "🏁 Download Summary:"
+        echo "  • Success: $DOWNLOAD_SUCCESS"
+        echo "  • Artifacts Found: $ARTIFACTS_FOUND"
+        echo "  • Total Attempts: $ATTEMPT_NUM"
+        echo "  • Final Status: $([ "$DOWNLOAD_SUCCESS" = "true" ] && echo "✅ Completed" || echo "❌ Failed")"

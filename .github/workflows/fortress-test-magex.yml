@@ -1,0 +1,207 @@
+# ------------------------------------------------------------------------------------
+#  Test MAGE-X (Reusable Workflow) (GoFortress)
+#
+#  Purpose: Verify that MAGE-X is installed and working correctly with standard
+#  magex commands. This is a prerequisite for other workflows that use magex commands.
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: GoFortress (Test MAGE-X)
+
+on:
+  workflow_call:
+    inputs:
+      env-json:
+        description: "JSON string of environment variables"
+        required: true
+        type: string
+      primary-runner:
+        description: "Primary runner OS"
+        required: true
+        type: string
+
+# Security: Restrictive default permissions with job-level overrides for least privilege access
+permissions:
+  contents: read
+
+jobs:
+  # ----------------------------------------------------------------------------------
+  # Test MAGE-X (Installation and Command Verification)
+  # ----------------------------------------------------------------------------------
+  test-magex:
+    name: 🪄 Verify & Test MAGE-X
+    runs-on: ${{ inputs.primary-runner }}
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Parse environment variables
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Parse environment variables
+        env:
+          ENV_JSON: ${{ inputs.env-json }}
+        run: |
+          echo "📋 Setting environment variables..."
+          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
+            echo "$key=$value" >> $GITHUB_ENV
+          done
+
+      # ————————————————————————————————————————————————————————————————
+      # Checkout code (sparse checkout)
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Checkout (sparse)
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0 # Required for sparse checkout
+          sparse-checkout: |
+            .github/.env.base
+            .github/actions/setup-magex
+            .mage.yaml
+            go.mod
+            go.sum
+
+      # ————————————————————————————————————————————————————————————————
+      # Setup MAGE-X using the reusable composite action
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Setup MAGE-X
+        id: setup-magex
+        uses: ./.github/actions/setup-magex
+        with:
+          magex-version: ${{ env.MAGE_X_VERSION }}
+          runner-os: ${{ inputs.primary-runner }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Validate MAGE-X version matches requested version
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔍 Validate MAGE-X Version
+        id: validate-version
+        run: |
+          echo "🔍 Validating MAGE-X version..."
+
+          # Get the actual version from the binary
+          ACTUAL_VERSION=$(magex --version 2>/dev/null | grep -E '^\s+Version:' | awk '{print $2}' || echo "unknown")
+          REQUESTED_VERSION="${{ env.MAGE_X_VERSION }}"
+
+          echo "📋 Requested version: $REQUESTED_VERSION"
+          echo "📋 Actual version: $ACTUAL_VERSION"
+
+          # Strip 'v' prefix from both versions for comparison
+          REQUESTED_CLEAN=$(echo "$REQUESTED_VERSION" | sed 's/^v//')
+          ACTUAL_CLEAN=$(echo "$ACTUAL_VERSION" | sed 's/^v//')
+
+          if [[ "$ACTUAL_VERSION" == "unknown" ]]; then
+            echo "❌ Failed: Could not determine magex version from binary"
+            echo "❌ This indicates a problem with version detection or binary corruption"
+            echo "validation-result=failed" >> $GITHUB_OUTPUT
+            exit 1
+          elif [[ "$ACTUAL_CLEAN" == "$REQUESTED_CLEAN" ]]; then
+            echo "✅ Version validation passed: $ACTUAL_VERSION matches $REQUESTED_VERSION"
+            echo "validation-result=success" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Version mismatch detected!"
+            echo "❌ Requested: $REQUESTED_VERSION (clean: $REQUESTED_CLEAN)"
+            echo "❌ Actual: $ACTUAL_VERSION (clean: $ACTUAL_CLEAN)"
+            echo "❌ This indicates a cache corruption or installation failure"
+            echo "validation-result=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Verify MAGE-X installation and required commands
+      # ————————————————————————————————————————————————————————————————
+      - name: ✅ Verify magex help and required commands
+        id: verify-magex
+        run: |
+          echo "📋 Testing for required magex commands..."
+
+          # Capture help output
+          HELP_OUTPUT=$(magex help)
+
+          echo "$HELP_OUTPUT"
+
+          # List of required magex commands
+          REQUIRED_COMMANDS=(
+            "bench"
+            "clean"
+            "deps:download"
+            "deps:update"
+            "format:fix"
+            "lint"
+            "metrics:coverage"
+            "metrics:loc"
+            "release"
+            "release:validate"
+            "test"
+            "test:cover"
+            "test:coverrace"
+            "test:fuzz"
+            "test:race"
+            "tidy"
+            "update:install"
+            "version:bump"
+            "vet"
+          )
+
+          MATCHED_COUNT=0
+          MISSING_COUNT=0
+          MISSING_COMMANDS=()
+
+          echo ""
+          echo "🔍 Verifying required magex commands..."
+
+          for cmd in "${REQUIRED_COMMANDS[@]}"; do
+            if echo "$HELP_OUTPUT" | grep -qE "^[[:space:]]*$cmd[[:space:]]"; then
+              echo "✅ Found: $cmd"
+              MATCHED_COUNT=$((MATCHED_COUNT + 1))
+            else
+              echo "❌ Missing required command: $cmd"
+              MISSING_COMMANDS+=("$cmd")
+              MISSING_COUNT=$((MISSING_COUNT + 1))
+            fi
+          done
+
+          echo ""
+          echo "✅ Matched: $MATCHED_COUNT"
+          echo "❌ Missing: $MISSING_COUNT"
+
+          echo "matched=$MATCHED_COUNT" >> "$GITHUB_OUTPUT"
+          echo "missing=$MISSING_COUNT" >> "$GITHUB_OUTPUT"
+          echo "missing_commands=${MISSING_COMMANDS[*]}" >> "$GITHUB_OUTPUT"
+
+          # Fail if anything is missing
+          if [ $MISSING_COUNT -gt 0 ]; then
+            echo ""
+            echo "🚨 Missing MAGE-X commands:"
+            printf ' - %s\n' "${MISSING_COMMANDS[@]}"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ MAGE-X verification completed successfully."
+
+      # ————————————————————————————————————————————————————————————————
+      # Summary of MAGE-X verification
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Job Summary
+        run: |
+          # Get magex version
+          MAGEX_VERSION=$(magex --version 2>/dev/null | grep -E '^\s+Version:' | awk '{print $2}' || echo "unknown")
+
+          echo "## 🪄 MAGE-X Verification Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Verification Details | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Test** | magex help command |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | $MAGEX_VERSION |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version Validation** | ${{ steps.validate-version.outputs.validation-result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Installation** | ${{ steps.setup-magex.outputs.installation-method == 'cached' && '💾 From cache' || '📥 Fresh install' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Purpose** | Verify MAGE-X installation and standard commands |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Matched Commands** | ${{ steps.verify-magex.outputs.matched }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Missing Commands** | ${{ steps.verify-magex.outputs.missing }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ steps.verify-magex.outputs.missing }}" != "0" ]]; then
+            echo "🚨 **Missing Commands:** ${{ steps.verify-magex.outputs.missing_commands }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "🎯 **MAGE-X is properly configured and functional.**" >> $GITHUB_STEP_SUMMARY
+          fi

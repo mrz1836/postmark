@@ -1,0 +1,428 @@
+# ------------------------------------------------------------------------------------
+#  🏰 GoFortress - Enterprise-grade CI/CD fortress for Go applications
+#
+#  Version: 1.0.3 | Released: 2025-09-11
+#
+#  Built Strong. Tested Harder.
+#
+#  GoFortress transforms your Go development pipeline into an impenetrable fortress
+#  of quality. Like a medieval fortress with multiple layers of defense, GoFortress
+#  employs multi-stage verification to ensure your code is battle-tested before deployment.
+#
+#  Your Code's Defense System:
+#  🏰 Fortress of Go: Multi-stage CI/CD pipeline for Go applications
+#  🛡️ Security Ramparts: Nancy, Govulncheck, Gitleaks guard against threats
+#  🏗️ Quality Battlements: Static analysis and comprehensive linting
+#  ⚔️ Testing Garrison: Multi-OS, multi-version matrices with race detection
+#  🎯 Performance Watchtowers: Real-time metrics and cache optimization
+#  🚀 Release Citadel: Automated deployments with GoReleaser and GoDocs
+#
+#  Maintainer: @mrz1836
+#  Repository: https://github.com/mrz1836/go-fortress
+#
+#  Copyright 2025 @mrz1836
+#  SPDX-License-Identifier: MIT
+#
+#  This file is licensed under the MIT License.
+#  Attribution is requested if reused: Created by @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: GoFortress
+
+# ————————————————————————————————————————————————————————————————
+# Trigger Configuration
+# ————————————————————————————————————————————————————————————————
+on:
+  push:
+    branches:
+      - master # Main branch for production
+    tags:
+      - "v*" # Tags starting with 'v' (e.g., v1.0.0) trigger the workflow
+  pull_request:
+    branches:
+      - "**" # All branches for PRs
+
+# Security: Restrictive default permissions with job-level overrides for least privilege access
+permissions:
+  contents: read
+
+# ————————————————————————————————————————————————————————————————
+# Concurrency Control
+# ————————————————————————————————————————————————————————————————
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  # ----------------------------------------------------------------------------------
+  # Load Environment Variables and Setup Configuration
+  # ----------------------------------------------------------------------------------
+  load-env:
+    name: 🌍 Load Environment Variables
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # Read repository content for environment config
+    outputs:
+      env-json: ${{ steps.load-env.outputs.env-json }}
+      primary-runner: ${{ steps.load-env.outputs.primary-runner }}
+      base-file-found: ${{ steps.load-env.outputs.base-file-found }}
+      custom-file-found: ${{ steps.load-env.outputs.custom-file-found }}
+      base-var-count: ${{ steps.load-env.outputs.base-var-count }}
+      custom-var-count: ${{ steps.load-env.outputs.custom-var-count }}
+      config-mode: ${{ steps.load-env.outputs.config-mode }}
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Check out code to access env file
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Checkout code (sparse)
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: |
+            .github/.env.base
+            .github/.env.custom
+            .github/actions/load-env
+
+      # ————————————————————————————————————————————————————————————————
+      # Load and parse environment file
+      # ————————————————————————————————————————————————————————————————
+      - name: 🌍 Load environment variables
+        uses: ./.github/actions/load-env
+        id: load-env
+
+  # ----------------------------------------------------------------------------------
+  # Setup Configuration Workflow
+  # ----------------------------------------------------------------------------------
+  setup:
+    name: 🔧 Setup Configuration
+    needs: [load-env]
+    permissions:
+      contents: read # Read repository content for setup configuration
+    uses: ./.github/workflows/fortress-setup-config.yml
+    with:
+      env-json: ${{ needs.load-env.outputs.env-json }}
+      primary-runner: ${{ needs.load-env.outputs.primary-runner }}
+      base-file-found: ${{ needs.load-env.outputs.base-file-found }}
+      custom-file-found: ${{ needs.load-env.outputs.custom-file-found }}
+      base-var-count: ${{ needs.load-env.outputs.base-var-count }}
+      custom-var-count: ${{ needs.load-env.outputs.custom-var-count }}
+      config-mode: ${{ needs.load-env.outputs.config-mode }}
+    secrets:
+      github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+  # ----------------------------------------------------------------------------------
+  # Test MAGE-X
+  # ----------------------------------------------------------------------------------
+  test-magex:
+    name: 🪄 Verify & Test MAGE-X
+    needs: [load-env, setup]
+    permissions:
+      contents: read # Read repository content for magex testing
+    uses: ./.github/workflows/fortress-test-magex.yml
+    with:
+      env-json: ${{ needs.load-env.outputs.env-json }}
+      primary-runner: ${{ needs.setup.outputs.primary-runner }}
+  # ----------------------------------------------------------------------------------
+  # Warm Go Caches
+  # ----------------------------------------------------------------------------------
+  warm-cache:
+    name: 💾 Warm Cache (${{ matrix.name }})
+    needs: [load-env, setup, test-magex]
+    permissions:
+      contents: read # Read repository content for cache warming
+    strategy:
+      fail-fast: true
+      matrix: ${{ fromJSON(needs.setup.outputs.warm-cache-matrix) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Checkout code to access local action
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: |
+            .github/actions/warm-cache
+            .github/actions/warm-redis-cache
+            .github/actions/cache-redis-image
+            .github/.env.base
+            go.mod
+            go.sum
+            .mage.yaml
+
+      # ————————————————————————————————————————————————————————————————
+      # Extract verbose flag from env-json
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔁 Extract ENABLE_VERBOSE
+        id: extract
+        run: |
+          echo "enable_verbose=$(echo '${{ needs.load-env.outputs.env-json }}' | jq -r '.ENABLE_VERBOSE_TEST_OUTPUT')" >> "$GITHUB_OUTPUT"
+
+      # ————————————————————————————————————————————————————————————————
+      # Warm the Go and Redis caches using local action
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔥 Warm Go and Redis Caches
+        uses: ./.github/actions/warm-cache # Might not resolve as it's a composite action
+        with:
+          go-version: ${{ matrix.go-version }}
+          matrix-os: ${{ matrix.os }}
+          matrix-name: ${{ matrix.name }}
+          enable-verbose: ${{ steps.extract.outputs.enable_verbose }}
+          go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
+          go-secondary-version: ${{ needs.setup.outputs.go-secondary-version }}
+          env-json: ${{ needs.load-env.outputs.env-json }}
+          redis-enabled: ${{ needs.setup.outputs.redis-enabled }}
+          redis-versions: ${{ needs.setup.outputs.redis-version }}
+          redis-cache-force-pull: ${{ needs.setup.outputs.redis-cache-force-pull }}
+  # ----------------------------------------------------------------------------------
+  # Security Scans
+  # ----------------------------------------------------------------------------------
+  security:
+    name: 🔒 Security Scans
+    needs: [load-env, setup, warm-cache, test-magex]
+    if: needs.setup.outputs.security-scans-enabled == 'true'
+    permissions:
+      contents: read # Read repository content for security scanning
+    uses: ./.github/workflows/fortress-security-scans.yml
+    with:
+      env-json: ${{ needs.load-env.outputs.env-json }}
+      enable-nancy: ${{ needs.setup.outputs.nancy-enabled == 'true' }}
+      enable-govulncheck: ${{ needs.setup.outputs.govulncheck-enabled == 'true' }}
+      enable-gitleaks: ${{ needs.setup.outputs.gitleaks-enabled == 'true' }}
+      go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
+      primary-runner: ${{ needs.setup.outputs.primary-runner }}
+    secrets:
+      github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+      gitleaks-license: ${{ secrets.GITLEAKS_LICENSE }}
+  # ----------------------------------------------------------------------------------
+  # Code Quality Checks
+  # ----------------------------------------------------------------------------------
+  code-quality:
+    name: 📊 Code Quality
+    needs: [load-env, setup, warm-cache, test-magex]
+    permissions:
+      contents: read # Read repository content for code quality checks
+    uses: ./.github/workflows/fortress-code-quality.yml
+    with:
+      env-json: ${{ needs.load-env.outputs.env-json }}
+      go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
+      go-lint-enabled: ${{ needs.setup.outputs.go-lint-enabled }}
+      yaml-lint-enabled: ${{ needs.setup.outputs.yaml-lint-enabled }}
+      primary-runner: ${{ needs.setup.outputs.primary-runner }}
+      static-analysis-enabled: ${{ needs.setup.outputs.static-analysis-enabled }}
+    secrets:
+      github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+  # ----------------------------------------------------------------------------------
+  # Pre-commit Checks
+  # ----------------------------------------------------------------------------------
+  pre-commit:
+    name: 🪝 Pre-commit Checks
+    needs: [load-env, setup, warm-cache, test-magex]
+    if: needs.setup.outputs.pre-commit-enabled == 'true'
+    permissions:
+      contents: read # Read repository content for pre-commit checks
+    uses: ./.github/workflows/fortress-pre-commit.yml
+    with:
+      env-json: ${{ needs.load-env.outputs.env-json }}
+      primary-runner: ${{ needs.setup.outputs.primary-runner }}
+      go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
+      pre-commit-enabled: ${{ needs.setup.outputs.pre-commit-enabled }}
+  # ----------------------------------------------------------------------------------
+  # Test Suite
+  # ----------------------------------------------------------------------------------
+  test-suite:
+    name: 🧪 Test Suite
+    needs: [load-env, setup, warm-cache, test-magex]
+    permissions:
+      contents: write # Write repository content and push to gh-pages branch for test execution
+      pull-requests: write # Required: Coverage workflow needs to create PR comments
+      pages: write # Required: Coverage workflow needs to deploy to GitHub Pages
+      id-token: write # Required: Coverage workflow needs GitHub Pages authentication
+      statuses: write # Required: Coverage workflow needs to create commit status checks
+    uses: ./.github/workflows/fortress-test-suite.yml
+    with:
+      code-coverage-enabled: ${{ needs.setup.outputs.code-coverage-enabled }}
+      coverage-provider: ${{ needs.setup.outputs.coverage-provider }}
+      env-json: ${{ needs.load-env.outputs.env-json }}
+      fuzz-testing-enabled: ${{ needs.setup.outputs.fuzz-testing-enabled }}
+      go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
+      go-secondary-version: ${{ needs.setup.outputs.go-secondary-version }}
+      primary-runner: ${{ needs.setup.outputs.primary-runner }}
+      race-detection-enabled: ${{ needs.setup.outputs.race-detection-enabled }}
+      test-matrix: ${{ needs.setup.outputs.test-matrix }}
+      redis-enabled: ${{ needs.setup.outputs.redis-enabled }}
+      redis-version: ${{ needs.setup.outputs.redis-version }}
+      redis-host: ${{ needs.setup.outputs.redis-host }}
+      redis-port: ${{ needs.setup.outputs.redis-port }}
+      redis-health-retries: ${{ needs.setup.outputs.redis-health-retries }}
+      redis-health-interval: ${{ needs.setup.outputs.redis-health-interval }}
+      redis-health-timeout: ${{ needs.setup.outputs.redis-health-timeout }}
+      redis-trust-service-health: ${{ needs.setup.outputs.redis-trust-service-health }}
+    secrets:
+      github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  # ----------------------------------------------------------------------------------
+  # Benchmark Suite
+  # ----------------------------------------------------------------------------------
+  benchmarks:
+    name: 🏃 Benchmarks
+    needs: [load-env, setup, warm-cache, test-magex]
+    if: needs.setup.outputs.benchmarks-enabled == 'true'
+    permissions:
+      contents: read # Read repository content for benchmarking
+    uses: ./.github/workflows/fortress-benchmarks.yml
+    with:
+      env-json: ${{ needs.load-env.outputs.env-json }}
+      benchmark-matrix: ${{ needs.setup.outputs.benchmark-matrix }}
+      primary-runner: ${{ needs.setup.outputs.primary-runner }}
+      go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
+      go-secondary-version: ${{ needs.setup.outputs.go-secondary-version }}
+      benchmark-timeout: 30
+      redis-enabled: ${{ needs.setup.outputs.redis-enabled }}
+      redis-version: ${{ needs.setup.outputs.redis-version }}
+      redis-host: ${{ needs.setup.outputs.redis-host }}
+      redis-port: ${{ needs.setup.outputs.redis-port }}
+      redis-health-retries: ${{ needs.setup.outputs.redis-health-retries }}
+      redis-health-interval: ${{ needs.setup.outputs.redis-health-interval }}
+      redis-health-timeout: ${{ needs.setup.outputs.redis-health-timeout }}
+      redis-trust-service-health: ${{ needs.setup.outputs.redis-trust-service-health }}
+    secrets:
+      github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+  # ----------------------------------------------------------------------------------
+  # Final Status Check
+  # ----------------------------------------------------------------------------------
+  status-check:
+    name: 🎯 All Tests Passed
+    if: ${{ always() }}
+    needs: [setup, test-magex, security, code-quality, pre-commit, test-suite, benchmarks]
+    permissions:
+      contents: read # Read repository content for status checking
+    runs-on: ${{ needs.setup.outputs.primary-runner }}
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Build a summary table for the UI (always runs)
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Build results summary
+        run: |
+          {
+            echo "## 🚦 Workflow Results"
+            echo ""
+            echo "| Component | Result | Status |"
+            echo "|-----------|--------|--------|"
+            echo "| 🎯 Setup | ${{ needs.setup.result }} | Required |"
+            echo "| 🪄 MAGE-X | ${{ needs.test-magex.result }} | Required |"
+            echo "| 🔒 Security | ${{ needs.security.result }} | Required |"
+            echo "| 📊 Code Quality | ${{ needs.code-quality.result }} | Required |"
+            echo "| 🪝 Pre-commit | ${{ needs.pre-commit.result }} | ${{ needs.setup.outputs.pre-commit-enabled == 'true' && 'Required' || 'Skipped' }} |"
+            echo "| 🧪 Test Suite | ${{ needs.test-suite.result }} | Required |"
+            echo "| 🏃 Benchmarks | ${{ needs.benchmarks.result }} | Optional ⚠️ |"
+            echo ""
+            if [[ "${{ needs.benchmarks.result }}" == "failure" ]]; then
+              echo "⚠️ **Note**: Benchmarks failed but are currently non-blocking."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ————————————————————————————————————————————————————————————————
+      # Fail the workflow *only* when a dependency actually failed/canceled
+      # - 'skipped' is OK (e.g. feature flag off)
+      # - Benchmarks are currently optional (can fail without blocking)
+      # ————————————————————————————————————————————————————————————————
+      - name: ❌ Fail if any required job errored
+        if: ${{ always() }}
+        run: |
+          FAILED=false
+
+          # Check required jobs (these must pass)
+          if [[ "${{ needs.setup.result }}" == "failure" || "${{ needs.setup.result }}" == "cancelled" ]]; then
+            echo "❌ Setup failed or was cancelled" >&2
+            FAILED=true
+          fi
+
+          if [[ "${{ needs.test-magex.result }}" == "failure" || "${{ needs.test-magex.result }}" == "cancelled" ]]; then
+            echo "❌ Test MAGE-X failed or was cancelled" >&2
+            FAILED=true
+          fi
+
+          if [[ "${{ needs.security.result }}" == "failure" || "${{ needs.security.result }}" == "cancelled" ]]; then
+            echo "❌ Security scans failed or were cancelled" >&2
+            FAILED=true
+          fi
+
+          if [[ "${{ needs.code-quality.result }}" == "failure" || "${{ needs.code-quality.result }}" == "cancelled" ]]; then
+            echo "❌ Code quality checks failed or were cancelled" >&2
+            FAILED=true
+          fi
+
+          if [[ "${{ needs.pre-commit.result }}" == "failure" || "${{ needs.pre-commit.result }}" == "cancelled" ]]; then
+            echo "❌ Pre-commit checks failed or were cancelled" >&2
+            FAILED=true
+          fi
+
+          if [[ "${{ needs.test-suite.result }}" == "failure" || "${{ needs.test-suite.result }}" == "cancelled" ]]; then
+            echo "❌ Test suite failed or was cancelled" >&2
+            FAILED=true
+          fi
+
+          # Check benchmarks (currently optional - just warn if they fail)
+          if [[ "${{ needs.benchmarks.result }}" == "failure" ]]; then
+            echo "⚠️  Benchmarks failed (non-blocking)" >&2
+          fi
+
+          if [[ "$FAILED" == "true" ]]; then
+            echo "❌ One or more required jobs failed – see details above." >&2
+            exit 1
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Succeed if all required jobs passed or were skipped
+      # ————————————————————————————————————————————————————————————————
+      - name: ✅ Mark workflow success
+        if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "🎉 All required checks passed (skipped jobs are considered OK)."
+
+  # ----------------------------------------------------------------------------------
+  # Release Version
+  # ----------------------------------------------------------------------------------
+  release:
+    name: 🚀 Release Version
+    needs: [load-env, setup, test-suite, security, code-quality, pre-commit]
+    # Only run on successful tag pushes
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/fortress-release.yml
+    with:
+      env-json: ${{ needs.load-env.outputs.env-json }}
+      primary-runner: ${{ needs.setup.outputs.primary-runner }}
+      go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
+      golangci-lint-version: ${{ needs.code-quality.outputs.golangci-lint-version }}
+    secrets:
+      github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+      slack-webhook: ${{ secrets.SLACK_WEBHOOK || '' }}
+    permissions:
+      contents: write # Required: goreleaser needs to create GitHub releases
+  # ----------------------------------------------------------------------------------
+  # Workflow Completion Report
+  # ----------------------------------------------------------------------------------
+  completion-report:
+    name: 📊 Workflow Completion Report
+    if: always()
+    needs: [load-env, setup, test-magex, pre-commit, security, code-quality, test-suite, benchmarks, release, status-check]
+    permissions:
+      contents: read # Read repository content for completion report
+    uses: ./.github/workflows/fortress-completion-report.yml
+    with:
+      benchmarks-result: ${{ needs.benchmarks.result }}
+      code-quality-result: ${{ needs.code-quality.result }}
+      pre-commit-result: ${{ needs.pre-commit.result }}
+      env-json: ${{ needs.load-env.outputs.env-json }}
+      primary-runner: ${{ needs.setup.outputs.primary-runner }}
+      release-result: ${{ needs.release.result }}
+      security-result: ${{ needs.security.result }}
+      setup-result: ${{ needs.setup.result }}
+      start-epoch: ${{ needs.setup.outputs.start-epoch }}
+      start-time: ${{ needs.setup.outputs.start-time }}
+      status-check-result: ${{ needs.status-check.result }}
+      test-magex-result: ${{ needs.test-magex.result }}
+      test-matrix: ${{ needs.setup.outputs.test-matrix }}
+      test-suite-result: ${{ needs.test-suite.result }}
+      gofortress-version: ${{ needs.setup.outputs.gofortress-version }}
+      gofortress-released: ${{ needs.setup.outputs.gofortress-released }}

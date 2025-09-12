@@ -1,33 +1,102 @@
-# Basic dependabot.yml to update gomod and GitHub Actions
+# ────────────────────────────────────────────────────────────────
+# Dependabot Configuration
+# Repo: mrz1836/<repo>
+#
+# Purpose:
+#   • Keep Go modules, GitHub Actions, DevContainer images/features, and Docker
+#     base images up‑to‑date with zero‑day security patches and semantic‑version
+#     upgrades.
+#   • Reduce attack surface by limiting outdated dependencies.
+#   • Minimise PR noise via smart grouping and sane pull‑request limits.
+#
+# References:
+#   https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+#   https://docs.github.com/en/code-security/dependabot/configuration-options-for-dependency-updates
+#
+# Security Hardened Defaults:
+#   • Weekly cadence (Monday 09:00 America/New_York) – align with CVE dump cycle.
+#   • Direct dependencies only – prevents unsolicited transitive churn.
+#   • PRs labeled, assigned, and target the protected "master" branch.
+#   • PR titles prefixed with chore(scope): – conventional commits.
+#   • Force‑push and delete‑branch disabled via branch‑protection rules.
+#   • PR limit = 10 to avoid queue flooding.
+#   • All dependency PRs require passing CI + CODEOWNERS review.
+# ────────────────────────────────────────────────────────────────
 
 version: 2
-updates:
-  - package-ecosystem: "gomod"
-    target-branch: "master"
-    directory: "/"
-    schedule:
-      interval: "daily"
-      # Check for npm updates at 9am UTC (5am EST)
-      time: "10:00"
-    reviewers:
-      - "mrz1836"
-    assignees:
-      - "mrz1836"
-    # Labels must be created first
-    labels:
-      - "update"
 
-  # Maintain dependencies for GitHub Actions
-  - package-ecosystem: "github-actions"
-    target-branch: "master"
+updates:
+  # ──────────────────────────────────────────────────────────────
+  # 1. Go Modules (go.mod / go.sum)
+  # ──────────────────────────────────────────────────────────────
+  - package-ecosystem: "gomod"
     directory: "/"
+    target-branch: "master"
     schedule:
       interval: "weekly"
       day: "monday"
-    reviewers:
-      - "mrz1836"
-    assignees:
-      - "mrz1836"
-    labels:
-      - "chore"
+      time: "09:00"
+      timezone: "America/New_York"
+    allow:
+      - dependency-type: "direct"
+    groups:
+      security-deps:
+        patterns:
+          - "*crypto*"
+          - "*security*"
+          - "*auth*"
+          - "*jwt*"
+          - "*oauth*"
+        update-types: ["minor", "patch"]
     open-pull-requests-limit: 10
+    assignees: ["mrz1836"]
+    labels: ["chore", "dependencies", "gomod"]
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # ──────────────────────────────────────────────────────────────
+  # 2. GitHub Actions Workflows
+  # ──────────────────────────────────────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "master"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:15"
+      timezone: "America/New_York"
+    allow:
+      - dependency-type: "direct"
+    groups:
+      ghactions-all:
+        patterns: ["*"]
+    open-pull-requests-limit: 10
+    assignees: ["mrz1836"]
+    labels: ["chore", "dependencies", "github-actions"]
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # ──────────────────────────────────────────────────────────────
+  # 3. DevContainer (devcontainer.json : base image + features)
+  # ──────────────────────────────────────────────────────────────
+  - package-ecosystem: "devcontainers"
+    directory: "/"
+    target-branch: "master"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:30"
+      timezone: "America/New_York"
+    allow:
+      - dependency-type: "direct"
+    groups:
+      devcontainer-all:
+        patterns: ["*"]
+    open-pull-requests-limit: 5
+    assignees: ["mrz1836"]
+    labels: ["chore", "dependencies", "devcontainer"]
+    commit-message:
+      prefix: "chore"
+      include: "scope"

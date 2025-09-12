@@ -1,0 +1,517 @@
+# ------------------------------------------------------------------------------------
+#  Completion Report Test Analysis (Reusable Workflow) (GoFortress)
+#
+#  Purpose: Process all test-related artifacts for the completion report including
+#  test results, test configuration analysis, and fuzz testing results.
+#
+#  This workflow handles:
+#    - Test statistics processing and failure analysis
+#    - Test configuration and output mode analysis
+#    - Fuzz test statistics and security testing results
+#    - Test failure details and error extraction
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: GoFortress (Completion Tests)
+
+on:
+  workflow_call:
+    inputs:
+      test-suite-result:
+        description: "Result of the test suite job"
+        required: true
+        type: string
+      env-json:
+        description: "JSON string of environment variables"
+        required: true
+        type: string
+    outputs:
+      report-section:
+        description: "Generated test analysis markdown section"
+        value: ${{ jobs.analyze-tests.outputs.tests-markdown }}
+      test-metrics:
+        description: "Test performance metrics"
+        value: ${{ jobs.analyze-tests.outputs.test-data }}
+      failure-metrics:
+        description: "Test failure analysis metrics"
+        value: ${{ jobs.analyze-tests.outputs.failure-data }}
+
+# Security: Restrictive default permissions with job-level overrides for least privilege access
+permissions:
+  contents: read
+
+jobs:
+  # ----------------------------------------------------------------------------------
+  # Test Analysis
+  # ----------------------------------------------------------------------------------
+  analyze-tests:
+    name: 🧪 Analyze Test Results
+    runs-on: ubuntu-latest
+    if: always()
+    outputs:
+      tests-markdown: ${{ steps.set-output.outputs.content }}
+      test-data: ${{ steps.process-tests.outputs.test-metrics }}
+      failure-data: ${{ steps.process-tests.outputs.failure-metrics }}
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Checkout repository for local actions
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      # ————————————————————————————————————————————————————————————————
+      # Parse environment variables
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Parse environment variables
+        env:
+          ENV_JSON: ${{ inputs.env-json }}
+        run: |
+          echo "📋 Setting environment variables..."
+          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
+            echo "$key=$value" >> $GITHUB_ENV
+          done
+
+      # ————————————————————————————————————————————————————————————————
+      # Download specific artifacts needed for test analysis
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Download test statistics
+        if: always()
+        uses: ./.github/actions/download-artifact-resilient
+        with:
+          pattern: "test-stats-*"
+          path: ./artifacts/
+          merge-multiple: true
+          max-retries: ${{ env.ARTIFACT_DOWNLOAD_RETRIES }}
+          retry-delay: ${{ env.ARTIFACT_DOWNLOAD_RETRY_DELAY }}
+          timeout: ${{ env.ARTIFACT_DOWNLOAD_TIMEOUT }}
+          continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
+
+      - name: 📥 Download benchmark statistics
+        if: always()
+        uses: ./.github/actions/download-artifact-resilient
+        with:
+          pattern: "bench-stats-*"
+          path: ./artifacts/
+          merge-multiple: true
+          max-retries: ${{ env.ARTIFACT_DOWNLOAD_RETRIES }}
+          retry-delay: ${{ env.ARTIFACT_DOWNLOAD_RETRY_DELAY }}
+          timeout: ${{ env.ARTIFACT_DOWNLOAD_TIMEOUT }}
+          continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
+
+      - name: 📥 Download cache statistics
+        if: always()
+        uses: ./.github/actions/download-artifact-resilient
+        with:
+          pattern: "cache-stats-*"
+          path: ./artifacts/
+          merge-multiple: true
+          max-retries: ${{ env.ARTIFACT_DOWNLOAD_RETRIES }}
+          retry-delay: ${{ env.ARTIFACT_DOWNLOAD_RETRY_DELAY }}
+          timeout: ${{ env.ARTIFACT_DOWNLOAD_TIMEOUT }}
+          continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
+
+      - name: 📥 Download test failure artifacts
+        if: always()
+        uses: ./.github/actions/download-artifact-resilient
+        with:
+          pattern: "test-results-unit-*"
+          path: ./test-artifacts/
+          merge-multiple: true
+          max-retries: ${{ env.ARTIFACT_DOWNLOAD_RETRIES }}
+          retry-delay: ${{ env.ARTIFACT_DOWNLOAD_RETRY_DELAY }}
+          timeout: ${{ env.ARTIFACT_DOWNLOAD_TIMEOUT }}
+          continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
+
+      - name: 📥 Download fuzz test failure artifacts
+        if: always()
+        uses: ./.github/actions/download-artifact-resilient
+        with:
+          pattern: "test-results-fuzz-*"
+          path: ./test-artifacts/
+          merge-multiple: true
+          max-retries: ${{ env.ARTIFACT_DOWNLOAD_RETRIES }}
+          retry-delay: ${{ env.ARTIFACT_DOWNLOAD_RETRY_DELAY }}
+          timeout: ${{ env.ARTIFACT_DOWNLOAD_TIMEOUT }}
+          continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
+
+      - name: 🗂️ Flatten artifacts
+        if: always()
+        run: |
+          echo "🗂️ Flattening downloaded artifacts..."
+
+          # Process stats artifacts
+          if [ -d "./artifacts/" ]; then
+            find ./artifacts/ -name "*.json" -type f | while read -r file; do
+              filename=$(basename "$file")
+              echo "Moving $file to ./$filename"
+              cp "$file" "./$filename"
+            done
+            echo "📋 Available stats files:"
+            ls -la *-stats-*.json 2>/dev/null || echo "No stats files found"
+          else
+            echo "⚠️ No artifacts directory found"
+          fi
+
+          # Process test failure artifacts
+          if [ -d "./test-artifacts/" ]; then
+            find ./test-artifacts/ -name "*.json" -type f | while read -r file; do
+              filename=$(basename "$file")
+              echo "Moving test artifact $file to ./$filename"
+              cp "$file" "./$filename"
+            done
+            echo "📋 Available test artifacts:"
+            ls -la test-failures*.json test-results*.json 2>/dev/null || echo "No test artifacts found"
+          else
+            echo "⚠️ No test-artifacts directory found"
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Initialize test analysis section
+      # ————————————————————————————————————————————————————————————————
+      - name: 📝 Initialize Test Analysis Section
+        run: |
+          touch tests-section.md
+
+      # ————————————————————————————————————————————————————————————————
+      # Process test statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 🧪 Process Test Statistics
+        id: process-tests
+        run: |
+          # Process test statistics if available
+          if compgen -G "test-stats-*.json" >/dev/null 2>&1; then
+            {
+              echo ""
+              echo ""
+              echo "### 🧪 Test Results Summary"
+              echo "| Test Suite | Mode | Duration | Tests | Failed | Packages | Status | Race | Coverage |"
+              echo "|------------|------|----------|-------|--------|----------|--------|------|----------|"
+            } >> tests-section.md
+
+            # Initialize totals for summary
+            TOTAL_TESTS=0
+            TOTAL_FAILURES=0
+            TOTAL_AFFECTED_PACKAGES=0
+            SUITE_COUNT=0
+
+            for stats_file in test-stats-*.json; do
+              if [ -f "$stats_file" ]; then
+                NAME=$(jq -r '.name' "$stats_file")
+                DURATION=$(jq -r '.duration_seconds' "$stats_file")
+                TEST_COUNT=$(jq -r '.test_count' "$stats_file")
+                STATUS=$(jq -r '.status' "$stats_file")
+                RACE_ENABLED=$(jq -r '.race_enabled' "$stats_file")
+                COVERAGE_ENABLED=$(jq -r '.coverage_enabled' "$stats_file")
+
+                # New enhanced fields
+                TEST_MODE=$(jq -r '.test_mode // "unknown"' "$stats_file")
+                SUITE_FAILURES=$(jq -r '.total_failures // 0' "$stats_file")
+                AFFECTED_PACKAGES=$(jq -r '.affected_packages // 0' "$stats_file")
+
+                DURATION_MIN=$((DURATION / 60))
+                DURATION_SEC=$((DURATION % 60))
+
+                COVERAGE_ICON=$([[ "$COVERAGE_ENABLED" == "true" ]] && echo "✅" || echo "❌")
+                RACE_ICON=$([[ "$RACE_ENABLED" == "true" ]] && echo "✅" || echo "❌")
+                STATUS_ICON=$([[ "$STATUS" == "success" ]] && echo "✅" || echo "❌")
+
+                # Show package count or dash
+                PACKAGE_DISPLAY=$([[ "$AFFECTED_PACKAGES" -gt 0 ]] && echo "$AFFECTED_PACKAGES" || echo "-")
+
+                echo "| $NAME | $TEST_MODE | ${DURATION_MIN}m ${DURATION_SEC}s | $TEST_COUNT | $SUITE_FAILURES | $PACKAGE_DISPLAY | $STATUS_ICON | $RACE_ICON | $COVERAGE_ICON |" >> tests-section.md
+
+                # Accumulate totals
+                TOTAL_TESTS=$((TOTAL_TESTS + TEST_COUNT))
+                TOTAL_FAILURES=$((TOTAL_FAILURES + SUITE_FAILURES))
+                TOTAL_AFFECTED_PACKAGES=$((TOTAL_AFFECTED_PACKAGES + AFFECTED_PACKAGES))
+                SUITE_COUNT=$((SUITE_COUNT + 1))
+              fi
+            done
+
+            # Store totals as outputs for later use
+            echo "test-metrics={\"total_tests\":$TOTAL_TESTS,\"total_failures\":$TOTAL_FAILURES,\"suite_count\":$SUITE_COUNT}" >> $GITHUB_OUTPUT
+
+            # Add test failure analysis if any failures exist
+            if [[ $TOTAL_FAILURES -gt 0 ]]; then
+              {
+                echo ""
+                echo ""
+                echo "### ❌ Test Failure Analysis"
+                echo "**Total Failures**: $TOTAL_FAILURES across $SUITE_COUNT test suite(s)"
+                echo ""
+                echo "#### 📊 Failures by Test Suite:"
+              } >> tests-section.md
+
+              for stats_file in test-stats-*.json; do
+                if [ -f "$stats_file" ]; then
+                  SUITE_NAME=$(jq -r '.name' "$stats_file")
+                  SUITE_FAILURES=$(jq -r '.total_failures // 0' "$stats_file")
+                  SUITE_PACKAGES=$(jq -r '.affected_packages // 0' "$stats_file")
+
+                  if [[ $SUITE_FAILURES -gt 0 ]]; then
+                    echo "- **$SUITE_NAME**: $SUITE_FAILURES failures across $SUITE_PACKAGES packages" >> tests-section.md
+                  fi
+                fi
+              done
+
+              {
+                echo ""
+                echo "<details>"
+                echo "<summary>🔍 Top Failed Tests (click to expand)</summary>"
+                echo ""
+                echo "| Test Name | Package | Duration | Suite |"
+                echo "|-----------|---------|----------|-------|"
+              } >> tests-section.md
+
+              # Extract detailed failure information from all suites
+              FAILURE_COUNT=0
+              for stats_file in test-stats-*.json; do
+                if [ -f "$stats_file" ] && [[ $FAILURE_COUNT -lt 20 ]]; then
+                  SUITE_NAME=$(jq -r '.name' "$stats_file")
+                  FAILURE_DETAILS=$(jq -r '.failure_details // null' "$stats_file")
+
+                  if [[ "$FAILURE_DETAILS" != "null" ]] && [[ "$FAILURE_DETAILS" != "[]" ]]; then
+                    echo "$FAILURE_DETAILS" | jq -r --arg suite "$SUITE_NAME" \
+                      '.[] | "| \(.Test) | \(.Package | split("/") | .[-1] // .[-2] // .) | \(.Duration // "unknown")s | \($suite) |"' 2>/dev/null | \
+                      head -10 >> tests-section.md || true
+                    FAILURE_COUNT=$((FAILURE_COUNT + 10))
+                  fi
+                fi
+              done
+
+              {
+                echo ""
+                echo "</details>"
+              } >> tests-section.md
+
+              # Add error details section for failed tests
+              HAS_ERROR_OUTPUT=false
+              for stats_file in test-stats-*.json; do
+                if [ -f "$stats_file" ]; then
+                  FAILURE_DETAILS=$(jq -r '.failure_details // null' "$stats_file")
+                  if [[ "$FAILURE_DETAILS" != "null" ]] && [[ "$FAILURE_DETAILS" != "[]" ]]; then
+                    # Check if any failure has non-empty output
+                    HAS_OUTPUT=$(echo "$FAILURE_DETAILS" | jq -r 'map(select(.Output != "" and .Output != null)) | length > 0' 2>/dev/null)
+                    if [[ "$HAS_OUTPUT" == "true" ]]; then
+                      HAS_ERROR_OUTPUT=true
+                      break
+                    fi
+                  fi
+                fi
+              done
+
+              if [[ "$HAS_ERROR_OUTPUT" == "true" ]]; then
+                {
+                  echo ""
+                  echo ""
+                  echo "### 📝 Test Error Messages"
+                  echo ""
+                } >> tests-section.md
+
+                ERROR_COUNT=0
+                for stats_file in test-stats-*.json; do
+                  if [ -f "$stats_file" ] && [[ $ERROR_COUNT -lt 10 ]]; then
+                    SUITE_NAME=$(jq -r '.name' "$stats_file")
+                    FAILURE_DETAILS=$(jq -r '.failure_details // null' "$stats_file")
+
+                    if [[ "$FAILURE_DETAILS" != "null" ]] && [[ "$FAILURE_DETAILS" != "[]" ]]; then
+                      # Display failures with non-empty outputs using smart truncation
+                      echo "$FAILURE_DETAILS" | jq -r --arg suite "$SUITE_NAME" \
+                        '.[] | select(.Output != "" and .Output != null) |
+                        "#### \(.Test) (\(.Package | split("/") | .[-1] // .[-2] // .))\n\n```\n\(.Output | if length > 1500 then .[0:1500] + "\n... (truncated)" else . end)\n```\n"' 2>/dev/null | \
+                        head -c 4000 >> tests-section.md || true
+                      ERROR_COUNT=$((ERROR_COUNT + 3))
+                    fi
+                  fi
+                done
+              fi
+
+              # Store failure metrics
+              echo "failure-metrics={\"total_failures\":$TOTAL_FAILURES,\"has_error_output\":$HAS_ERROR_OUTPUT}" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Add test configuration and output analysis
+      # ————————————————————————————————————————————————————————————————
+      - name: 🎛️ Add Test Configuration Section
+        id: add-test-config
+        run: |
+          # Add test output configuration section
+          if compgen -G "test-stats-*.json" >/dev/null 2>&1; then
+            {
+              echo ""
+              echo "<br><br>"
+              echo ""
+              echo "### 🎛️ Test Output Configuration"
+              echo "| Configuration | Value | Description |"
+              echo "|---------------|-------|-------------|"
+              echo "| **Mode** | ${TEST_OUTPUT_MODE:-SMART} | Test output strategy |"
+              echo "| **Smart Threshold** | ${TEST_OUTPUT_SMART_THRESHOLD:-500} tests | Switch to FAILURES_ONLY above this |"
+              echo "| **Detail Count** | ${TEST_FAILURE_DETAIL_COUNT:-50} | Failures shown with details |"
+              echo "| **Annotations** | ${TEST_FAILURE_ANNOTATION_COUNT:-10} | GitHub annotations limit |"
+              echo "| **Artifacts** | ✅ Enabled | ${TEST_OUTPUT_ARTIFACT_RETENTION_DAYS:-7} day retention |"
+            } >> tests-section.md
+
+            # Show output strategy summary
+            SUITE_COUNT=0
+            for stats_file in test-stats-*.json; do
+              if [ -f "$stats_file" ]; then
+                SUITE_COUNT=$((SUITE_COUNT + 1))
+              fi
+            done
+
+            if [[ $SUITE_COUNT -gt 0 ]]; then
+              FULL_MODE_COUNT=0
+              FAILURES_ONLY_COUNT=0
+
+              for stats_file in test-stats-*.json; do
+                if [ -f "$stats_file" ]; then
+                  MODE=$(jq -r '.test_mode // "unknown"' "$stats_file")
+                  if [[ "$MODE" == "FULL" ]]; then
+                    FULL_MODE_COUNT=$((FULL_MODE_COUNT + 1))
+                  elif [[ "$MODE" == "FAILURES_ONLY" ]]; then
+                    FAILURES_ONLY_COUNT=$((FAILURES_ONLY_COUNT + 1))
+                  fi
+                fi
+              done
+
+              {
+                echo ""
+                echo "**Output Strategy Summary:**"
+                echo "- $FULL_MODE_COUNT suite(s) used FULL mode (complete output)"
+                echo "- $FAILURES_ONLY_COUNT suite(s) used FAILURES_ONLY mode (efficient extraction)"
+              } >> tests-section.md
+
+              if [[ $FAILURES_ONLY_COUNT -gt 0 ]]; then
+                echo "- Estimated output size reduction: ~80-90% for large test suites" >> tests-section.md
+              fi
+            fi
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Process fuzz test statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 🎯 Process Fuzz Test Statistics
+        id: process-fuzz
+        run: |
+          # Process fuzz test statistics - always show status
+          {
+            echo "<br><br>"
+            echo ""
+            echo "### 🛡️ Security Testing Results"
+          } >> tests-section.md
+
+          # Check if fuzz testing is enabled in environment
+          if [[ "${{ env.ENABLE_FUZZ_TESTING }}" == "true" ]]; then
+            # Fuzz testing is enabled, check for stats files
+            if compgen -G "fuzz-stats-*.json" >/dev/null 2>&1; then
+              # Check if we have actual fuzz stats data before creating table header
+              HAS_FUZZ_DATA=false
+              for stats_file in fuzz-stats-*.json; do
+                if [ -f "$stats_file" ]; then
+                  NAME=$(jq -r '.name' "$stats_file")
+                  if [[ "$NAME" != "null" ]] && [[ -n "$NAME" ]]; then
+                    HAS_FUZZ_DATA=true
+                    break
+                  fi
+                fi
+              done
+
+              if [[ "$HAS_FUZZ_DATA" == "true" ]]; then
+                # Create table header only when we have actual data
+                echo "| Fuzz Suite | Duration | Fuzz Tests | Status | Enabled |" >> tests-section.md
+                echo "|------------|----------|------------|--------|---------|" >> tests-section.md
+
+                # Process fuzz stats files only if they exist
+                ROW_ADDED=false
+                if compgen -G "fuzz-stats-*.json" >/dev/null 2>&1; then
+                  for stats_file in fuzz-stats-*.json; do
+                    if [ -f "$stats_file" ] && [[ "$ROW_ADDED" == "false" ]]; then
+                      NAME=$(jq -r '.name' "$stats_file")
+                      DURATION=$(jq -r '.duration_seconds' "$stats_file")
+                      FUZZ_TEST_COUNT=$(jq -r '.fuzz_test_count' "$stats_file")
+                      STATUS=$(jq -r '.status' "$stats_file")
+
+                      # Only add a table row if we have valid, complete data
+                      if [[ "$NAME" != "null" ]] && [[ -n "$NAME" ]] && \
+                         [[ "$DURATION" != "null" ]] && [[ -n "$DURATION" ]] && \
+                         [[ "$FUZZ_TEST_COUNT" != "null" ]] && [[ -n "$FUZZ_TEST_COUNT" ]] && \
+                         [[ "$STATUS" != "null" ]] && [[ -n "$STATUS" ]]; then
+
+                        DURATION_MIN=$((DURATION / 60))
+                        DURATION_SEC=$((DURATION % 60))
+
+                        STATUS_ICON=$([[ "$STATUS" == "success" ]] && echo "✅" || echo "❌")
+
+                        echo "| $NAME | ${DURATION_MIN}m ${DURATION_SEC}s | $FUZZ_TEST_COUNT | $STATUS_ICON | 🎯 |" >> tests-section.md
+                        ROW_ADDED=true
+                      fi
+                    fi
+                  done
+                fi
+              else
+                # Fuzz testing enabled but no valid stats data
+                {
+                  echo "| Status | Details |"
+                  echo "|--------|---------|"
+                  echo "| **Fuzz Testing** | ✅ Enabled |"
+                  echo "| **Execution** | ⚠️ No valid fuzz stats found - check job logs |"
+                  echo "| **Platform** | Linux with primary Go version |"
+                } >> tests-section.md
+              fi
+            else
+              # Fuzz testing enabled but no stats files found
+              {
+                echo "| Status | Details |"
+                echo "|--------|---------|"
+                echo "| **Fuzz Testing** | ✅ Enabled |"
+                echo "| **Execution** | ⚠️ No fuzz stats found - check job logs |"
+                echo "| **Platform** | Linux with primary Go version |"
+              } >> tests-section.md
+            fi
+          else
+            # Fuzz testing is disabled
+            {
+              echo "| Status | Details |"
+              echo "|--------|---------|"
+              echo "| **Fuzz Testing** | ❌ Disabled |"
+              echo "| **Configuration** | Set ENABLE_FUZZ_TESTING=true to enable |"
+              echo "| **Target Platform** | Would run on Linux with primary Go version |"
+            } >> tests-section.md
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Upload test analysis section
+      # ————————————————————————————————————————————————————————————————
+      - name: 📤 Upload Test Analysis Section
+        id: upload-section
+        if: always()
+        run: |
+          if [ -f "tests-section.md" ] && [ -s "tests-section.md" ]; then
+            echo "🧪 Test section found, uploading..."
+            ls -la tests-section.md
+            echo "📋 Content preview:"
+            head -5 tests-section.md
+          else
+            echo "⚠️ Test section file missing or empty, creating minimal section..."
+            echo "### 🧪 Test Results Section" > tests-section.md
+            echo "No test data available for this run." >> tests-section.md
+          fi
+
+      - name: 📤 Upload Test Artifact
+        uses: ./.github/actions/upload-statistics
+        with:
+          artifact-name: "tests-section"
+          artifact-path: "tests-section.md"
+          retention-days: "1"
+          if-no-files-found: "warn"
+
+      - name: 📋 Set Output Content
+        id: set-output
+        run: |
+          echo "content<<EOF" >> $GITHUB_OUTPUT
+          cat tests-section.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT

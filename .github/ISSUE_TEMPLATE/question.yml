@@ -1,0 +1,24 @@
+name: Question
+description: General template for asking a question related to this project
+title: "[Question] <your topic here>"
+labels: ["question"]
+assignees:
+  - mrz1836
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: What's your question?
+      description: A clear and concise question, including references to specific code or files if applicable.
+      placeholder: I'm wondering about the behavior of the package.XYZ function when...
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context
+      description: Add any other context, code samples, or screenshots that help explain your question.
+      placeholder: e.g., stack traces, related functions, environment info, links to source lines
+    validations:
+      required: false

@@ -1,0 +1,179 @@
+# ------------------------------------------------------------------------------------
+#  Workflow Completion Report (Reusable Workflow) (GoFortress)
+#
+#  Purpose: Generate a comprehensive workflow completion report for the entire
+#  workflow run, including timing metrics, test results, job status, and analytics.
+#
+#  This workflow orchestrates sub-workflows that process different aspects of the
+#  completion report to improve maintainability and enable parallel processing.
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: GoFortress (Completion Report)
+
+on:
+  workflow_call:
+    inputs:
+      benchmarks-result:
+        description: "Benchmarks job result"
+        required: false
+        type: string
+        default: "skipped"
+      start-epoch:
+        description: "Workflow start epoch time"
+        required: true
+        type: string
+      start-time:
+        description: "Workflow start time"
+        required: true
+        type: string
+      setup-result:
+        description: "Setup job result"
+        required: true
+        type: string
+      test-magex-result:
+        description: "Test MAGE-X job result"
+        required: true
+        type: string
+      security-result:
+        description: "Security job result"
+        required: true
+        type: string
+      code-quality-result:
+        description: "Code quality job result"
+        required: true
+        type: string
+      pre-commit-result:
+        description: "Pre-commit checks job result"
+        required: true
+        type: string
+      test-suite-result:
+        description: "Test suite job result"
+        required: true
+        type: string
+      release-result:
+        description: "Result of the release job"
+        required: false
+        type: string
+        default: "skipped"
+      status-check-result:
+        description: "Result of the status-check job"
+        required: false
+        type: string
+        default: "skipped"
+      test-matrix:
+        description: "Test matrix JSON"
+        required: true
+        type: string
+      env-json:
+        description: "JSON string of environment variables"
+        required: true
+        type: string
+      primary-runner:
+        description: "Primary runner OS"
+        required: true
+        type: string
+      gofortress-version:
+        description: "GoFortress workflow system version"
+        required: false
+        type: string
+        default: "unknown"
+      gofortress-released:
+        description: "GoFortress release date"
+        required: false
+        type: string
+        default: "unknown"
+
+# Security: Restrictive default permissions with job-level overrides for least privilege access
+permissions:
+  contents: read
+
+jobs:
+  # ----------------------------------------------------------------------------------
+  # Initialize Report and Download Artifacts
+  # ----------------------------------------------------------------------------------
+  initialize-report:
+    name: 📊 Initialize Report Data
+    runs-on: ${{ inputs.primary-runner }}
+    if: always()
+    outputs:
+      timing-data: ${{ steps.calculate-timing.outputs.timing-json }}
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Checkout repository for local actions
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      # ————————————————————————————————————————————————————————————————
+      # Parse environment variables
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Parse environment variables
+        env:
+          ENV_JSON: ${{ inputs.env-json }}
+        run: |
+          echo "📋 Setting environment variables..."
+          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
+            echo "$key=$value" >> $GITHUB_ENV
+          done
+
+      # ————————————————————————————————————————————————————————————————
+      # Calculate timing metrics
+      # ————————————————————————————————————————————————————————————————
+      - name: ⏱️ Calculate Timing Metrics
+        id: calculate-timing
+        run: |
+          # Calculate total duration
+          START_EPOCH=${{ inputs.start-epoch }}
+          END_EPOCH=$(date +%s)
+          TOTAL_DURATION=$((END_EPOCH - START_EPOCH))
+          TOTAL_MINUTES=$((TOTAL_DURATION / 60))
+          TOTAL_SECONDS=$((TOTAL_DURATION % 60))
+
+          # Store as outputs for later use
+          echo "total_minutes=$TOTAL_MINUTES" >> $GITHUB_OUTPUT
+          echo "total_seconds=$TOTAL_SECONDS" >> $GITHUB_OUTPUT
+          echo "total_duration=$TOTAL_DURATION" >> $GITHUB_OUTPUT
+
+          # Create JSON for sub-workflows
+          echo "timing-json={\"total_minutes\":$TOTAL_MINUTES,\"total_seconds\":$TOTAL_SECONDS,\"total_duration\":$TOTAL_DURATION}" >> $GITHUB_OUTPUT
+
+  # ----------------------------------------------------------------------------------
+  # Process Statistics (Cache, Benchmarks, Coverage, LOC)
+  # ----------------------------------------------------------------------------------
+  process-statistics:
+    name: 📊 Process Statistics
+    needs: initialize-report
+    if: always()
+    uses: ./.github/workflows/fortress-completion-statistics.yml
+    with:
+      timing-metrics: ${{ needs.initialize-report.outputs.timing-data }}
+      env-json: ${{ inputs.env-json }}
+
+  # ----------------------------------------------------------------------------------
+  # Process Test Analysis (Test Results, Fuzz Testing, Configuration)
+  # ----------------------------------------------------------------------------------
+  process-tests:
+    name: 🧪 Process Test Analysis
+    needs: initialize-report
+    if: always()
+    uses: ./.github/workflows/fortress-completion-tests.yml
+    with:
+      test-suite-result: ${{ inputs.test-suite-result }}
+      env-json: ${{ inputs.env-json }}
+
+  # ----------------------------------------------------------------------------------
+  # Finalize Report (Job Summary, Performance Insights, Assembly)
+  # ----------------------------------------------------------------------------------
+  finalize-report:
+    name: ✅ Finalize Report
+    needs: [initialize-report, process-statistics, process-tests]
+    if: always()
+    uses: ./.github/workflows/fortress-completion-finalize.yml
+    with:
+      all-inputs: ${{ toJSON(inputs) }}
+      statistics-report: ${{ needs.process-statistics.outputs.report-section }}
+      tests-report: ${{ needs.process-tests.outputs.report-section }}
+      timing-data: ${{ needs.initialize-report.outputs.timing-data }}

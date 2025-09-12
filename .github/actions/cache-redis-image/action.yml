@@ -1,0 +1,316 @@
+# ------------------------------------------------------------------------------------
+#  Cache Redis Image Composite Action (GoFortress)
+#
+#  Purpose: Cache Redis Docker images to accelerate service container startup.
+#  Provides intelligent caching similar to Go module and build caching, pinned to
+#  Redis version for proper cache invalidation.
+#
+#  Features:
+#    - Docker image caching using actions/cache
+#    - Version-pinned cache keys tied to REDIS_VERSION
+#    - Cross-platform image caching support
+#    - Performance tracking and metrics
+#    - Automatic fallback to Docker Hub on cache miss
+#    - Cache compression for storage efficiency
+#
+#  Usage:
+#    - uses: ./.github/actions/cache-redis-image
+#      with:
+#        redis-version: ${{ env.REDIS_VERSION }}
+#        runner-os: ${{ runner.os }}
+#        cache-mode: "restore-save"  # restore, save, restore-save
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: "Cache Redis Image"
+description: "Cache Redis Docker images for faster service container startup with version-pinned keys"
+
+inputs:
+  redis-version:
+    description: "Redis Docker image version (e.g., 7-alpine, 6-alpine)"
+    required: true
+  runner-os:
+    description: "Operating system for cache keys (e.g., Linux, macOS)"
+    required: true
+  cache-mode:
+    description: "Cache operation mode: restore, save, restore-save"
+    required: false
+    default: "restore-save"
+  force-pull:
+    description: "Force pull image even if cache exists (for cache warming)"
+    required: false
+    default: "false"
+
+outputs:
+  cache-hit:
+    description: "Whether Redis image was restored from cache (true/false)"
+    value: ${{ steps.restore-redis-image.outputs.cache-hit }}
+  image-size:
+    description: "Size of Redis image in MB"
+    value: ${{ steps.image-info.outputs.image-size }}
+  operation-time:
+    description: "Total operation time in seconds"
+    value: ${{ steps.operation-summary.outputs.operation-time }}
+  cache-key:
+    description: "Cache key used for Redis image"
+    value: ${{ steps.cache-config.outputs.cache-key }}
+  image-available:
+    description: "Whether Redis image is available locally (true/false)"
+    value: ${{ steps.image-verification.outputs.image-available }}
+
+runs:
+  using: "composite"
+  steps:
+    # ————————————————————————————————————————————————————————————————
+    # Initialize operation tracking
+    # ————————————————————————————————————————————————————————————————
+    - name: ⏱️ Initialize operation tracking
+      id: operation-start
+      shell: bash
+      run: |
+        echo "🗄️ Starting Redis image caching operation..."
+        OPERATION_START=$(date +%s)
+        echo "operation-start=$OPERATION_START" >> $GITHUB_OUTPUT
+        echo "📋 Configuration:"
+        echo "   • Redis Version: ${{ inputs.redis-version }}"
+        echo "   • Runner OS: ${{ inputs.runner-os }}"
+        echo "   • Cache Mode: ${{ inputs.cache-mode }}"
+        echo "   • Force Pull: ${{ inputs.force-pull }}"
+        echo ""
+
+    # ————————————————————————————————————————————————————————————————
+    # Configure cache settings and keys
+    # ————————————————————————————————————————————————————————————————
+    - name: 🔧 Configure cache settings
+      id: cache-config
+      shell: bash
+      run: |
+        echo "🔧 Configuring Redis image cache settings..."
+
+        # Generate cache key pinned to Redis version and OS
+        REDIS_VERSION="${{ inputs.redis-version }}"
+        RUNNER_OS="${{ inputs.runner-os }}"
+
+        # Normalize Redis version for cache key (remove special characters)
+        NORMALIZED_VERSION=$(echo "$REDIS_VERSION" | sed 's/[^a-zA-Z0-9.-]/_/g')
+
+        # Create cache key
+        CACHE_KEY="redis-image-${RUNNER_OS}-${NORMALIZED_VERSION}"
+
+        # Define cache paths
+        CACHE_DIR="$HOME/.cache/redis-images"
+        IMAGE_TAR="redis-${NORMALIZED_VERSION}.tar"
+        CACHE_PATH="${CACHE_DIR}/${IMAGE_TAR}"
+
+        echo "📋 Cache Configuration:"
+        echo "   • Cache Key: $CACHE_KEY"
+        echo "   • Cache Directory: $CACHE_DIR"
+        echo "   • Image Tar: $IMAGE_TAR"
+        echo "   • Cache Path: $CACHE_PATH"
+
+        # Create cache directory
+        mkdir -p "$CACHE_DIR"
+
+        # Set outputs
+        echo "cache-key=$CACHE_KEY" >> $GITHUB_OUTPUT
+        echo "cache-dir=$CACHE_DIR" >> $GITHUB_OUTPUT
+        echo "image-tar=$IMAGE_TAR" >> $GITHUB_OUTPUT
+        echo "cache-path=$CACHE_PATH" >> $GITHUB_OUTPUT
+        echo "normalized-version=$NORMALIZED_VERSION" >> $GITHUB_OUTPUT
+
+    # ————————————————————————————————————————————————————————————————
+    # Restore Redis image from cache
+    # ————————————————————————————————————————————————————————————————
+    - name: 💾 Restore Redis image from cache
+      if: contains(inputs.cache-mode, 'restore')
+      id: restore-redis-image
+      uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+      with:
+        path: ${{ steps.cache-config.outputs.cache-path }}
+        key: ${{ steps.cache-config.outputs.cache-key }}
+
+    # ————————————————————————————————————————————————————————————————
+    # Load cached Redis image into Docker
+    # ————————————————————————————————————————————————————————————————
+    - name: 📦 Load cached Redis image
+      if: contains(inputs.cache-mode, 'restore') && steps.restore-redis-image.outputs.cache-hit == 'true' && inputs.force-pull != 'true'
+      id: load-cached-image
+      shell: bash
+      run: |
+        echo "📦 Loading Redis image from cache..."
+        CACHE_PATH="${{ steps.cache-config.outputs.cache-path }}"
+
+        if [ -f "$CACHE_PATH" ]; then
+          echo "✅ Cache file found: $CACHE_PATH"
+
+          # Load image from tar file
+          if docker load < "$CACHE_PATH"; then
+            echo "✅ Redis image loaded successfully from cache"
+            echo "image-loaded=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Failed to load Redis image from cache"
+            echo "image-loaded=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+        else
+          echo "❌ Cache file not found: $CACHE_PATH"
+          echo "image-loaded=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+    # ————————————————————————————————————————————————————————————————
+    # Pull Redis image if not cached or force-pull enabled
+    # ————————————————————————————————————————————————————————————————
+    - name: 📥 Pull Redis image from Docker Hub
+      if: (contains(inputs.cache-mode, 'restore') && steps.restore-redis-image.outputs.cache-hit != 'true') || inputs.force-pull == 'true'
+      id: pull-redis-image
+      shell: bash
+      run: |
+        echo "📥 Pulling Redis image from Docker Hub..."
+        REDIS_IMAGE="redis:${{ inputs.redis-version }}"
+
+        echo "🔍 Pulling image: $REDIS_IMAGE"
+
+        # Pull the image with progress
+        if docker pull "$REDIS_IMAGE"; then
+          echo "✅ Redis image pulled successfully: $REDIS_IMAGE"
+          echo "image-pulled=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Failed to pull Redis image: $REDIS_IMAGE"
+          echo "image-pulled=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+    # ————————————————————————————————————————————————————————————————
+    # Save Redis image to cache
+    # ————————————————————————————————————————————————————————————————
+    - name: 💾 Save Redis image to cache
+      if: contains(inputs.cache-mode, 'save') && (steps.pull-redis-image.outputs.image-pulled == 'true' || inputs.force-pull == 'true')
+      id: save-redis-image
+      shell: bash
+      run: |
+        echo "💾 Saving Redis image to cache..."
+        REDIS_IMAGE="redis:${{ inputs.redis-version }}"
+        CACHE_PATH="${{ steps.cache-config.outputs.cache-path }}"
+
+        echo "🔍 Saving image: $REDIS_IMAGE"
+        echo "📁 Cache path: $CACHE_PATH"
+
+        # Save image as tar file
+        if docker save "$REDIS_IMAGE" | gzip > "$CACHE_PATH"; then
+          echo "✅ Redis image saved to cache successfully"
+
+          # Get file size
+          if [ -f "$CACHE_PATH" ]; then
+            FILE_SIZE_BYTES=$(stat -c%s "$CACHE_PATH" 2>/dev/null || stat -f%z "$CACHE_PATH" 2>/dev/null || echo "0")
+            FILE_SIZE_MB=$((FILE_SIZE_BYTES / 1024 / 1024))
+            echo "📊 Cache file size: ${FILE_SIZE_MB}MB"
+            echo "cache-size-mb=$FILE_SIZE_MB" >> $GITHUB_OUTPUT
+          fi
+
+          echo "image-saved=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Failed to save Redis image to cache"
+          echo "image-saved=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+    # ————————————————————————————————————————————————————————————————
+    # Save cache using actions/cache (only if cache wasn't already hit)
+    # ————————————————————————————————————————————————————————————————
+    - name: 🗄️ Save Redis image cache
+      if: contains(inputs.cache-mode, 'save') && steps.save-redis-image.outputs.image-saved == 'true' && steps.restore-redis-image.outputs.cache-hit != 'true'
+      uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+      with:
+        path: ${{ steps.cache-config.outputs.cache-path }}
+        key: ${{ steps.cache-config.outputs.cache-key }}
+
+    # ————————————————————————————————————————————————————————————————
+    # Verify Redis image availability
+    # ————————————————————————————————————————————————————————————————
+    - name: 🔍 Verify Redis image availability
+      id: image-verification
+      shell: bash
+      run: |
+        echo "🔍 Verifying Redis image availability..."
+        REDIS_IMAGE="redis:${{ inputs.redis-version }}"
+
+        # Check if image exists locally
+        if docker image inspect "$REDIS_IMAGE" >/dev/null 2>&1; then
+          echo "✅ Redis image available locally: $REDIS_IMAGE"
+          echo "image-available=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Redis image not available locally: $REDIS_IMAGE"
+          echo "image-available=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+    # ————————————————————————————————————————————————————————————————
+    # Gather image information and metrics
+    # ————————————————————————————————————————————————————————————————
+    - name: 📊 Gather image information
+      id: image-info
+      shell: bash
+      run: |
+        echo "📊 Gathering Redis image information..."
+        REDIS_IMAGE="redis:${{ inputs.redis-version }}"
+
+        # Get image size
+        IMAGE_SIZE_BYTES=$(docker image inspect "$REDIS_IMAGE" --format='{{.Size}}' 2>/dev/null || echo "0")
+        IMAGE_SIZE_MB=$((IMAGE_SIZE_BYTES / 1024 / 1024))
+
+        # Get image ID and created date
+        IMAGE_ID=$(docker image inspect "$REDIS_IMAGE" --format='{{.Id}}' 2>/dev/null | cut -d: -f2 | head -c 12)
+        IMAGE_CREATED=$(docker image inspect "$REDIS_IMAGE" --format='{{.Created}}' 2>/dev/null || echo "unknown")
+
+        echo "📋 Image Information:"
+        echo "   • Image: $REDIS_IMAGE"
+        echo "   • Size: ${IMAGE_SIZE_MB}MB"
+        echo "   • ID: $IMAGE_ID"
+        echo "   • Created: $IMAGE_CREATED"
+
+        # Set outputs
+        echo "image-size=$IMAGE_SIZE_MB" >> $GITHUB_OUTPUT
+        echo "image-id=$IMAGE_ID" >> $GITHUB_OUTPUT
+        echo "image-created=$IMAGE_CREATED" >> $GITHUB_OUTPUT
+
+    # ————————————————————————————————————————————————————————————————
+    # Operation summary and timing
+    # ————————————————————————————————————————————————————————————————
+    - name: ✅ Operation summary
+      id: operation-summary
+      shell: bash
+      run: |
+        echo "✅ Redis image caching operation completed"
+
+        # Calculate operation time
+        OPERATION_START="${{ steps.operation-start.outputs.operation-start }}"
+        OPERATION_END=$(date +%s)
+        OPERATION_TIME=$((OPERATION_END - OPERATION_START))
+
+        # Determine cache status
+        CACHE_HIT="${{ steps.restore-redis-image.outputs.cache-hit || 'false' }}"
+        IMAGE_AVAILABLE="${{ steps.image-verification.outputs.image-available }}"
+
+        echo "📊 Operation Summary:"
+        echo "   • Cache Hit: $CACHE_HIT"
+        echo "   • Image Available: $IMAGE_AVAILABLE"
+        echo "   • Operation Time: ${OPERATION_TIME}s"
+        echo "   • Cache Key: ${{ steps.cache-config.outputs.cache-key }}"
+
+        # Set outputs
+        echo "operation-time=$OPERATION_TIME" >> $GITHUB_OUTPUT
+        echo "cache-hit-final=$CACHE_HIT" >> $GITHUB_OUTPUT
+
+        if [[ "$IMAGE_AVAILABLE" == "true" ]]; then
+          if [[ "$CACHE_HIT" == "true" ]]; then
+            echo "🚀 Redis image restored from cache in ${OPERATION_TIME}s"
+          else
+            echo "📥 Redis image pulled and cached in ${OPERATION_TIME}s"
+          fi
+        else
+          echo "❌ Redis image operation failed after ${OPERATION_TIME}s"
+          exit 1
+        fi

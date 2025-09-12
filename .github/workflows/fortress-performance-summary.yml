@@ -1,0 +1,478 @@
+# ------------------------------------------------------------------------------------
+#  Performance Summary (Reusable Workflow) (GoFortress)
+#
+#  Purpose: Generate a comprehensive performance summary report for the entire
+#  workflow run, including timing metrics, cache statistics, and test results.
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: GoFortress (Performance Summary)
+
+on:
+  workflow_call:
+    inputs:
+      benchmarks-result:
+        description: "Benchmarks job result"
+        required: false
+        type: string
+        default: "skipped"
+      start-epoch:
+        description: "Workflow start epoch time"
+        required: true
+        type: string
+      start-time:
+        description: "Workflow start time"
+        required: true
+        type: string
+      setup-result:
+        description: "Setup job result"
+        required: true
+        type: string
+      test-magex-result:
+        description: "Test MAGE-X job result"
+        required: true
+        type: string
+      security-result:
+        description: "Security job result"
+        required: true
+        type: string
+      code-quality-result:
+        description: "Code quality job result"
+        required: true
+        type: string
+      pre-commit-result:
+        description: "Pre-commit checks job result"
+        required: true
+        type: string
+      test-suite-result:
+        description: "Test suite job result"
+        required: true
+        type: string
+      release-result:
+        description: "Result of the release job"
+        required: false
+        type: string
+        default: "skipped"
+      status-check-result:
+        description: "Result of the status-check job"
+        required: false
+        type: string
+        default: "skipped"
+      test-matrix:
+        description: "Test matrix JSON"
+        required: true
+        type: string
+      env-json:
+        description: "JSON string of environment variables"
+        required: true
+        type: string
+      primary-runner:
+        description: "Primary runner OS"
+        required: true
+        type: string
+
+# Security: Restrictive default permissions with job-level overrides for least privilege access
+permissions:
+  contents: read
+
+jobs:
+  # ----------------------------------------------------------------------------------
+  # Performance Summary Report
+  # ----------------------------------------------------------------------------------
+  performance-summary:
+    name: 📊 Performance Summary Report
+    runs-on: ${{ inputs.primary-runner }}
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Parse environment variables
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Parse environment variables
+        env:
+          ENV_JSON: ${{ inputs.env-json }}
+        run: |
+          echo "📋 Setting environment variables..."
+          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
+            echo "$key=$value" >> $GITHUB_ENV
+          done
+
+      # ————————————————————————————————————————————————————————————————
+      # Download all statistics artifacts
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Download performance artifacts
+        if: always()
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          pattern: "*-stats-*"
+          path: ./performance-artifacts/
+
+      # ————————————————————————————————————————————————————————————————
+      # Flatten performance artifacts for processing
+      # ————————————————————————————————————————————————————————————————
+      - name: 🗂️ Flatten performance artifacts
+        if: always()
+        run: |
+          echo "🗂️ Flattening downloaded artifacts..."
+
+          # Find all JSON files in subdirectories and move them to current directory
+          if [ -d "./performance-artifacts/" ]; then
+            find ./performance-artifacts/ -name "*.json" -type f | while read -r file; do
+              filename=$(basename "$file")
+              echo "Moving $file to ./$filename"
+              cp "$file" "./$filename"
+            done
+
+            # List all flattened files for debugging
+            echo "📋 Available stats files:"
+            ls -la *-stats-*.json 2>/dev/null || echo "No stats files found"
+          else
+            echo "⚠️ No performance-artifacts directory found"
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Generate performance report
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Generate Performance Report
+        id: generate-performance-report
+        run: |
+          # Calculate total duration
+          START_EPOCH=${{ inputs.start-epoch }}
+          END_EPOCH=$(date +%s)
+          TOTAL_DURATION=$((END_EPOCH - START_EPOCH))
+          TOTAL_MINUTES=$((TOTAL_DURATION / 60))
+          TOTAL_SECONDS=$((TOTAL_DURATION % 60))
+
+          # Store as outputs for later use
+          echo "total_minutes=$TOTAL_MINUTES" >> $GITHUB_OUTPUT
+          echo "total_seconds=$TOTAL_SECONDS" >> $GITHUB_OUTPUT
+          echo "total_duration=$TOTAL_DURATION" >> $GITHUB_OUTPUT
+
+          # Start performance summary
+          {
+            echo "## 📊 Workflow Performance Metrics"
+            echo ""
+            echo "### ⏱️ Overall Timing"
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| **Total Duration** | ${TOTAL_MINUTES}m ${TOTAL_SECONDS}s |"
+            echo "| **Start Time** | ${{ inputs.start-time }} |"
+            echo "| **End Time** | $(date -u +"%Y-%m-%dT%H:%M:%SZ") |"
+            echo "| **Workflow** | ${{ github.workflow }} |"
+            echo "| **Run Number** | ${{ github.run_number }} |"
+            echo "| **Trigger** | ${{ github.event_name }} |"
+            echo "| **Source** | ${{ github.event.pull_request.head.repo.full_name == github.repository && 'Internal' || 'Fork' }} |"
+            echo ""
+
+            # Process cache statistics if available
+            # Use a more robust file existence check
+            if compgen -G "cache-stats-*.json" >/dev/null 2>&1; then
+              echo ""
+              echo "### 💾 Cache Performance"
+              echo "| OS | Go Version | Module Cache | Build Cache | Module Size | Build Size |"
+              echo "|----|------------|--------------|-------------|-------------|------------|"
+
+              TOTAL_CACHE_HITS=0
+              TOTAL_CACHE_ATTEMPTS=0
+
+              for stats_file in cache-stats-*.json; do
+                if [ -f "$stats_file" ]; then
+                  OS=$(jq -r '.os' "$stats_file")
+                  GO_VER=$(jq -r '.go_version' "$stats_file")
+                  GOMOD_HIT=$(jq -r '.gomod_cache_hit' "$stats_file")
+                  GOBUILD_HIT=$(jq -r '.gobuild_cache_hit' "$stats_file")
+                  GOMOD_SIZE=$(jq -r '.cache_size_gomod' "$stats_file")
+                  GOBUILD_SIZE=$(jq -r '.cache_size_gobuild' "$stats_file")
+
+                  GOMOD_ICON=$([[ "$GOMOD_HIT" == "true" ]] && echo "✅ Hit" || echo "❌ Miss")
+                  GOBUILD_ICON=$([[ "$GOBUILD_HIT" == "true" ]] && echo "✅ Hit" || echo "❌ Miss")
+
+                  echo "| $OS | $GO_VER | $GOMOD_ICON | $GOBUILD_ICON | $GOMOD_SIZE | $GOBUILD_SIZE |"
+
+                  [[ "$GOMOD_HIT" == "true" ]] && TOTAL_CACHE_HITS=$((TOTAL_CACHE_HITS + 1))
+                  [[ "$GOBUILD_HIT" == "true" ]] && TOTAL_CACHE_HITS=$((TOTAL_CACHE_HITS + 1))
+                  TOTAL_CACHE_ATTEMPTS=$((TOTAL_CACHE_ATTEMPTS + 2))
+                fi
+              done
+            fi
+
+            # Process benchmark statistics if available
+            # Use a more robust file existence check
+            if compgen -G "benchmark-stats-*.json" >/dev/null 2>&1; then
+              echo ""
+              echo ""
+              echo "### 🏃 Benchmark Performance"
+
+              # Get benchmark mode from the first stats file
+              BENCH_MODE="normal"
+              for stats_file in benchmark-stats-*.json; do
+                if [ -f "$stats_file" ]; then
+                  BENCH_MODE=$(jq -r '.benchmark_mode // "normal"' "$stats_file")
+                  break
+                fi
+              done
+
+              echo "**Mode**: \`$BENCH_MODE\` $(case "$BENCH_MODE" in quick) echo "(Quick 50ms runs)" ;; full) echo "(Comprehensive 10s runs)" ;; *) echo "(Normal 100ms runs)" ;; esac)"
+              echo ""
+
+              echo "| Benchmark Suite | Duration | Benchmarks | Status |"
+              echo "|-----------------|----------|------------|--------|"
+
+              for stats_file in benchmark-stats-*.json; do
+                if [ -f "$stats_file" ]; then
+                  NAME=$(jq -r '.name' "$stats_file")
+                  DURATION=$(jq -r '.duration_seconds' "$stats_file")
+                  BENCHMARK_COUNT=$(jq -r '.benchmark_count' "$stats_file")
+                  STATUS=$(jq -r '.status' "$stats_file")
+                  BENCHMARK_SUMMARY=$(jq -r '.benchmark_summary' "$stats_file")
+
+                  DURATION_MIN=$((DURATION / 60))
+                  DURATION_SEC=$((DURATION % 60))
+                  STATUS_ICON=$([[ "$STATUS" == "success" ]] && echo "✅" || echo "❌")
+
+                  echo "| $NAME | ${DURATION_MIN}m ${DURATION_SEC}s | $BENCHMARK_COUNT | $STATUS_ICON |"
+                fi
+              done
+
+              # Display detailed benchmark results
+              echo ""
+              echo "<details>"
+              echo "<summary>Detailed Benchmark Results</summary>"
+              echo ""
+
+              for stats_file in benchmark-stats-*.json; do
+                if [ -f "$stats_file" ]; then
+                  NAME=$(jq -r '.name' "$stats_file")
+                  BENCHMARK_SUMMARY=$(jq -r '.benchmark_summary' "$stats_file")
+                  if [ -n "$BENCHMARK_SUMMARY" ] && [ "$BENCHMARK_SUMMARY" != "null" ]; then
+                    echo "#### $NAME"
+                    echo "$BENCHMARK_SUMMARY"
+                    echo ""
+                  fi
+                fi
+              done
+
+              echo "</details>"
+            fi
+
+            # Process test statistics if available
+            # Use a more robust file existence check
+            if compgen -G "test-stats-*.json" >/dev/null 2>&1; then
+              echo ""
+              echo ""
+              echo "### 🧪 Test Execution Performance"
+              echo "| Test Suite | Duration | Tests | Examples | Status | Race | Coverage |"
+              echo "|------------|----------|-------|----------|--------|------|----------|"
+
+              for stats_file in test-stats-*.json; do
+                if [ -f "$stats_file" ]; then
+                  NAME=$(jq -r '.name' "$stats_file")
+                  DURATION=$(jq -r '.duration_seconds' "$stats_file")
+                  TEST_COUNT=$(jq -r '.test_count' "$stats_file")
+                  EXAMPLE_COUNT=$(jq -r '.example_count' "$stats_file")
+                  STATUS=$(jq -r '.status' "$stats_file")
+                  RACE_ENABLED=$(jq -r '.race_enabled' "$stats_file")
+                  COVERAGE_ENABLED=$(jq -r '.coverage_enabled' "$stats_file")
+
+                  DURATION_MIN=$((DURATION / 60))
+                  DURATION_SEC=$((DURATION % 60))
+
+                  COVERAGE_ICON=$([[ "$COVERAGE_ENABLED" == "true" ]] && echo "✅" || echo "❌")
+                  RACE_ICON=$([[ "$RACE_ENABLED" == "true" ]] && echo "✅" || echo "❌")
+                  STATUS_ICON=$([[ "$STATUS" == "success" ]] && echo "✅" || echo "❌")
+
+                  echo "| $NAME | ${DURATION_MIN}m ${DURATION_SEC}s | $TEST_COUNT | $EXAMPLE_COUNT | $STATUS_ICON | $RACE_ICON | $COVERAGE_ICON |"
+                fi
+              done
+
+              # Process Lines of Code Summary
+              DISPLAYED_LOC_SUMMARY=false
+
+              for stats_file in test-stats-*.json; do
+                if [ -f "$stats_file" ] && [ "$DISPLAYED_LOC_SUMMARY" = false ]; then
+                  # Extract individual LOC values from the JSON
+                  TEST_FILES_COUNT=$(jq -r '.loc_test_files' "$stats_file")
+                  GO_FILES_COUNT=$(jq -r '.loc_go_files' "$stats_file")
+                  TOTAL_LOC=$(jq -r '.loc_total' "$stats_file")
+                  LOC_DATE=$(jq -r '.loc_date' "$stats_file")
+
+                  echo ""
+                  echo ""
+                  echo "### 📊 Lines of Code Summary"
+                  echo "| Type | Total Lines | Date |"
+                  echo "|------|-------------|------|"
+                  echo "| Test Files | $TEST_FILES_COUNT | $LOC_DATE |"
+                  echo "| Go Files | $GO_FILES_COUNT | $LOC_DATE |"
+                  echo ""
+                  echo "**Total lines of code: $TOTAL_LOC**"
+                  DISPLAYED_LOC_SUMMARY=true
+                fi
+              done
+            fi
+
+            # Process fuzz test statistics - always show status
+            echo ""
+            echo ""
+            echo "### 🎯 Fuzz Test Performance"
+
+            # Check if fuzz testing is enabled in environment
+            if [[ "${{ env.ENABLE_FUZZ_TESTING }}" == "true" ]]; then
+              # Fuzz testing is enabled, check for stats files
+              if compgen -G "fuzz-stats-*.json" >/dev/null 2>&1; then
+                echo "| Fuzz Suite | Duration | Fuzz Tests | Status | Enabled |"
+                echo "|------------|----------|------------|--------|---------|"
+
+                for stats_file in fuzz-stats-*.json; do
+                  if [ -f "$stats_file" ]; then
+                    NAME=$(jq -r '.name' "$stats_file")
+                    DURATION=$(jq -r '.duration_seconds' "$stats_file")
+                    FUZZ_TEST_COUNT=$(jq -r '.fuzz_test_count' "$stats_file")
+                    STATUS=$(jq -r '.status' "$stats_file")
+
+                    DURATION_MIN=$((DURATION / 60))
+                    DURATION_SEC=$((DURATION % 60))
+
+                    STATUS_ICON=$([[ "$STATUS" == "success" ]] && echo "✅" || echo "❌")
+
+                    echo "| $NAME | ${DURATION_MIN}m ${DURATION_SEC}s | $FUZZ_TEST_COUNT | $STATUS_ICON | 🎯 |"
+                  fi
+                done
+              else
+                # Fuzz testing enabled but no stats found
+                echo "| Status | Details |"
+                echo "|--------|---------|"
+                echo "| **Fuzz Testing** | ✅ Enabled |"
+                echo "| **Execution** | ⚠️ No fuzz stats found - check job logs |"
+                echo "| **Platform** | Linux with primary Go version |"
+              fi
+            else
+              # Fuzz testing is disabled
+              echo "| Status | Details |"
+              echo "|--------|---------|"
+              echo "| **Fuzz Testing** | ❌ Disabled |"
+              echo "| **Configuration** | Set ENABLE_FUZZ_TESTING=true to enable |"
+              echo "| **Target Platform** | Would run on Linux with primary Go version |"
+            fi
+
+            # Process coverage statistics if available
+            if compgen -G "coverage-stats-*.json" >/dev/null 2>&1; then
+              echo ""
+              echo ""
+              echo "### 📊 Coverage System Performance"
+
+              for stats_file in coverage-stats-*.json; do
+                if [ -f "$stats_file" ]; then
+                  echo "| Metric | Value |"
+                  echo "|--------|-------|"
+
+                  COVERAGE_PERCENT=$(jq -r '.coverage_percent // "N/A"' "$stats_file")
+                  PROCESSING_TIME=$(jq -r '.processing_time_seconds // "N/A"' "$stats_file")
+                  FILES_PROCESSED=$(jq -r '.files_processed // "N/A"' "$stats_file")
+                  BADGE_GENERATED=$(jq -r '.badge_generated // "false"' "$stats_file")
+                  PAGES_DEPLOYED=$(jq -r '.pages_deployed // "false"' "$stats_file")
+
+                  echo "| **Coverage Percentage** | $COVERAGE_PERCENT% |"
+                  echo "| **Processing Time** | ${PROCESSING_TIME}s |"
+                  echo "| **Files Processed** | $FILES_PROCESSED |"
+                  echo "| **Badge Generated** | $([ "$BADGE_GENERATED" == "true" ] && echo "✅ Yes" || echo "❌ No") |"
+                  echo "| **Pages Deployed** | $([ "$PAGES_DEPLOYED" == "true" ] && echo "✅ Yes" || echo "❌ No") |"
+
+                  break # Only show first coverage stats file
+                fi
+              done
+            elif [[ "${{ env.ENABLE_CODE_COVERAGE }}" == "true" ]]; then
+              echo ""
+              echo ""
+              echo "### 📊 Coverage System Status"
+              echo "| Status | Details |"
+              echo "|--------|---------|"
+              echo "| **System** | Internal GoFortress Coverage |"
+              echo "| **Threshold** | ${{ env.GO_COVERAGE_THRESHOLD }}% minimum |"
+              echo "| **Badge Style** | ${{ env.GO_COVERAGE_BADGE_STYLE }} |"
+              echo "| **PR Comments** | $([ "${{ env.GO_COVERAGE_POST_COMMENTS }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") |"
+              echo "| **Theme** | ${{ env.GO_COVERAGE_REPORT_THEME }} |"
+            fi
+
+            echo ""
+            echo "### 🔧 Job Results Summary"
+            echo "| Job | Status | Result |"
+            echo "|-----|--------|--------|"
+            echo "| 🎯 Setup Configuration | ${{ inputs.setup-result }} | $([ "${{ inputs.setup-result }}" = "success" ] && echo "✅" || echo "❌") |"
+            echo "| 🪄 Test MAGE-X | ${{ inputs.test-magex-result }} | $([ "${{ inputs.test-magex-result }}" = "success" ] && echo "✅" || echo "❌") |"
+            echo "| 🪝 Pre-commit Checks | ${{ inputs.pre-commit-result }} | $([ "${{ inputs.pre-commit-result }}" = "success" ] && echo "✅" || echo "❌") |"
+            echo "| 🔒 Security Scans | ${{ inputs.security-result }} | $([ "${{ inputs.security-result }}" = "success" ] && echo "✅" || echo "❌") |"
+            echo "| 📊 Code Quality | ${{ inputs.code-quality-result }} | $([ "${{ inputs.code-quality-result }}" = "success" ] && echo "✅" || echo "❌") |"
+            echo "| 🧪 Test Suite | ${{ inputs.test-suite-result }} | $([ "${{ inputs.test-suite-result }}" = "success" ] && echo "✅" || echo "❌") |"
+            # Only show benchmarks row if it was attempted
+            if [[ "${{ inputs.benchmarks-result }}" != "skipped" ]]; then
+              echo "| 🏃 Benchmarks | ${{ inputs.benchmarks-result }} | $([ "${{ inputs.benchmarks-result }}" = "success" ] && echo "✅" || echo "❌") |"
+            fi
+            # Always show status-check result
+            echo "| 🎯 All Tests Passed | ${{ inputs.status-check-result }} | $([ "${{ inputs.status-check-result }}" = "success" ] && echo "✅" || echo "❌") |"
+            # Only show release row if it was attempted
+            if [[ "${{ inputs.release-result }}" != "skipped" ]]; then
+              echo "| 🚀 Release | ${{ inputs.release-result }} | $([ "${{ inputs.release-result }}" = "success" ] && echo "✅" || echo "❌") |"
+            fi
+
+            echo ""
+
+            # Add release-specific information if this was a tag push
+            if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+              echo ""
+              echo "## 📦 Release Information"
+              if [[ "${{ inputs.release-result }}" == "success" ]]; then
+                echo "✅ Release ${{ github.ref_name }} created successfully!"
+                echo "[View Release](https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }})"
+              elif [[ "${{ inputs.release-result }}" == "skipped" ]]; then
+                echo "⏭️ Release was skipped (likely due to test failures)"
+              elif [[ "${{ inputs.release-result }}" == "failure" ]]; then
+                echo "❌ Release creation failed - check logs for details"
+              fi
+              echo ""
+            fi
+
+            echo ""
+
+            echo ""
+            echo "### 🚀 Performance Insights"
+            if [[ $TOTAL_DURATION -gt 600 ]]; then
+              echo "- ⚠️  **Warning**: Workflow took longer than 10 minutes (${TOTAL_MINUTES}m ${TOTAL_SECONDS}s)"
+            elif [[ $TOTAL_DURATION -gt 180 && $TOTAL_DURATION -le 300 ]]; then
+              echo "- 🎉  **Great Job**: Workflow completed in under 5 minutes (${TOTAL_MINUTES}m ${TOTAL_SECONDS}s)!"
+            elif [[ $TOTAL_DURATION -le 180 ]]; then
+              echo "- 🚀  **Excellent Performance**: Workflow completed in under 3 minutes!"
+            else
+              echo "- ℹ️  Workflow completed in ${TOTAL_MINUTES}m ${TOTAL_SECONDS}s."
+            fi
+            echo "- **Parallel Jobs**: Multiple jobs ran in parallel to optimize execution time"
+            echo "- **Matrix Strategy**: Tests ran across $(echo '${{ inputs.test-matrix }}' | jq '.include | length') configurations"
+            if [ "${{ env.ENABLE_VERBOSE_TEST_OUTPUT }}" != "true" ]; then
+              echo "- **Verbose Output**: Disabled to speed up test execution"
+            else
+              echo "- **Verbose Output**: Enabled for detailed test logs"
+            fi
+
+            # Add failure analysis if any job failed
+            FAILED_JOBS=""
+            [ "${{ inputs.setup-result }}" != "success" ] && [ "${{ inputs.setup-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Setup Configuration, "
+            [ "${{ inputs.test-magex-result }}" != "success" ] && [ "${{ inputs.test-magex-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Test MAGE-X, "
+            [ "${{ inputs.pre-commit-result }}" != "success" ] && [ "${{ inputs.pre-commit-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Pre-commit Checks, "
+            [ "${{ inputs.security-result }}" != "success" ] && [ "${{ inputs.security-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Security Scans, "
+            [ "${{ inputs.code-quality-result }}" != "success" ] && [ "${{ inputs.code-quality-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Code Quality, "
+            [ "${{ inputs.test-suite-result }}" != "success" ] && [ "${{ inputs.test-suite-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Test Suite, "
+            [ "${{ inputs.benchmarks-result }}" != "success" ] && [ "${{ inputs.benchmarks-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Benchmarks, "
+            [ "${{ inputs.status-check-result }}" != "success" ] && [ "${{ inputs.status-check-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Status Check, "
+            [ "${{ inputs.release-result }}" != "success" ] && [ "${{ inputs.release-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Release, "
+
+            if [ -n "$FAILED_JOBS" ]; then
+              FAILED_JOBS=${FAILED_JOBS%, }  # Remove trailing comma
+              echo ""
+              echo ""
+              echo "### ❌ Failed Jobs"
+              echo "The following jobs did not complete successfully:"
+              echo "- ${FAILED_JOBS}"
+            fi
+
+          } >> $GITHUB_STEP_SUMMARY
+
+          echo "✅ Performance summary report generated successfully"

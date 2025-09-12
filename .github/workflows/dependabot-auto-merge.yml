@@ -1,0 +1,620 @@
+# ------------------------------------------------------------------------------------
+#  Dependabot Auto-merge Workflow
+#
+#  Purpose: Automatically merge Dependabot updates based on configurable rules
+#           for different update types (patch, minor, major) and dependency types
+#           (development, production). Security updates get special handling.
+#
+#  Configuration: All settings are loaded from .env.base and .env.custom files for
+#  centralized management across all workflows.
+#
+#  Triggers: Pull request events for immediate response to Dependabot PRs
+#
+#  Auto-merge Rules (configurable via .env.base/.env.custom):
+#  - Patch updates: Auto-merge by default
+#  - Minor dev dependencies: Auto-merge by default
+#  - Minor prod dependencies: Manual review by default
+#  - Major updates: Always require manual review with alert
+#  - Security updates: Auto-merge non-major by default
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: Dependabot Auto-merge
+
+# ————————————————————————————————————————————————————————————————
+# Trigger Configuration
+# ————————————————————————————————————————————————————————————————
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# Security: Restrictive default permissions with job-level overrides for least privilege access
+permissions:
+  contents: read
+
+# ————————————————————————————————————————————————————————————————
+# Concurrency Control
+# ————————————————————————————————————————————————————————————————
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# ————————————————————————————————————————————————————————————————
+# Environment Variables
+# ————————————————————————————————————————————————————————————————
+# Note: Configuration variables are loaded from .env.base and .env.custom files
+
+jobs:
+  # ----------------------------------------------------------------------------------
+  # Load Environment Variables
+  # ----------------------------------------------------------------------------------
+  load-env:
+    name: 🌍 Load Environment Variables
+    runs-on: ubuntu-latest
+    # Only run on Dependabot PRs
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    outputs:
+      env-json: ${{ steps.load-env.outputs.env-json }}
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Check out code to access env file
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Checkout code (sparse)
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: |
+            .github/.env.base
+            .github/.env.custom
+            .github/actions/load-env
+
+      # ————————————————————————————————————————————————————————————————
+      # Load and parse environment file
+      # ————————————————————————————————————————————————————————————————
+      - name: 🌍 Load environment variables
+        uses: ./.github/actions/load-env
+        id: load-env
+
+  # ----------------------------------------------------------------------------------
+  # Process Dependabot PR
+  # ----------------------------------------------------------------------------------
+  process-pr:
+    name: 🤖 Process Dependabot PR
+    needs: [load-env]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required for Dependabot PRs: Enables auto-merge (not needed for other PRs)
+      pull-requests: write # Required: Update and merge Dependabot PRs
+      issues: write # Required: Comment on related dependency issues
+    outputs:
+      dependency-names: ${{ steps.metadata.outputs.dependency-names }}
+      update-type: ${{ steps.metadata.outputs.update-type }}
+      dependency-type: ${{ steps.metadata.outputs.dependency-type }}
+      action-taken: ${{ steps.determine-action.outputs.action }}
+
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Extract configuration from env-json
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Extract configuration
+        id: config
+        env:
+          ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+        run: |
+          echo "📋 Extracting Dependabot configuration from environment..."
+
+          # Extract all needed variables
+          MAINTAINER=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_MAINTAINER_USERNAME')
+          AUTO_MERGE_PATCH=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH')
+          AUTO_MERGE_MINOR_DEV=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_DEV')
+          AUTO_MERGE_MINOR_PROD=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_PROD')
+          AUTO_MERGE_SECURITY=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_SECURITY_NON_MAJOR')
+          ALERT_ON_MAJOR=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_ALERT_ON_MAJOR')
+          ALERT_ON_MINOR_PROD=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_ALERT_ON_MINOR_PROD')
+          MANUAL_REVIEW_LABEL=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_MANUAL_REVIEW_LABEL')
+          AUTO_MERGE_LABELS=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_LABELS')
+          PREFERRED_TOKEN=$(echo "$ENV_JSON" | jq -r '.PREFERRED_GITHUB_TOKEN')
+
+          # Validate required configuration
+          if [[ -z "$MAINTAINER" ]] || [[ "$MAINTAINER" == "null" ]]; then
+            echo "❌ ERROR: DEPENDABOT_MAINTAINER_USERNAME not set in configuration" >&2
+            exit 1
+          fi
+
+          # Set as environment variables for all subsequent steps
+          echo "MAINTAINER=$MAINTAINER" >> $GITHUB_ENV
+          echo "AUTO_MERGE_PATCH=$AUTO_MERGE_PATCH" >> $GITHUB_ENV
+          echo "AUTO_MERGE_MINOR_DEV=$AUTO_MERGE_MINOR_DEV" >> $GITHUB_ENV
+          echo "AUTO_MERGE_MINOR_PROD=$AUTO_MERGE_MINOR_PROD" >> $GITHUB_ENV
+          echo "AUTO_MERGE_SECURITY=$AUTO_MERGE_SECURITY" >> $GITHUB_ENV
+          echo "ALERT_ON_MAJOR=$ALERT_ON_MAJOR" >> $GITHUB_ENV
+          echo "ALERT_ON_MINOR_PROD=$ALERT_ON_MINOR_PROD" >> $GITHUB_ENV
+          echo "MANUAL_REVIEW_LABEL=$MANUAL_REVIEW_LABEL" >> $GITHUB_ENV
+          echo "AUTO_MERGE_LABELS=$AUTO_MERGE_LABELS" >> $GITHUB_ENV
+
+          # Log configuration
+          echo "🔍 Configuration loaded:"
+          echo "  👤 Maintainer: @$MAINTAINER"
+          echo "  🔧 Auto-merge patch: $AUTO_MERGE_PATCH"
+          echo "  🔧 Auto-merge minor dev: $AUTO_MERGE_MINOR_DEV"
+          echo "  🔧 Auto-merge minor prod: $AUTO_MERGE_MINOR_PROD"
+          echo "  🔒 Auto-merge security (non-major): $AUTO_MERGE_SECURITY"
+          echo "  ⚠️ Alert on major: $ALERT_ON_MAJOR"
+          echo "  🔍 Alert on minor prod: $ALERT_ON_MINOR_PROD"
+          echo "  🏷️ Manual review label: $MANUAL_REVIEW_LABEL"
+          echo "  🏷️ Auto-merge labels: $AUTO_MERGE_LABELS"
+
+          if [[ "$PREFERRED_TOKEN" == "GH_PAT_TOKEN" && -n "${{ secrets.GH_PAT_TOKEN }}" ]]; then
+            echo "  🔑 Token: Personal Access Token (PAT)"
+          else
+            echo "  🔑 Token: Default GITHUB_TOKEN"
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Get official Dependabot metadata
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@08eff52bf64351f401fb50d4972fa95b9f2c2d1b # v2.4.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Log dependency information
+      # ————————————————————————————————————————————————————————————————
+      - name: 📋 Log dependency details
+        run: |
+          echo "🔍 Analyzing Dependabot PR #${{ github.event.pull_request.number }}..."
+          echo "════════════════════════════════════════════════════════════════"
+          echo "📦 Dependency: ${{ steps.metadata.outputs.dependency-names }}"
+          echo "🔄 Update type: ${{ steps.metadata.outputs.update-type }}"
+          echo "📁 Dependency type: ${{ steps.metadata.outputs.dependency-type }}"
+          echo "🌐 Package ecosystem: ${{ steps.metadata.outputs.package-ecosystem }}"
+          echo "⬆️ Version: ${{ steps.metadata.outputs.previous-version }} → ${{ steps.metadata.outputs.new-version }}"
+          echo "════════════════════════════════════════════════════════════════"
+
+      # ————————————————————————————————————————————————————————————————
+      # Check if this is a security update
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔒 Check for security update
+        id: check-security
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          echo "🔒 Checking if this is a security update..."
+
+          # Check PR title and labels for security indicators
+          # Using environment variables to prevent script injection
+          if [[ "$PR_LABELS" == *"security"* ]] || \
+             [[ "$PR_TITLE" == *"security"* ]] || \
+             [[ "$PR_TITLE" == *"[Security]"* ]]; then
+            echo "is_security=true" >> $GITHUB_OUTPUT
+            echo "✅ Security update detected"
+          else
+            echo "is_security=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ Not a security update"
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Determine action based on configuration and update type
+      # ————————————————————————————————————————————————————————————————
+      - name: 🎯 Determine action
+        id: determine-action
+        run: |
+          echo "🎯 Determining action based on update type and configuration..."
+
+          UPDATE_TYPE="${{ steps.metadata.outputs.update-type }}"
+          DEP_TYPE="${{ steps.metadata.outputs.dependency-type }}"
+          IS_SECURITY="${{ steps.check-security.outputs.is_security }}"
+          ACTION="none"
+
+          # Security updates (if enabled)
+          if [[ "$IS_SECURITY" == "true" ]] && [[ "${{ env.AUTO_MERGE_SECURITY }}" == "true" ]]; then
+            if [[ "$UPDATE_TYPE" != "version-update:semver-major" ]]; then
+              ACTION="auto-merge-security"
+            else
+              ACTION="alert-security-major"
+            fi
+          # Patch updates
+          elif [[ "$UPDATE_TYPE" == "version-update:semver-patch" ]]; then
+            if [[ "${{ env.AUTO_MERGE_PATCH }}" == "true" ]]; then
+              ACTION="auto-merge-patch"
+            else
+              ACTION="manual-review"
+            fi
+          # Minor updates - development dependencies
+          elif [[ "$UPDATE_TYPE" == "version-update:semver-minor" ]] && [[ "$DEP_TYPE" == "direct:development" ]]; then
+            if [[ "${{ env.AUTO_MERGE_MINOR_DEV }}" == "true" ]]; then
+              ACTION="auto-merge-minor-dev"
+            else
+              ACTION="manual-review"
+            fi
+          # Minor updates - production dependencies
+          elif [[ "$UPDATE_TYPE" == "version-update:semver-minor" ]] && [[ "$DEP_TYPE" == "direct:production" ]]; then
+            if [[ "${{ env.AUTO_MERGE_MINOR_PROD }}" == "true" ]]; then
+              ACTION="auto-merge-minor-prod"
+            elif [[ "${{ env.ALERT_ON_MINOR_PROD }}" == "true" ]]; then
+              ACTION="alert-minor-prod"
+            else
+              ACTION="manual-review"
+            fi
+          # Major updates
+          elif [[ "$UPDATE_TYPE" == "version-update:semver-major" ]]; then
+            if [[ "${{ env.ALERT_ON_MAJOR }}" == "true" ]]; then
+              ACTION="alert-major"
+            else
+              ACTION="manual-review"
+            fi
+          else
+            ACTION="manual-review"
+          fi
+
+          echo "action=$ACTION" >> $GITHUB_OUTPUT
+          echo "✅ Determined action: $ACTION"
+
+      # ————————————————————————————————————————————————————————————————
+      # Handle major version alerts
+      # ————————————————————————————————————————————————————————————————
+      - name: ⚠️ Alert on major version bump
+        if: steps.determine-action.outputs.action == 'alert-major' || steps.determine-action.outputs.action == 'alert-security-major'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issueNumber = context.issue.number;
+            const dependency = '${{ steps.metadata.outputs.dependency-names }}';
+            const newVersion = '${{ steps.metadata.outputs.new-version }}';
+            const previousVersion = '${{ steps.metadata.outputs.previous-version }}';
+            const maintainer = '${{ env.MAINTAINER }}';
+            const isSecurity = '${{ steps.check-security.outputs.is_security }}' === 'true';
+
+            const emoji = isSecurity ? '🚨' : '⚠️';
+            const prefix = isSecurity ? '**SECURITY** - ' : '';
+
+            const commentBody = `${emoji} @${maintainer} – ${prefix}**Major version update detected**
+
+            **Dependency:** \`${dependency}\`
+            **Version:** \`${previousVersion}\` → \`${newVersion}\`
+            **Type:** ${{ steps.metadata.outputs.dependency-type }}
+            **Ecosystem:** ${{ steps.metadata.outputs.package-ecosystem }}
+            ${isSecurity ? '\n🔒 **This is a security update with potential breaking changes**' : ''}
+
+            This requires manual review for potential breaking changes.
+
+            **Review checklist:**
+            - [ ] Check changelog/release notes for breaking changes
+            - [ ] Review migration guide if available
+            - [ ] Test functionality affected by this dependency
+            - [ ] Update code if necessary to handle breaking changes`;
+
+            // Check for existing alert comment to avoid duplicates
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              per_page: 100
+            });
+
+            const alertExists = comments.some(comment =>
+              comment.body.includes('Major version update detected') &&
+              comment.body.includes(dependency) &&
+              comment.user.login === 'github-actions[bot]'
+            );
+
+            if (!alertExists) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: commentBody
+              });
+
+              // Add label for tracking
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: ['${{ env.MANUAL_REVIEW_LABEL }}']
+              });
+            } else {
+              console.log('Major version alert already exists, skipping duplicate comment');
+            }
+
+      # ————————————————————————————————————————————————————————————————
+      # Handle minor production dependency alerts
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔍 Alert on minor production dependency
+        if: steps.determine-action.outputs.action == 'alert-minor-prod'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issueNumber = context.issue.number;
+            const dependency = '${{ steps.metadata.outputs.dependency-names }}';
+            const newVersion = '${{ steps.metadata.outputs.new-version }}';
+            const previousVersion = '${{ steps.metadata.outputs.previous-version }}';
+            const maintainer = '${{ env.MAINTAINER }}';
+
+            const commentBody = `🔍 @${maintainer} – **Minor production dependency update**
+
+            **Dependency:** \`${dependency}\`
+            **Version:** \`${previousVersion}\` → \`${newVersion}\`
+            **Type:** Production dependency
+            **Ecosystem:** ${{ steps.metadata.outputs.package-ecosystem }}
+
+            Please review for potential feature changes or compatibility issues.
+
+            **Quick review checklist:**
+            - [ ] Check release notes for new features
+            - [ ] Verify no deprecation warnings
+            - [ ] Confirm compatibility with current code`;
+
+            // Check for existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              per_page: 100
+            });
+
+            const commentExists = comments.some(comment =>
+              comment.body.includes('Minor production dependency update') &&
+              comment.body.includes(dependency) &&
+              comment.user.login === 'github-actions[bot]'
+            );
+
+            if (!commentExists) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: commentBody
+              });
+            }
+
+      # ————————————————————————————————————————————————————————————————
+      # Auto-merge approved updates
+      # ————————————————————————————————————————————————————————————————
+      - name: 🚀 Auto-merge approved updates
+        if: |
+          startsWith(steps.determine-action.outputs.action, 'auto-merge-')
+        run: |
+          echo "🚀 Processing auto-merge for ${{ steps.determine-action.outputs.action }}..."
+
+          ACTION="${{ steps.determine-action.outputs.action }}"
+          DEPENDENCY="${{ steps.metadata.outputs.dependency-names }}"
+          VERSION_CHANGE="${{ steps.metadata.outputs.previous-version }} → ${{ steps.metadata.outputs.new-version }}"
+
+          # Check token availability
+          if [[ -n "${{ secrets.GH_PAT_TOKEN }}" ]]; then
+            echo "🔑 Using Personal Access Token for enhanced permissions"
+            TOKEN_TYPE="PAT"
+          else
+            echo "⚠️ Using default GITHUB_TOKEN - auto-merge may fail for Dependabot PRs"
+            TOKEN_TYPE="GITHUB_TOKEN"
+          fi
+
+          # Determine approval message based on action type
+          case "$ACTION" in
+            "auto-merge-patch")
+              APPROVAL_MSG="✅ Auto-approving patch update"
+              ;;
+            "auto-merge-minor-dev")
+              APPROVAL_MSG="✅ Auto-approving minor development dependency update"
+              ;;
+            "auto-merge-minor-prod")
+              APPROVAL_MSG="✅ Auto-approving minor production dependency update"
+              ;;
+            "auto-merge-security")
+              APPROVAL_MSG="🔒 Auto-approving security update"
+              ;;
+            *)
+              APPROVAL_MSG="✅ Auto-approving dependency update"
+              ;;
+          esac
+
+          # Approve the PR
+          echo "📝 Approving PR..."
+          if ! gh pr review --approve "$PR_URL" --body "$APPROVAL_MSG: $DEPENDENCY ($VERSION_CHANGE)"; then
+            echo "❌ Failed to approve PR"
+            exit 1
+          fi
+
+          # Attempt to enable auto-merge
+          echo "🚀 Attempting to enable auto-merge..."
+          if gh pr merge --auto --squash "$PR_URL"; then
+            echo "✅ Successfully enabled auto-merge for $ACTION"
+          else
+            echo "⚠️ Auto-merge failed (likely permissions issue)"
+            echo "💡 Tip: Ensure GH_PAT_TOKEN is set with repo permissions for Dependabot PRs"
+
+            # Fallback: Set up for manual merge
+            echo "🔄 PR has been approved and is ready for manual merge"
+            echo "action-taken=approved-ready-for-merge" >> $GITHUB_OUTPUT
+
+            # Don't exit with error - the PR is still approved
+          fi
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Add tracking labels
+      # ————————————————————————————————————————————————————————————————
+      - name: 🏷️ Add tracking labels
+        if: |
+          startsWith(steps.determine-action.outputs.action, 'auto-merge-') ||
+          startsWith(steps.determine-action.outputs.action, 'alert-')
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const action = '${{ steps.determine-action.outputs.action }}';
+            const labels = [];
+
+            // Add auto-merge labels if applicable
+            if (action.startsWith('auto-merge-')) {
+              const autoMergeLabels = '${{ env.AUTO_MERGE_LABELS }}'.split(',').map(l => l.trim());
+              labels.push(...autoMergeLabels);
+            }
+
+            // Add dependency type label
+            const depType = '${{ steps.metadata.outputs.dependency-type }}';
+            if (depType === 'direct:development') {
+              labels.push('dev-dependency');
+            } else if (depType === 'direct:production') {
+              labels.push('prod-dependency');
+            }
+
+            // Add update type label
+            const updateType = '${{ steps.metadata.outputs.update-type }}';
+            if (updateType === 'version-update:semver-patch') {
+              labels.push('patch-update');
+            } else if (updateType === 'version-update:semver-minor') {
+              labels.push('minor-update');
+            } else if (updateType === 'version-update:semver-major') {
+              labels.push('major-update');
+            }
+
+            // Add security label if applicable
+            if ('${{ steps.check-security.outputs.is_security }}' === 'true') {
+              labels.push('security');
+            }
+
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: labels
+              });
+              console.log(`Added labels: ${labels.join(', ')}`);
+            }
+
+  # ----------------------------------------------------------------------------------
+  # Generate Workflow Summary Report
+  # ----------------------------------------------------------------------------------
+  summary:
+    name: 📊 Generate Summary
+    if: always() && github.event.pull_request.user.login == 'dependabot[bot]'
+    needs: [load-env, process-pr]
+    runs-on: ubuntu-latest
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Generate a workflow summary report
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Generate workflow summary
+        env:
+          ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+        run: |
+          echo "📊 Generating workflow summary..."
+
+          echo "# 🤖 Dependabot Auto-merge Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**⏰ Processed:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**📋 PR:** #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## 📦 Dependency Information" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Dependency** | ${{ needs.process-pr.outputs.dependency-names }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Update Type** | ${{ needs.process-pr.outputs.update-type }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Dependency Type** | ${{ needs.process-pr.outputs.dependency-type }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Determine action taken
+          ACTION="${{ needs.process-pr.outputs.action-taken }}"
+          case "$ACTION" in
+            "auto-merge-patch")
+              ACTION_DESC="✅ Auto-merged (patch update)"
+              ;;
+            "auto-merge-minor-dev")
+              ACTION_DESC="✅ Auto-merged (minor dev dependency)"
+              ;;
+            "auto-merge-minor-prod")
+              ACTION_DESC="✅ Auto-merged (minor prod dependency)"
+              ;;
+            "auto-merge-security")
+              ACTION_DESC="🔒 Auto-merged (security update)"
+              ;;
+            "approved-ready-for-merge")
+              ACTION_DESC="✅ Approved and ready for manual merge (auto-merge failed)"
+              ;;
+            "alert-major")
+              ACTION_DESC="⚠️ Manual review required (major update)"
+              ;;
+            "alert-security-major")
+              ACTION_DESC="🚨 Manual review required (major security update)"
+              ;;
+            "alert-minor-prod")
+              ACTION_DESC="🔍 Manual review suggested (minor prod update)"
+              ;;
+            "manual-review")
+              ACTION_DESC="👀 Manual review required"
+              ;;
+            *)
+              ACTION_DESC="❓ Unknown action"
+              ;;
+          esac
+
+          echo "## 🎯 Action Taken" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "$ACTION_DESC" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### 🔧 Current Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Extract configuration for display
+          MAINTAINER=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_MAINTAINER_USERNAME')
+          AUTO_MERGE_PATCH=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH')
+          AUTO_MERGE_MINOR_DEV=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_DEV')
+          AUTO_MERGE_MINOR_PROD=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_PROD')
+          AUTO_MERGE_SECURITY=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_SECURITY_NON_MAJOR')
+
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Auto-merge patch | $AUTO_MERGE_PATCH |" >> $GITHUB_STEP_SUMMARY
+          echo "| Auto-merge minor dev | $AUTO_MERGE_MINOR_DEV |" >> $GITHUB_STEP_SUMMARY
+          echo "| Auto-merge minor prod | $AUTO_MERGE_MINOR_PROD |" >> $GITHUB_STEP_SUMMARY
+          echo "| Auto-merge security | $AUTO_MERGE_SECURITY |" >> $GITHUB_STEP_SUMMARY
+          echo "| Maintainer | @$MAINTAINER |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "🤖 _Automated by GitHub Actions_" >> $GITHUB_STEP_SUMMARY
+
+      # ————————————————————————————————————————————————————————————————
+      # Report final workflow status
+      # ————————————————————————————————————————————————————————————————
+      - name: 📢 Report workflow status
+        run: |
+          echo "=== 🤖 Dependabot Auto-merge Summary ==="
+          echo "📦 Dependency: ${{ needs.process-pr.outputs.dependency-names }}"
+          echo "🔄 Update type: ${{ needs.process-pr.outputs.update-type }}"
+          echo "📁 Dependency type: ${{ needs.process-pr.outputs.dependency-type }}"
+
+          ACTION="${{ needs.process-pr.outputs.action-taken }}"
+          case "$ACTION" in
+            auto-merge-*)
+              echo "✅ Action: Auto-merge enabled"
+              ;;
+            approved-ready-for-merge)
+              echo "✅ Action: Approved and ready for manual merge"
+              ;;
+            alert-*)
+              echo "⚠️ Action: Alert sent, manual review required"
+              ;;
+            manual-review)
+              echo "👀 Action: Manual review required"
+              ;;
+            *)
+              echo "❓ Action: $ACTION"
+              ;;
+          esac
+
+          echo "🕐 Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "✅ Workflow completed!"

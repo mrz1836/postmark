@@ -43,3 +43,6 @@ todo.md
 
 # Distribution
 dist
+
+# Fuzz tests
+testdata

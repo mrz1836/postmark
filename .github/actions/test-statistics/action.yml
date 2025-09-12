@@ -1,0 +1,355 @@
+# ------------------------------------------------------------------------------------
+#  Test Statistics Collection (Composite Action)
+#
+#  Purpose: Calculate and collect comprehensive test statistics including test counts,
+#  failure metrics, performance data, and lines of code metrics.
+#
+#  This action provides standardized statistics collection:
+#    - Test and benchmark counting from source files
+#    - Failure analysis from test output files
+#    - Performance metrics (duration, output size)
+#    - Lines of code metrics via magex
+#    - JSON output for consumption by other workflows
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: "Test Statistics Collection"
+description: "Calculate comprehensive test statistics and metrics for test runs"
+
+inputs:
+  matrix-name:
+    description: 'Matrix job name (e.g., "ubuntu-latest go1.21")'
+    required: true
+  matrix-os:
+    description: "Operating system from matrix"
+    required: true
+  matrix-go-version:
+    description: "Go version from matrix"
+    required: true
+  test-exit-code:
+    description: "Test command exit code"
+    required: true
+  output-mode:
+    description: "Test output mode (FULL or FAILURES_ONLY)"
+    required: false
+    default: "FULL"
+  job-status:
+    description: "Current job status"
+    required: true
+  test-start-time:
+    description: "Test start timestamp (epoch)"
+    required: true
+  race-detection-enabled:
+    description: "Whether race detection was enabled"
+    required: false
+    default: "false"
+  code-coverage-enabled:
+    description: "Whether code coverage was enabled"
+    required: false
+    default: "false"
+  fuzz-run:
+    description: "Whether this is a fuzz test run"
+    required: false
+    default: "false"
+  failures-file:
+    description: "Path to test failures file"
+    required: false
+    default: "test-failures.txt"
+  output-file:
+    description: "Path to test output file"
+    required: false
+    default: "test-output.log"
+
+outputs:
+  statistics-file:
+    description: "Path to generated statistics JSON file"
+    value: ${{ steps.generate-stats.outputs.statistics-file }}
+  test-count:
+    description: "Total number of tests found"
+    value: ${{ steps.generate-stats.outputs.test-count }}
+  benchmark-count:
+    description: "Total number of benchmarks found"
+    value: ${{ steps.generate-stats.outputs.benchmark-count }}
+  total-failures:
+    description: "Total number of test failures"
+    value: ${{ steps.generate-stats.outputs.total-failures }}
+  test-passed:
+    description: "Boolean indicating if tests passed"
+    value: ${{ steps.generate-stats.outputs.test-passed }}
+  duration-seconds:
+    description: "Test execution duration in seconds"
+    value: ${{ steps.generate-stats.outputs.duration-seconds }}
+  loc-total:
+    description: "Total lines of code"
+    value: ${{ steps.generate-stats.outputs.loc-total }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: 📊 Calculate test statistics
+      id: generate-stats
+      shell: bash
+      run: |
+        # Enable error handling but don't exit on first error to allow cleanup
+        set +e
+
+        # Get basic values with safe defaults
+        TEST_EXIT_CODE="${{ inputs.test-exit-code }}"
+        OUTPUT_MODE="${{ inputs.output-mode }}"
+        TEST_END=$(date +%s)
+        TEST_DURATION=$((TEST_END - ${{ inputs.test-start-time }}))
+
+        # Count tests and benchmarks
+        FUZZ_RUN="${{ inputs.fuzz-run }}"
+        if [[ "$FUZZ_RUN" == "true" ]]; then
+          # Count fuzz functions for fuzz runs
+          TEST_COUNT=$(find . -type f -name '*_test.go' \
+            -not -path './vendor/*' \
+            -not -path './third_party/*' \
+            -not -path './testdata/*' \
+            -exec grep -hE '^\s*func (\([^)]+\) )?Fuzz[A-Z0-9_]' {} + | wc -l | xargs)
+        else
+          # Count test functions for regular test runs
+          TEST_COUNT=$(find . -type f -name '*_test.go' \
+            -not -path './vendor/*' \
+            -not -path './third_party/*' \
+            -not -path './testdata/*' \
+            -exec grep -hE '^\s*func (\([^)]+\) )?Test[A-Z0-9_]' {} + | wc -l | xargs)
+        fi
+        TEST_COUNT=${TEST_COUNT:-0}
+
+        BENCHMARK_COUNT=$(find . -type f -name '*_test.go' \
+          -not -path './vendor/*' \
+          -not -path './third_party/*' \
+          -exec grep -h '^func Benchmark' {} + | wc -l | xargs)
+        BENCHMARK_COUNT=${BENCHMARK_COUNT:-0}
+
+        # Count failures
+        TOTAL_FAILURES=0
+        FAILURES_FILE="${{ inputs.failures-file }}"
+        if [[ -f "$FAILURES_FILE" ]]; then
+          TOTAL_FAILURES=$(wc -l < "$FAILURES_FILE" 2>/dev/null || echo "0")
+        fi
+
+        # Calculate output size
+        OUTPUT_SIZE=0
+        OUTPUT_FILE="${{ inputs.output-file }}"
+        if [[ -f "$OUTPUT_FILE" ]]; then
+          OUTPUT_SIZE=$(wc -c < "$OUTPUT_FILE" 2>/dev/null || echo "0")
+        fi
+
+        # Collect Lines of Code metrics using magex
+        LOC_TEST_FILES=""
+        LOC_GO_FILES=""
+        LOC_TOTAL=""
+        LOC_DATE=$(date -u +"%Y-%m-%d")
+
+        if command -v magex &> /dev/null; then
+          echo "📊 Collecting Lines of Code metrics..."
+          LOC_OUTPUT=$(magex metrics:loc 2>&1 || true)
+          if [[ -n "$LOC_OUTPUT" ]]; then
+            echo "📋 Raw LOC output:"
+            echo "$LOC_OUTPUT"
+            echo "📋 Parsing LOC data..."
+
+            # Extract numbers from magex metrics:loc output - preserve commas for display
+            # Format: "| Test Files | 71,476      | 2025-08-28 |" -> extract field 3, trim spaces but keep commas
+            LOC_TEST_FILES=$(echo "$LOC_OUTPUT" | grep "Test Files" | awk -F'|' '{print $3}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
+            LOC_GO_FILES=$(echo "$LOC_OUTPUT" | grep "Go Files" | awk -F'|' '{print $3}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
+            # Format: "✅ Total lines of code: 93,418" -> extract last field after colon, preserve commas
+            LOC_TOTAL=$(echo "$LOC_OUTPUT" | grep "Total lines of code:" | awk -F':' '{print $2}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
+
+            echo "📊 Parsed values:"
+            echo "  - Test Files: '$LOC_TEST_FILES'"
+            echo "  - Go Files: '$LOC_GO_FILES'"
+            echo "  - Total: '$LOC_TOTAL'"
+
+            if [[ -n "$LOC_TOTAL" ]]; then
+              echo "✅ LOC collected: $LOC_TOTAL total ($LOC_TEST_FILES test, $LOC_GO_FILES go)"
+            else
+              echo "⚠️ LOC parsing failed - no total found"
+            fi
+          else
+            echo "⚠️ No LOC output collected from magex"
+          fi
+        else
+          echo "⚠️ magex not available for LOC collection"
+        fi
+
+        # Pre-compute boolean values
+        TEST_PASSED=$([ "$TEST_EXIT_CODE" = "0" ] && echo "true" || echo "false")
+        RACE_ENABLED="${{ inputs.race-detection-enabled == 'true' && 'true' || 'false' }}"
+        COVERAGE_ENABLED="${{ inputs.code-coverage-enabled == 'true' && 'true' || 'false' }}"
+        FUZZ_RUN="${{ inputs.fuzz-run == 'true' && 'true' || 'false' }}"
+
+        # Count affected packages from failure details
+        AFFECTED_PACKAGES=0
+        FAILURE_DETAILS="[]"
+        if [[ -f test-failures-summary.json ]] && [[ -s test-failures-summary.json ]]; then
+          AFFECTED_PACKAGES=$(jq 'length' test-failures-summary.json 2>/dev/null || echo "0")
+          # Extract failure details for completion report
+          FAILURE_DETAILS=$(jq '[.[] as $parent | $parent.failures[] | {
+            Test: .Test,
+            Package: $parent.Package,
+            Duration: (.Elapsed // "unknown"),
+            Output: ((.Output // "") | if length > 500 then .[0:500] + "..." else . end)
+          }]' test-failures-summary.json 2>/dev/null || echo "[]")
+        fi
+
+        # Secondary validation: Cross-check test_passed against detected failures
+        echo "🔍 Secondary validation: Cross-checking test_passed against failure indicators..."
+        ORIGINAL_TEST_PASSED="$TEST_PASSED"
+
+        if [[ "$TEST_PASSED" == "true" ]]; then
+          # Check for inconsistencies where test_passed=true but we have failures
+          if [[ "$TOTAL_FAILURES" -gt 0 ]] || [[ "$AFFECTED_PACKAGES" -gt 0 ]]; then
+            echo "⚠️ Inconsistency detected: test_passed=true but failures found:"
+            echo "   • Total failures: $TOTAL_FAILURES"
+            echo "   • Affected packages: $AFFECTED_PACKAGES"
+            echo "🔧 Overriding test_passed from true to false"
+            TEST_PASSED="false"
+          fi
+
+          # Note: Previously checked for "Error:" patterns in test output, but this was too broad
+          # and caught legitimate error strings in test assertions, output formatting, and test data.
+          # Removed to rely on more accurate failure detection from test exit codes and structured data.
+        fi
+
+        if [[ "$ORIGINAL_TEST_PASSED" != "$TEST_PASSED" ]]; then
+          echo "✅ Secondary validation corrected test_passed: $ORIGINAL_TEST_PASSED -> $TEST_PASSED"
+        else
+          echo "✅ Secondary validation confirmed test_passed: $TEST_PASSED"
+        fi
+
+        # Use jq to build JSON safely - no heredocs, no sed, no complex logic
+        # Generate appropriate filename based on test type
+        if [[ "$FUZZ_RUN" == "true" ]]; then
+          STATS_FILE="fuzz-stats-${{ inputs.matrix-os }}-${{ inputs.matrix-go-version }}.json"
+        else
+          STATS_FILE="test-stats-${{ inputs.matrix-os }}-${{ inputs.matrix-go-version }}.json"
+        fi
+
+        # Set fuzz_test_count for fuzz runs (same as test_count for fuzz tests)
+        FUZZ_TEST_COUNT=0
+        if [[ "$FUZZ_RUN" == "true" ]]; then
+          FUZZ_TEST_COUNT=$TEST_COUNT
+        fi
+
+        # Create JSON with error handling
+        JSON_CREATE_SUCCESS=false
+        if jq -n \
+          --arg name "${{ inputs.matrix-name }}" \
+          --arg os "${{ inputs.matrix-os }}" \
+          --arg version "${{ inputs.matrix-go-version }}" \
+          --arg exit_code "$TEST_EXIT_CODE" \
+          --argjson passed "$TEST_PASSED" \
+          --arg status "${{ inputs.job-status }}" \
+          --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          --arg test_mode "$OUTPUT_MODE" \
+          --argjson duration "$TEST_DURATION" \
+          --argjson test_count "$TEST_COUNT" \
+          --argjson benchmark_count "$BENCHMARK_COUNT" \
+          --argjson total_failures "$TOTAL_FAILURES" \
+          --argjson affected_packages "$AFFECTED_PACKAGES" \
+          --argjson failure_details "$FAILURE_DETAILS" \
+          --argjson output_size "$OUTPUT_SIZE" \
+          --argjson race_enabled "$RACE_ENABLED" \
+          --argjson coverage_enabled "$COVERAGE_ENABLED" \
+          --argjson fuzz_run "$FUZZ_RUN" \
+          --argjson fuzz_test_count "$FUZZ_TEST_COUNT" \
+          --arg loc_test_files "$LOC_TEST_FILES" \
+          --arg loc_go_files "$LOC_GO_FILES" \
+          --arg loc_total "$LOC_TOTAL" \
+          --arg loc_date "$LOC_DATE" \
+          '{
+            name: $name,
+            os: $os,
+            go_version: $version,
+            test_mode: $test_mode,
+            duration_seconds: $duration,
+            test_count: $test_count,
+            benchmark_count: $benchmark_count,
+            status: $status,
+            test_exit_code: ($exit_code | tonumber),
+            test_passed: $passed,
+            total_failures: $total_failures,
+            affected_packages: $affected_packages,
+            failure_details: $failure_details,
+            output_size_bytes: $output_size,
+            race_enabled: $race_enabled,
+            coverage_enabled: $coverage_enabled,
+            fuzz_run: $fuzz_run,
+            fuzz_test_count: $fuzz_test_count,
+            timestamp: $timestamp,
+            loc_test_files: $loc_test_files,
+            loc_go_files: $loc_go_files,
+            loc_total: $loc_total,
+            loc_date: $loc_date
+          }' > "$STATS_FILE" 2>/dev/null; then
+          JSON_CREATE_SUCCESS=true
+          echo "📊 Test statistics generated successfully:"
+        else
+          echo "⚠️ JSON creation failed, creating minimal statistics file"
+          # Create minimal fallback JSON
+          printf '%s\n' \
+            '{' \
+            '  "name": "'"${{ inputs.matrix-name }}"'",' \
+            '  "os": "'"${{ inputs.matrix-os }}"'",' \
+            '  "go_version": "'"${{ inputs.matrix-go-version }}"'",' \
+            '  "test_mode": "'"$OUTPUT_MODE"'",' \
+            '  "duration_seconds": '"$TEST_DURATION"',' \
+            '  "test_count": '"${TEST_COUNT:-0}"',' \
+            '  "benchmark_count": '"${BENCHMARK_COUNT:-0}"',' \
+            '  "status": "'"${{ inputs.job-status }}"'",' \
+            '  "test_exit_code": '"${TEST_EXIT_CODE:-0}"',' \
+            '  "test_passed": '"$TEST_PASSED"',' \
+            '  "total_failures": '"${TOTAL_FAILURES:-0}"',' \
+            '  "affected_packages": '"${AFFECTED_PACKAGES:-0}"',' \
+            '  "failure_details": [],' \
+            '  "output_size_bytes": '"${OUTPUT_SIZE:-0}"',' \
+            '  "race_enabled": '"$RACE_ENABLED"',' \
+            '  "coverage_enabled": '"$COVERAGE_ENABLED"',' \
+            '  "fuzz_run": '"$FUZZ_RUN"',' \
+            '  "fuzz_test_count": '"${FUZZ_TEST_COUNT:-0}"',' \
+            '  "timestamp": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'",' \
+            '  "loc_test_files": "'"$LOC_TEST_FILES"'",' \
+            '  "loc_go_files": "'"$LOC_GO_FILES"'",' \
+            '  "loc_total": "'"$LOC_TOTAL"'",' \
+            '  "loc_date": "'"$LOC_DATE"'"' \
+            '}' > "$STATS_FILE"
+          JSON_CREATE_SUCCESS=true
+          echo "📊 Minimal test statistics generated successfully:"
+        fi
+
+        # Display the JSON file if it was created successfully
+        if [[ "$JSON_CREATE_SUCCESS" == "true" ]] && [[ -f "$STATS_FILE" ]]; then
+          jq . "$STATS_FILE" 2>/dev/null || cat "$STATS_FILE"
+        else
+          echo "❌ Failed to create statistics file"
+        fi
+
+        # Always set outputs for other steps/workflows (with safe defaults)
+        if [[ "$JSON_CREATE_SUCCESS" == "true" ]] && [[ -f "$STATS_FILE" ]]; then
+          echo "statistics-file=$STATS_FILE" >> $GITHUB_OUTPUT
+        else
+          echo "statistics-file=" >> $GITHUB_OUTPUT
+        fi
+        echo "test-count=${TEST_COUNT:-0}" >> $GITHUB_OUTPUT
+        echo "benchmark-count=${BENCHMARK_COUNT:-0}" >> $GITHUB_OUTPUT
+        echo "total-failures=${TOTAL_FAILURES:-0}" >> $GITHUB_OUTPUT
+        echo "test-passed=${TEST_PASSED:-false}" >> $GITHUB_OUTPUT
+        echo "duration-seconds=${TEST_DURATION:-0}" >> $GITHUB_OUTPUT
+        echo "loc-total=${LOC_TOTAL:-}" >> $GITHUB_OUTPUT
+
+        echo "📊 Statistics collection completed:"
+        echo "   • Tests: ${TEST_COUNT:-0}"
+        echo "   • Benchmarks: ${BENCHMARK_COUNT:-0}"
+        echo "   • Failures: ${TOTAL_FAILURES:-0}"
+        echo "   • Passed: ${TEST_PASSED:-false}"
+        echo "   • Duration: ${TEST_DURATION:-0}s"
+        echo "   • LOC Total: ${LOC_TOTAL:-N/A}"
+
+        # Always exit successfully to prevent cascading failures
+        exit 0

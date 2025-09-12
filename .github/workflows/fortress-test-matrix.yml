@@ -1,0 +1,719 @@
+# ------------------------------------------------------------------------------------
+#  Test Matrix Execution (Reusable Workflow) (GoFortress)
+#
+#  Purpose: Execute Go tests across multiple operating systems and Go versions
+#  in a matrix strategy with comprehensive failure detection and statistics collection.
+#
+#  This workflow handles:
+#    - Multi-platform test execution (ubuntu, windows, macOS)
+#    - Multiple Go version testing (primary, secondary)
+#    - Race detection and code coverage
+#    - Test failure detection and reporting
+#    - Statistics collection and artifact uploading
+#    - Cache performance tracking
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: GoFortress (Test Matrix)
+
+on:
+  workflow_call:
+    inputs:
+      env-json:
+        description: "JSON string of environment variables"
+        required: true
+        type: string
+      test-matrix:
+        description: "Test matrix JSON"
+        required: true
+        type: string
+      primary-runner:
+        description: "Primary runner OS"
+        required: true
+        type: string
+      go-primary-version:
+        description: "Primary Go version"
+        required: true
+        type: string
+      go-secondary-version:
+        description: "Secondary Go version"
+        required: true
+        type: string
+      code-coverage-enabled:
+        description: "Whether code coverage is enabled"
+        required: true
+        type: string
+      race-detection-enabled:
+        description: "Whether race detection is enabled"
+        required: true
+        type: string
+      redis-enabled:
+        description: "Whether Redis service is enabled"
+        required: false
+        type: string
+        default: "false"
+      redis-version:
+        description: "Redis Docker image version"
+        required: false
+        type: string
+        default: "7-alpine"
+      redis-host:
+        description: "Redis host for tests"
+        required: false
+        type: string
+        default: "localhost"
+      redis-port:
+        description: "Redis port for tests"
+        required: false
+        type: string
+        default: "6379"
+      redis-health-retries:
+        description: "Redis health check retry count"
+        required: false
+        type: string
+        default: "10"
+      redis-health-interval:
+        description: "Redis health check interval in seconds"
+        required: false
+        type: string
+        default: "10"
+      redis-health-timeout:
+        description: "Redis health check timeout in seconds"
+        required: false
+        type: string
+        default: "5"
+      redis-trust-service-health:
+        description: "Trust GitHub Actions service container health checks"
+        required: false
+        type: string
+        default: "true"
+
+# Security: Restrictive default permissions with job-level overrides for least privilege access
+permissions:
+  contents: read
+
+jobs:
+  # ----------------------------------------------------------------------------------
+  # Testing Matrix for Go (Parallel)
+  # ----------------------------------------------------------------------------------
+  test-go:
+    name: 🧪 Test (${{ matrix.name }})
+    timeout-minutes: 30 # Prevent hung tests
+    permissions:
+      contents: read # Read repository content for testing
+    strategy:
+      fail-fast: true
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
+    runs-on: ${{ matrix.os }}
+
+    # Redis service container (conditionally enabled)
+    services:
+      redis:
+        image: ${{ inputs.redis-enabled == 'true' && format('redis:{0}', inputs.redis-version) || 'busybox:latest' }}
+        options: ${{ inputs.redis-enabled == 'true' && format('--health-cmd "redis-cli ping" --health-interval {0}s --health-timeout {1}s --health-retries {2}', inputs.redis-health-interval, inputs.redis-health-timeout, inputs.redis-health-retries) || '--entrypoint sh' }}
+        ports:
+          - ${{ inputs.redis-enabled == 'true' && format('{0}:{0}', inputs.redis-port) || '9999:9999' }}
+
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Checkout code (required for local actions)
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      # ————————————————————————————————————————————————————————————————
+      # Parse environment variables
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Parse environment variables
+        uses: ./.github/actions/parse-env
+        with:
+          env-json: ${{ inputs.env-json }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Setup Go with caching and version management
+      # ————————————————————————————————————————————————————————————————
+      - name: 🏗️ Setup Go with Cache
+        id: setup-go-test
+        uses: ./.github/actions/setup-go-with-cache
+        with:
+          go-version: ${{ matrix.go-version }}
+          matrix-os: ${{ matrix.os }}
+          go-primary-version: ${{ inputs.go-primary-version }}
+          go-secondary-version: ${{ inputs.go-secondary-version }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Setup MAGE-X (required for magex test commands)
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Setup MAGE-X
+        uses: ./.github/actions/setup-magex
+        with:
+          magex-version: ${{ env.MAGE_X_VERSION }}
+          runner-os: ${{ matrix.os }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Start test timer
+      # ————————————————————————————————————————————————————————————————
+      - name: ⏱️ Start test timer
+        id: test-timer
+        run: |
+          TEST_START=$(date +%s)
+          echo "test-start=$TEST_START" >> $GITHUB_OUTPUT
+          echo "🕒 Test timer started at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      # ————————————————————————————————————————————————————————————————
+      # Detect test output mode based on test count and configuration
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔍 Detect test output mode
+        id: detect-mode
+        run: |
+          # Count total tests in the repository (excluding vendor and testdata)
+          TEST_COUNT=$(find . -type f -name '*_test.go' \
+            -not -path './vendor/*' \
+            -not -path './third_party/*' \
+            -not -path './testdata/*' \
+            -exec grep -hE '^\s*func (\([^)]+\) )?Test[A-Z0-9_]' {} + | wc -l | xargs)
+
+          # Sanitize count (ensure it's numeric)
+          TEST_COUNT=${TEST_COUNT:-0}
+          if ! [[ "$TEST_COUNT" =~ ^[0-9]+$ ]]; then
+            TEST_COUNT=0
+          fi
+
+          echo "📊 Total tests found: $TEST_COUNT"
+
+          # Determine output mode based on test count and failure patterns
+          # For large test suites (>100 tests), use FAILURES_ONLY to reduce noise
+          # For smaller test suites, use FULL to see all output
+          if [[ "$TEST_COUNT" -gt 100 ]]; then
+            DETECTED_MODE="FAILURES_ONLY"
+            echo "🎛️ Using FAILURES_ONLY mode for large test suite ($TEST_COUNT tests)"
+          else
+            DETECTED_MODE="FULL"
+            echo "🎛️ Using FULL mode for manageable test suite ($TEST_COUNT tests)"
+          fi
+
+          echo "detected-mode=$DETECTED_MODE" >> $GITHUB_OUTPUT
+          echo "test-count=$TEST_COUNT" >> $GITHUB_OUTPUT
+
+      # ————————————————————————————————————————————————————————————————
+      # Setup Redis service using composite action with caching
+      # ————————————————————————————————————————————————————————————————
+      - name: 🗄️ Setup Redis Service
+        id: setup-redis
+        uses: ./.github/actions/setup-redis-service
+        with:
+          redis-enabled: ${{ inputs.redis-enabled }}
+          redis-version: ${{ inputs.redis-version }}
+          redis-host: ${{ inputs.redis-host }}
+          redis-port: ${{ inputs.redis-port }}
+          matrix-os: ${{ matrix.os }}
+          use-cache: "true"
+          trust-service-health: ${{ inputs.redis-trust-service-health }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Setup test failure detection functions
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Setup failure detection
+        uses: ./.github/actions/test-failure-detection
+        with:
+          output-file: "test-output.log"
+          mode: "text" # Will be overridden during actual detection
+
+      # ————————————————————————————————————————————————————————————————
+      # Run tests with appropriate configuration
+      # ————————————————————————————————————————————————————————————————
+      - name: 🧪 Run tests
+        id: run-tests
+        continue-on-error: true
+        run: |
+          # Sanitize inherited environment variables first
+          TEST_COUNT=${TEST_COUNT:-0}
+          TEST_COUNT=$(echo "$TEST_COUNT" | xargs)
+          if ! [[ "$TEST_COUNT" =~ ^[0-9]+$ ]]; then
+            TEST_COUNT=0
+          fi
+          export TEST_COUNT
+
+          # Safely assign values to shell vars with defaults
+          RACE="${{ inputs.race-detection-enabled || 'false' }}"
+          COVER="${{ inputs.code-coverage-enabled || 'false' }}"
+          MODE="${{ steps.detect-mode.outputs.detected-mode || 'FULL' }}"
+
+          echo "🔍 Race Detection Enabled: $RACE"
+          echo "🔍 Code Coverage Enabled: $COVER"
+          echo "🎛️ Output Mode: $MODE"
+
+          # Initialize test exit code
+          TEST_EXIT_CODE=0
+
+          # Build unified magex command with timeout and appropriate test type
+          if [[ "$RACE" == "true" && "$COVER" == "true" ]]; then
+            TEST_TIMEOUT="${TEST_TIMEOUT_RACE_COVER:-30m}"
+            TEST_TYPE="coverrace"
+            echo "🏁 Running tests with race detection and coverage analysis (timeout: $TEST_TIMEOUT)..."
+          elif [[ "$RACE" != "true" && "$COVER" == "true" ]]; then
+            TEST_TIMEOUT="${TEST_TIMEOUT_RACE_COVER:-30m}"
+            TEST_TYPE="cover"
+            echo "🏁 Running tests with coverage analysis (timeout: $TEST_TIMEOUT)..."
+          elif [[ "$RACE" == "true" && "$COVER" != "true" ]]; then
+            TEST_TIMEOUT="${TEST_TIMEOUT:-30m}"
+            TEST_TYPE="race"
+            echo "🏁 Running tests with race detection (timeout: $TEST_TIMEOUT)..."
+          else
+            TEST_TIMEOUT="${TEST_TIMEOUT_UNIT:-20m}"
+            TEST_TYPE="unit"
+            echo "🏁 Running tests without coverage or race detection (timeout: $TEST_TIMEOUT)..."
+          fi
+
+          # Build command with JSON flag for FAILURES_ONLY mode
+          MAGEX_CMD="magex test:${TEST_TYPE} -timeout $TEST_TIMEOUT"
+          if [[ "$MODE" == "FAILURES_ONLY" ]]; then
+            MAGEX_CMD="$MAGEX_CMD -json"
+          fi
+
+          echo "🔧 Running: $MAGEX_CMD (timeout: $TEST_TIMEOUT)"
+
+          # Pre-execution diagnostic info for better visibility
+          PACKAGE_COUNT=$(find . -name '*.go' -not -path './vendor/*' -not -path './third_party/*' | xargs dirname | sort -u | wc -l | xargs)
+          PACKAGE_COUNT=${PACKAGE_COUNT:-0}
+          echo "🚀 Starting test execution:"
+          echo "   • Total tests: $TEST_COUNT"
+          echo "   • Test packages: $PACKAGE_COUNT"
+          echo "   • Test mode: $TEST_TYPE"
+          echo "   • Output mode: $MODE"
+          ESTIMATED_TIME=$(( ($TEST_COUNT + 49) / 50 ))
+          echo "   • Estimated time: $ESTIMATED_TIME minutes (based on ~50 tests/minute)"
+          echo "   • Timeout: $TEST_TIMEOUT"
+          echo ""
+
+          START_TIME=$(date +%s)
+          export START_TIME
+
+          # Execute based on detected mode with simplified processing
+          set +e  # Don't exit on error to capture exit code properly
+          if [[ "$MODE" == "FULL" ]]; then
+            echo "📝 Using FULL output mode - showing all test output"
+            echo "🔍 Executing: $MAGEX_CMD"
+            $MAGEX_CMD 2>&1 | tee test-output.log
+            TEST_EXIT_CODE=${PIPESTATUS[0]}
+            echo "🔍 Magex command exit code: $TEST_EXIT_CODE"
+
+            # Extract failures for summary (even in full mode) using robust detection
+            if [[ $TEST_EXIT_CODE -ne 0 ]]; then
+              source test-failure-functions.sh 2>/dev/null || true
+              detect_failures_from_text "test-output.log" "test-failures.txt" || true
+            fi
+
+          elif [[ "$MODE" == "FAILURES_ONLY" ]]; then
+            echo "📝 Using FAILURES_ONLY mode - JSON output with failure extraction"
+            echo "🔍 Executing: $MAGEX_CMD"
+            $MAGEX_CMD 2>&1 | tee test-output.log
+            TEST_EXIT_CODE=${PIPESTATUS[0]}
+            echo "🔍 Magex command exit code: $TEST_EXIT_CODE"
+
+            # Always extract failures in JSON mode to check for test failures
+            source test-failure-functions.sh 2>/dev/null || true
+            detect_failures_from_json "test-output.log" "test-failures.txt" || true
+
+            # JSON failure override: Check if JSON contains ACTUAL test failures when exit code is 0
+            if [[ $TEST_EXIT_CODE -eq 0 ]] && [[ -f test-output.log ]]; then
+              echo "🔍 Checking JSON output for actual test failures despite exit code 0..."
+
+              # Check for JSON test failure entries or error patterns
+              JSON_FAILURES=0
+              if grep -q '^{' test-output.log 2>/dev/null; then
+                # Count ONLY failed test events, not package/suite failures which are expected
+                # Look for Action="fail" AND Package field AND Test field (indicating actual test failure)
+                JSON_FAILURES=$(grep '^{' test-output.log 2>/dev/null | \
+                  jq -r 'select(.Action == "fail" and .Test != null and .Test != "" and (.Package // "") != "" and (.Test | test("^Test[A-Za-z].*"))) | .Test' 2>/dev/null | wc -l | xargs || echo "0")
+
+                if [[ $JSON_FAILURES -gt 0 ]]; then
+                  echo "⚠️ Found $JSON_FAILURES actual failing test functions in JSON output"
+                  echo "🔧 Overriding exit code from 0 to 1 due to detected test failures"
+                  TEST_EXIT_CODE=1
+                else
+                  echo "✅ JSON output contains no actual test failures (exit code 0 is correct)"
+                fi
+              fi
+            fi
+          fi
+          set -e
+
+          # Set outputs for other steps
+          echo "test-exit-code=$TEST_EXIT_CODE" >> $GITHUB_OUTPUT
+          echo "output-mode=$MODE" >> $GITHUB_OUTPUT
+
+          echo "🏁 Test execution completed with exit code: $TEST_EXIT_CODE"
+
+      # ————————————————————————————————————————————————————————————————
+      # Normalize coverage file name if coverage was generated
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔄 Normalize coverage file name
+        if: inputs.code-coverage-enabled == 'true' && steps.run-tests.outputs.test-exit-code == '0'
+        run: |
+          # Look for generated coverage files with various naming patterns
+          for coverage_file in coverage.out coverage.txt cover.out cover.txt profile.out profile.txt; do
+            if [[ -f "$coverage_file" ]]; then
+              echo "📁 Found coverage file: $coverage_file"
+              if [[ "$coverage_file" != "coverage.txt" ]]; then
+                echo "🔄 Renaming $coverage_file to coverage.txt for consistency"
+                mv "$coverage_file" coverage.txt
+              fi
+              echo "✅ Coverage file normalized to coverage.txt"
+              break
+            fi
+          done
+
+          # Verify coverage file exists and has content
+          if [[ -f coverage.txt ]] && [[ -s coverage.txt ]]; then
+            COVERAGE_LINES=$(wc -l < coverage.txt)
+            echo "✅ Coverage file verified: $COVERAGE_LINES lines"
+          else
+            echo "⚠️ No coverage file found or file is empty"
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Inject matrix job info into failure signatures for deduplication tracking
+      # ————————————————————————————————————————————————————————————————
+      - name: 🏷️ Add matrix job info to signatures
+        if: always()
+        run: |
+          # Add matrix job information to signatures for tracking across matrix jobs
+          if [[ -f test-failures-signatures.json ]]; then
+            echo "🏷️ Adding matrix job information to failure signatures..."
+            MATRIX_JOB_ID="${{ matrix.name }}"
+
+            # Debug: Show signature file before processing
+            echo "🔍 Signature file before adding matrix info:"
+            echo "  • File size: $(wc -c < test-failures-signatures.json) bytes"
+            echo "  • Entry count: $(jq 'length' test-failures-signatures.json 2>/dev/null || echo 'invalid')"
+            if [[ -s test-failures-signatures.json ]]; then
+              echo "  • First entry:"
+              jq '.[0]' test-failures-signatures.json 2>/dev/null | head -5 | sed 's/^/    /' || echo "    (invalid JSON)"
+            fi
+
+            # Add matrix_job field to each signature entry
+            jq --arg matrix_job "$MATRIX_JOB_ID" 'map(. + {matrix_job: $matrix_job})' test-failures-signatures.json > test-failures-signatures.tmp && \
+              mv test-failures-signatures.tmp test-failures-signatures.json
+
+            echo "✅ Added matrix job info ($MATRIX_JOB_ID) to $(jq 'length' test-failures-signatures.json 2>/dev/null || echo '0') signatures"
+          else
+            echo "ℹ️ No signatures file found - creating empty file for matrix job ${{ matrix.name }}"
+            echo '[]' > test-failures-signatures.json
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Create test failure summary if failures occurred
+      # ————————————————————————————————————————————————————————————————
+      - name: 🚨 Create Test Failure Summary
+        if: always() && steps.run-tests.outputs.test-exit-code != '0'
+        run: |
+          echo "🚨 Processing test failures for enhanced reporting..."
+
+          FAILURES_EXIST=false
+
+          # Check if we have failure details to process
+          if [[ -f test-failures.txt ]] && [[ -s test-failures.txt ]]; then
+            FAILURES_EXIST=true
+            echo "📋 Found $(wc -l < test-failures.txt) test failures to process"
+
+            # Create enhanced failure summary with structured JSON output
+            echo "📊 Creating enhanced test failure summary..."
+
+            # Initialize the JSON structure
+            echo '[]' > test-failures-summary.json
+
+            # Process each unique package that had failures
+            TEMP_PACKAGES=$(mktemp)
+
+            # Process both test failures and build failures
+
+            # Extract package names from test failures using a named regex and
+            # intermediate steps
+            FAIL_REGEX='FAIL:.*\(([^)]+)\)'
+            PACKAGE_LINE_REGEX='.*\(([^):]+)[^)]*\).*'
+
+            grep -oE "$FAIL_REGEX" test-failures.txt 2>/dev/null > temp-fail-lines.txt
+            sed -E "s/$PACKAGE_LINE_REGEX/\1/" temp-fail-lines.txt | sort -u > "$TEMP_PACKAGES"
+            rm temp-fail-lines.txt
+
+            if [[ -s "$TEMP_PACKAGES" ]]; then
+              echo "📦 Found packages with test failures:"
+              cat "$TEMP_PACKAGES"
+
+              # Process each package with test failures
+              while IFS= read -r package; do
+                if [[ -n "$package" ]]; then
+                  echo "🔍 Processing test failures for package: $package"
+
+                  # Extract failures for this specific package
+                  PACKAGE_FAILURES=$(grep "($package)" test-failures.txt 2>/dev/null || true)
+                  if [[ -n "$PACKAGE_FAILURES" ]]; then
+                    # Create package failure entry for test failures
+                    PACKAGE_JSON=$(jq -n \
+                      --arg pkg "$package" \
+                      --arg failures "$PACKAGE_FAILURES" \
+                      '{
+                        Package: $pkg,
+                        Type: "test",
+                        failures: [
+                          $failures | split("\n")[] | select(length > 0) | {
+                            Test: (. | gsub("^.*FAIL: "; "") | gsub(" \\(.*\\)$"; "")),
+                            Output: .,
+                            Elapsed: "unknown"
+                          }
+                        ]
+                      }')
+
+                    # Add to summary
+                    jq --argjson new_entry "$PACKAGE_JSON" '. += [$new_entry]' test-failures-summary.json > test-failures-summary.json.tmp
+                    mv test-failures-summary.json.tmp test-failures-summary.json
+                  fi
+                fi
+              done < "$TEMP_PACKAGES"
+            fi
+
+            rm -f "$TEMP_PACKAGES"
+
+            # Now handle build failures separately
+            TEMP_BUILD_PACKAGES=$(mktemp)
+
+            if grep "^--- BUILD FAILED:" test-failures.txt 2>/dev/null | sed 's/^--- BUILD FAILED: //' | sort -u > "$TEMP_BUILD_PACKAGES"; then
+              echo "📦 Found packages with build failures:"
+              cat "$TEMP_BUILD_PACKAGES"
+
+              # Process each package with build failures
+              while IFS= read -r package; do
+                if [[ -n "$package" ]]; then
+                  echo "🔨 Processing build failures for package: $package"
+
+                  # Extract build error details for this package
+                  BUILD_ERRORS=$(awk -v pkg="$package" '
+                    BEGIN { capture = 0; errors = "" }
+                    $0 == "--- BUILD FAILED: " pkg { capture = 1; next }
+                    /^--- (FAIL|BUILD FAILED):/ && $0 != "--- BUILD FAILED: " pkg { capture = 0 }
+                    capture && /^    / {
+                      if (errors) errors = errors "\n" substr($0, 5)
+                      else errors = substr($0, 5)
+                    }
+                    END { print errors }
+                  ' test-failures.txt)
+
+                  # Create package failure entry for build failures
+                  BUILD_JSON=$(jq -n \
+                    --arg pkg "$package" \
+                    --arg errors "$BUILD_ERRORS" \
+                    '{
+                      Package: $pkg,
+                      Type: "build",
+                      BuildErrors: ($errors | split("\n") | map(select(length > 0))),
+                      failures: [{
+                        Test: "Build compilation",
+                        Output: ("--- BUILD FAILED: " + $pkg + "\n" + $errors),
+                        Elapsed: "unknown"
+                      }]
+                    }')
+
+                  # Add to summary
+                  jq --argjson new_entry "$BUILD_JSON" '. += [$new_entry]' test-failures-summary.json > test-failures-summary.json.tmp
+                  mv test-failures-summary.json.tmp test-failures-summary.json
+                fi
+              done < "$TEMP_BUILD_PACKAGES"
+            fi
+
+            rm -f "$TEMP_BUILD_PACKAGES"
+
+            echo "✅ Test failure summary created with $(jq 'length' test-failures-summary.json) packages"
+
+          else
+            echo "ℹ️ No specific test failures detected, creating generic failure entry"
+            # Create generic failure entry when exit code indicates failure but no specific patterns found
+            jq -n \
+              --arg exit_code "${{ steps.run-tests.outputs.test-exit-code }}" \
+              '[{
+                Package: "unknown",
+                failures: [{
+                  Test: "Generic failure",
+                  Output: ("Test execution failed with exit code " + $exit_code),
+                  Elapsed: "unknown"
+                }]
+              }]' > test-failures-summary.json
+          fi
+
+          # Verify the summary file
+          if [[ -f test-failures-summary.json ]]; then
+            echo "📊 Final failure summary:"
+            jq . test-failures-summary.json
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Create test failure annotations for GitHub PR/commit view
+      # ————————————————————————————————————————————————————————————————
+      - name: 📋 Annotate Key Test Failures
+        if: always() && steps.run-tests.outputs.test-exit-code != '0'
+        run: |
+          if [[ -f test-failures.txt ]] && [[ -s test-failures.txt ]]; then
+            echo "📋 Creating GitHub annotations for key test failures..."
+
+            # Limit to first 10 failures to avoid annotation overload
+            head -10 test-failures.txt | while IFS= read -r failure_line; do
+              if [[ -n "$failure_line" ]]; then
+                # Extract test name and create annotation
+                TEST_NAME=$(echo "$failure_line" | sed -E 's/^.*FAIL: ([^ ]+).*$/\1/' | head -c 100)
+                echo "::error title=Test Failure::❌ $TEST_NAME failed in ${{ matrix.name }}"
+              fi
+            done
+
+            TOTAL_FAILURES=$(wc -l < test-failures.txt)
+            if [[ "$TOTAL_FAILURES" -gt 10 ]]; then
+              echo "::warning title=Additional Failures::⚠️ $((TOTAL_FAILURES - 10)) additional test failures not shown in annotations"
+            fi
+
+            echo "✅ Created annotations for up to 10 test failures"
+          else
+            echo "::error title=Test Suite Failed::❌ Test suite failed but no specific failure patterns detected"
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Generate comprehensive test statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Calculate test statistics
+        id: test-summary
+        if: always()
+        uses: ./.github/actions/test-statistics
+        with:
+          matrix-name: ${{ matrix.name }}
+          matrix-os: ${{ matrix.os }}
+          matrix-go-version: ${{ matrix.go-version }}
+          test-exit-code: ${{ steps.run-tests.outputs.test-exit-code || '0' }}
+          output-mode: ${{ steps.run-tests.outputs.output-mode || 'FULL' }}
+          job-status: ${{ job.status }}
+          test-start-time: ${{ steps.test-timer.outputs.test-start || '0' }}
+          race-detection-enabled: ${{ inputs.race-detection-enabled }}
+          code-coverage-enabled: ${{ inputs.code-coverage-enabled }}
+          fuzz-run: "false"
+
+      # ————————————————————————————————————————————————————————————————
+      # Collect cache performance statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Collect cache statistics
+        uses: ./.github/actions/collect-cache-stats
+        with:
+          workflow-name: test-${{ matrix.os }}-${{ matrix.go-version }}
+          job-name: test-go
+          os: ${{ matrix.os }}
+          go-version: ${{ matrix.go-version }}
+          cache-prefix: cache-stats
+          gomod-cache-hit: ${{ steps.setup-go-test.outputs.module-cache-hit }}
+          gobuild-cache-hit: ${{ steps.setup-go-test.outputs.build-cache-hit }}
+          redis-enabled: ${{ inputs.redis-enabled }}
+          redis-cache-hit: ${{ steps.setup-redis.outputs.cache-hit }}
+          redis-image-size: ${{ steps.setup-redis.outputs.image-size }}
+          redis-operation-time: ${{ steps.setup-redis.outputs.cache-operation-time }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Report Redis cache performance metrics
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Report Redis Cache Performance
+        if: inputs.redis-enabled == 'true'
+        run: |
+          echo "📊 Redis Cache Performance Report"
+          echo "================================="
+          echo "• Redis Enabled: ${{ inputs.redis-enabled }}"
+          echo "• Redis Version: ${{ inputs.redis-version }}"
+          echo "• Cache Hit: ${{ steps.setup-redis.outputs.cache-hit }}"
+          echo "• Image Size: ${{ steps.setup-redis.outputs.image-size }}MB"
+          echo "• Cache Operation Time: ${{ steps.setup-redis.outputs.cache-operation-time }}s"
+          echo "• Connection Time: ${{ steps.setup-redis.outputs.connection-time }}s"
+          echo "• Installation Method: ${{ steps.setup-redis.outputs.installation-method }}"
+
+          # Calculate total Redis setup time
+          CACHE_TIME="${{ steps.setup-redis.outputs.cache-operation-time || '0' }}"
+          CONNECTION_TIME="${{ steps.setup-redis.outputs.connection-time || '0' }}"
+          TOTAL_TIME=$((CACHE_TIME + CONNECTION_TIME))
+
+          echo "• Total Setup Time: ${TOTAL_TIME}s"
+
+          # Performance assessment
+          if [[ "${{ steps.setup-redis.outputs.cache-hit }}" == "true" ]]; then
+            echo "🚀 Performance: Redis cache hit - faster startup achieved!"
+          else
+            echo "📥 Performance: Redis pulled from Docker Hub - consider cache warming"
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Upload performance cache statistics for completion report
+      # ————————————————————————————————————————————————————————————————
+      - name: 📤 Upload performance cache statistics
+        uses: ./.github/actions/upload-statistics
+        with:
+          artifact-name: cache-stats-test-${{ matrix.os }}-${{ matrix.go-version }}
+          artifact-path: cache-stats-test-${{ matrix.os }}-${{ matrix.go-version }}.json
+          retention-days: "1"
+
+      # ————————————————————————————————————————————————————————————————
+      # Upload test outputs and failure details for validation
+      # ————————————————————————————————————————————————————————————————
+      - name: 📤 Upload test outputs and statistics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-results-unit-${{ matrix.os }}-${{ matrix.go-version }}
+          path: |
+            test-output.log
+            test-failures.txt
+            test-failures-detailed.txt
+            test-failures-summary.json
+            test-failures-signatures.json
+          retention-days: 1
+          if-no-files-found: ignore
+
+      # ————————————————————————————————————————————————————————————————
+      # Upload test statistics for completion report
+      # ————————————————————————————————————————————————————————————————
+      - name: 📤 Upload test statistics
+        uses: ./.github/actions/upload-statistics
+        with:
+          artifact-name: test-stats-${{ matrix.os }}-${{ matrix.go-version }}
+          artifact-path: ${{ steps.test-summary.outputs.statistics-file }}
+          retention-days: "1"
+
+      # ————————————————————————————————————————————————————————————————
+      # Verify coverage file exists and upload for processing
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔍 Verify coverage file
+        if: inputs.code-coverage-enabled == 'true'
+        run: |
+          if [[ -f coverage.txt ]] && [[ -s coverage.txt ]]; then
+            echo "✅ Coverage file verified and ready for upload"
+            echo "📊 Coverage file size: $(wc -c < coverage.txt) bytes"
+            echo "📊 Coverage entries: $(wc -l < coverage.txt) lines"
+
+            # Basic validation - ensure it looks like Go coverage format
+            if head -1 coverage.txt | grep -q "mode:"; then
+              echo "✅ Coverage file format validation passed"
+            else
+              echo "⚠️ Coverage file may not be in expected Go coverage format"
+              head -3 coverage.txt
+            fi
+          else
+            echo "❌ Coverage file missing or empty"
+            if [[ "${{ steps.run-tests.outputs.test-exit-code }}" == "0" ]]; then
+              echo "::error::Tests passed but no coverage file generated despite coverage being enabled"
+            else
+              echo "::warning::No coverage file due to test failures"
+            fi
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Upload coverage data for fortress-coverage workflow processing
+      # ————————————————————————————————————————————————————————————————
+      - name: 📤 Upload coverage data
+        if: inputs.code-coverage-enabled == 'true' && hashFiles('coverage.txt') != '' && matrix.os == inputs.primary-runner && matrix.go-version == inputs.go-primary-version
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-data
+          path: coverage.txt
+          retention-days: 1

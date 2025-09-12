@@ -1,0 +1,526 @@
+# ------------------------------------------------------------------------------------
+#  Auto-merge on Approval Workflow
+#
+#  Purpose: Automatically enable auto-merge for PRs when configurable approval
+#           and readiness conditions are met. GitHub handles the actual merge
+#           when all status checks pass.
+#
+#  Configuration: All settings are loaded from .env.base and .env.custom files for
+#  centralized management across all workflows.
+#
+#  Triggers:
+#  - Pull request reviews (submitted)
+#  - Pull request state changes (ready_for_review, review_request_removed)
+#
+#  Auto-merge Rules (configurable via .env.base/.env.custom):
+#  - Minimum number of approvals
+#  - No requested reviewers remaining (if configured)
+#  - No "Changes Requested" reviews
+#  - PR ready for review (not draft, no WIP indicators)
+#  - Bot PRs handled separately (if configured)
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: Auto-merge on Approval
+
+# ————————————————————————————————————————————————————————————————
+# Trigger Configuration
+# ————————————————————————————————————————————————————————————————
+on:
+  pull_request_review:
+    types: [submitted]
+  pull_request:
+    types: [ready_for_review, review_request_removed]
+
+# Security: Restrictive default permissions with job-level overrides for least privilege access
+permissions:
+  contents: read # Default read-only access to repository contents
+  pull-requests: read # Default read access to pull requests
+
+# ————————————————————————————————————————————————————————————————
+# Concurrency Control
+# ————————————————————————————————————————————————————————————————
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# ————————————————————————————————————————————————————————————————
+# Environment Variables
+# ————————————————————————————————————————————————————————————————
+# Note: Configuration variables are loaded from .env.base and .env.custom files
+
+jobs:
+  # ----------------------------------------------------------------------------------
+  # Load Environment Variables
+  # ----------------------------------------------------------------------------------
+  load-env:
+    name: 🌍 Load Environment Variables
+    runs-on: ubuntu-latest
+    outputs:
+      env-json: ${{ steps.load-env.outputs.env-json }}
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Check out code to access env file
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Checkout code (sparse)
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: |
+            .github/.env.base
+            .github/.env.custom
+            .github/actions/load-env
+
+      # ————————————————————————————————————————————————————————————————
+      # Load and parse environment file
+      # ————————————————————————————————————————————————————————————————
+      - name: 🌍 Load environment variables
+        uses: ./.github/actions/load-env
+        id: load-env
+
+  # ----------------------------------------------------------------------------------
+  # Process Auto-merge
+  # ----------------------------------------------------------------------------------
+  process-auto-merge:
+    name: 🤖 Process Auto-merge
+    needs: [load-env]
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write # Required: Update PR status and enable auto-merge
+    outputs:
+      action-taken: ${{ steps.process.outputs.action }}
+      pr-number: ${{ github.event.pull_request.number }}
+
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Extract configuration from env-json
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Extract configuration
+        id: config
+        env:
+          ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+        run: |
+          echo "📋 Extracting auto-merge configuration from environment..."
+
+          # Extract all needed variables
+          MIN_APPROVALS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_MIN_APPROVALS')
+          REQUIRE_ALL_REVIEWS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_REQUIRE_ALL_REQUESTED_REVIEWS')
+          MERGE_TYPES=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_ALLOWED_MERGE_TYPES')
+          DELETE_BRANCH=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_DELETE_BRANCH')
+          SKIP_DRAFT=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_DRAFT')
+          SKIP_WIP=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_WIP')
+          WIP_LABELS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_WIP_LABELS')
+          COMMENT_ON_ENABLE=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_COMMENT_ON_ENABLE')
+          COMMENT_ON_DISABLE=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_COMMENT_ON_DISABLE')
+          LABELS_TO_ADD=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_LABELS_TO_ADD')
+          SKIP_BOT_PRS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_BOT_PRS')
+          PREFERRED_TOKEN=$(echo "$ENV_JSON" | jq -r '.PREFERRED_GITHUB_TOKEN')
+
+          # Validate required configuration
+          if [[ -z "$MIN_APPROVALS" ]] || [[ "$MIN_APPROVALS" == "null" ]]; then
+            MIN_APPROVALS="1"  # Default to 1 approval
+          fi
+
+          # Set as environment variables for all subsequent steps
+          echo "MIN_APPROVALS=$MIN_APPROVALS" >> $GITHUB_ENV
+          echo "REQUIRE_ALL_REVIEWS=$REQUIRE_ALL_REVIEWS" >> $GITHUB_ENV
+          echo "MERGE_TYPES=$MERGE_TYPES" >> $GITHUB_ENV
+          echo "DELETE_BRANCH=$DELETE_BRANCH" >> $GITHUB_ENV
+          echo "SKIP_DRAFT=$SKIP_DRAFT" >> $GITHUB_ENV
+          echo "SKIP_WIP=$SKIP_WIP" >> $GITHUB_ENV
+          echo "WIP_LABELS=$WIP_LABELS" >> $GITHUB_ENV
+          echo "COMMENT_ON_ENABLE=$COMMENT_ON_ENABLE" >> $GITHUB_ENV
+          echo "COMMENT_ON_DISABLE=$COMMENT_ON_DISABLE" >> $GITHUB_ENV
+          echo "LABELS_TO_ADD=$LABELS_TO_ADD" >> $GITHUB_ENV
+          echo "SKIP_BOT_PRS=$SKIP_BOT_PRS" >> $GITHUB_ENV
+
+          # Determine default merge type
+          DEFAULT_MERGE_TYPE=$(echo "$MERGE_TYPES" | cut -d',' -f1)
+          if [[ -z "$DEFAULT_MERGE_TYPE" ]]; then
+            DEFAULT_MERGE_TYPE="squash"
+          fi
+          echo "DEFAULT_MERGE_TYPE=$DEFAULT_MERGE_TYPE" >> $GITHUB_ENV
+
+          # Log configuration
+          echo "🔍 Configuration loaded:"
+          echo "  ✅ Min approvals: $MIN_APPROVALS"
+          echo "  👥 Require all reviews: $REQUIRE_ALL_REVIEWS"
+          echo "  🔀 Merge types: $MERGE_TYPES (default: $DEFAULT_MERGE_TYPE)"
+          echo "  🗑️ Delete branch: $DELETE_BRANCH"
+          echo "  📝 Skip draft: $SKIP_DRAFT"
+          echo "  🚧 Skip WIP: $SKIP_WIP"
+          echo "  🏷️ WIP labels: $WIP_LABELS"
+          echo "  💬 Comment on enable: $COMMENT_ON_ENABLE"
+          echo "  💬 Comment on disable: $COMMENT_ON_DISABLE"
+          echo "  🏷️ Labels to add: $LABELS_TO_ADD"
+          echo "  🤖 Skip bot PRs: $SKIP_BOT_PRS"
+
+          if [[ "$PREFERRED_TOKEN" == "GH_PAT_TOKEN" && -n "${{ secrets.GH_PAT_TOKEN }}" ]]; then
+            echo "  🔑 Token: Personal Access Token (PAT)"
+          else
+            echo "  🔑 Token: Default GITHUB_TOKEN"
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Process the PR for auto-merge
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔍 Check conditions and enable auto-merge
+        id: process
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          github-token: ${{ secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const prNumber = context.payload.pull_request.number;
+
+            console.log(`🔍 Checking auto-merge conditions for PR #${prNumber}`);
+            console.log('════════════════════════════════════════════════════════════════');
+
+            // Get fresh PR data
+            const { data: pr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: prNumber,
+            });
+
+            console.log(`📋 PR #${prNumber}: "${pr.title}"`);
+            console.log(`👤 Author: ${pr.user.login} (${pr.user.type})`);
+
+            // ————————————————————————————————————————————————————————————————
+            // Check if we should skip bot PRs
+            // ————————————————————————————————————————————————————————————————
+            const isBot = pr.user.type === 'Bot' || pr.user.login.endsWith('[bot]');
+            if (isBot && process.env.SKIP_BOT_PRS === 'true') {
+              console.log('🤖 Skipping bot PR (handled by separate workflow)');
+              core.setOutput('action', 'skip-bot');
+              return;
+            }
+
+            // ————————————————————————————————————————————————————————————————
+            // Check basic PR conditions
+            // ————————————————————————————————————————————————————————————————
+            const isDraft = pr.draft;
+            const title = pr.title || '';
+            const labels = pr.labels.map(l => l.name);
+
+            if (isDraft && process.env.SKIP_DRAFT === 'true') {
+              console.log('📝 PR is draft - skipping auto-merge');
+              core.setOutput('action', 'skip-draft');
+              return;
+            }
+
+            // Check for WIP indicators
+            if (process.env.SKIP_WIP === 'true') {
+              const titleHasWip = /\b(wip|work.in.progress)\b/i.test(title);
+              const wipLabels = process.env.WIP_LABELS.split(',').map(l => l.trim());
+              const hasWipLabel = labels.some(label => wipLabels.includes(label));
+
+              if (titleHasWip || hasWipLabel) {
+                console.log('🚧 PR has WIP indicators - skipping auto-merge');
+                core.setOutput('action', 'skip-wip');
+                return;
+              }
+            }
+
+            // ————————————————————————————————————————————————————————————————
+            // Check review conditions
+            // ————————————————————————————————————————————————————————————————
+            const { data: reviews } = await github.rest.pulls.listReviews({
+              owner,
+              repo,
+              pull_number: prNumber,
+            });
+
+            // Get latest review per user
+            const latestReviews = {};
+            reviews.forEach(review => {
+              const userId = review.user.id;
+              if (!latestReviews[userId] || review.submitted_at > latestReviews[userId].submitted_at) {
+                latestReviews[userId] = review;
+              }
+            });
+
+            const currentReviews = Object.values(latestReviews);
+            const approvals = currentReviews.filter(r => r.state === 'APPROVED').length;
+            const changesRequested = currentReviews.filter(r => r.state === 'CHANGES_REQUESTED').length;
+            const requestedReviewers = (pr.requested_reviewers || []).length;
+            const minApprovals = parseInt(process.env.MIN_APPROVALS);
+
+            console.log(`👥 Reviews: ${approvals} approvals, ${changesRequested} changes requested, ${requestedReviewers} pending`);
+            console.log(`✅ Required approvals: ${minApprovals}`);
+
+            // ————————————————————————————————————————————————————————————————
+            // Determine if we should enable auto-merge
+            // ————————————————————————————————————————————————————————————————
+            let shouldEnableAutoMerge = approvals >= minApprovals && changesRequested === 0;
+
+            if (process.env.REQUIRE_ALL_REVIEWS === 'true' && requestedReviewers > 0) {
+              shouldEnableAutoMerge = false;
+            }
+
+            if (!shouldEnableAutoMerge) {
+              if (approvals < minApprovals) {
+                console.log(`⏳ Needs ${minApprovals - approvals} more approval(s)`);
+              }
+              if (changesRequested > 0) {
+                console.log('🚫 Has "Changes Requested" reviews');
+              }
+              if (process.env.REQUIRE_ALL_REVIEWS === 'true' && requestedReviewers > 0) {
+                console.log(`⏳ Has ${requestedReviewers} pending reviewer request(s)`);
+              }
+              core.setOutput('action', 'conditions-not-met');
+              return;
+            }
+
+            // ————————————————————————————————————————————————————————————————
+            // Check if this is a disable event
+            // ————————————————————————————————————————————————————————————————
+            if (context.eventName === 'pull_request_review' &&
+                context.payload.review &&
+                context.payload.review.state === 'CHANGES_REQUESTED') {
+
+              // Try to disable auto-merge
+              try {
+                const { execSync } = require('child_process');
+                execSync(`gh pr merge --disable-auto "${pr.html_url}"`, {
+                  env: {
+                    ...process.env,
+                    GH_TOKEN: '${{ secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}'
+                  },
+                  stdio: 'inherit'
+                });
+
+                console.log('🛑 Auto-merge disabled due to "Changes Requested" review');
+
+                if (process.env.COMMENT_ON_DISABLE === 'true') {
+                  await github.rest.issues.createComment({
+                    owner,
+                    repo,
+                    issue_number: prNumber,
+                    body: `🛑 **Auto-merge disabled**\n\nChanges were requested in a review. Auto-merge will be re-enabled when conditions are met again.`
+                  });
+                }
+
+                core.setOutput('action', 'disabled-changes-requested');
+              } catch (error) {
+                console.log('ℹ️ Could not disable auto-merge (may not have been enabled)');
+              }
+              return;
+            }
+
+            // ————————————————————————————————————————————————————————————————
+            // Enable auto-merge
+            // ————————————————————————————————————————————————————————————————
+            try {
+              // Check if auto-merge is already enabled
+              if (pr.auto_merge) {
+                console.log('✅ Auto-merge already enabled');
+                core.setOutput('action', 'already-enabled');
+                return;
+              }
+
+              // Enable auto-merge with the configured merge type
+              const { execSync } = require('child_process');
+              const mergeType = process.env.DEFAULT_MERGE_TYPE;
+
+              let mergeCommand = `gh pr merge --auto`;
+              if (mergeType === 'squash') {
+                mergeCommand += ' --squash';
+              } else if (mergeType === 'merge') {
+                mergeCommand += ' --merge';
+              } else if (mergeType === 'rebase') {
+                mergeCommand += ' --rebase';
+              }
+
+              if (process.env.DELETE_BRANCH === 'true') {
+                mergeCommand += ' --delete-branch';
+              }
+
+              mergeCommand += ` "${pr.html_url}"`;
+
+              console.log(`🚀 Enabling auto-merge with command: ${mergeCommand}`);
+
+              execSync(mergeCommand, {
+                env: {
+                  ...process.env,
+                  GH_TOKEN: '${{ secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}'
+                },
+                stdio: 'inherit'
+              });
+
+              console.log('✅ Auto-merge enabled! PR will merge when all status checks pass.');
+
+              // Add comment if configured
+              if (process.env.COMMENT_ON_ENABLE === 'true') {
+                const mergeTypeText = mergeType === 'squash' ? 'squash and merge' :
+                                     mergeType === 'merge' ? 'create a merge commit' :
+                                     'rebase and merge';
+
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: prNumber,
+                  body: `🤖 **Auto-merge enabled**\n\nThis PR will automatically ${mergeTypeText} when all required status checks pass.\n\n` +
+                        `✅ Approvals: ${approvals}/${minApprovals}\n` +
+                        `🔍 Changes requested: ${changesRequested}\n` +
+                        `⏳ Pending reviews: ${requestedReviewers}`
+                });
+              }
+
+              // Add labels if configured
+              if (process.env.LABELS_TO_ADD) {
+                const labelsToAdd = process.env.LABELS_TO_ADD.split(',').map(l => l.trim()).filter(l => l);
+                if (labelsToAdd.length > 0) {
+                  await github.rest.issues.addLabels({
+                    owner,
+                    repo,
+                    issue_number: prNumber,
+                    labels: labelsToAdd
+                  });
+                  console.log(`🏷️ Added labels: ${labelsToAdd.join(', ')}`);
+                }
+              }
+
+              core.setOutput('action', 'enabled');
+
+            } catch (error) {
+              console.error('❌ Failed to enable auto-merge:', error.message);
+
+              // Comment on failure if configured
+              if (process.env.COMMENT_ON_ENABLE === 'true') {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: prNumber,
+                  body: `⚠️ **Auto-merge failed**\n\nCould not enable auto-merge: ${error.message}\n\n` +
+                        `This might be due to:\n` +
+                        `- Branch protection rules\n` +
+                        `- Missing permissions\n` +
+                        `- Repository settings`
+                });
+              }
+
+              core.setOutput('action', 'failed');
+              throw error;
+            }
+
+  # ----------------------------------------------------------------------------------
+  # Generate Workflow Summary Report
+  # ----------------------------------------------------------------------------------
+  summary:
+    name: 📊 Generate Summary
+    if: always()
+    needs: [load-env, process-auto-merge]
+    runs-on: ubuntu-latest
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Generate a workflow summary report
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Generate workflow summary
+        env:
+          ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+        run: |
+          echo "📊 Generating workflow summary..."
+
+          echo "# 🤖 Auto-merge on Approval Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**⏰ Processed:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**📋 PR:** #${{ needs.process-auto-merge.outputs.pr-number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Determine action taken
+          ACTION="${{ needs.process-auto-merge.outputs.action-taken }}"
+          case "$ACTION" in
+            "enabled")
+              ACTION_DESC="✅ Auto-merge enabled"
+              ;;
+            "already-enabled")
+              ACTION_DESC="✅ Auto-merge already enabled"
+              ;;
+            "disabled-changes-requested")
+              ACTION_DESC="🛑 Auto-merge disabled (changes requested)"
+              ;;
+            "skip-bot")
+              ACTION_DESC="🤖 Skipped (bot PR)"
+              ;;
+            "skip-draft")
+              ACTION_DESC="📝 Skipped (draft PR)"
+              ;;
+            "skip-wip")
+              ACTION_DESC="🚧 Skipped (work in progress)"
+              ;;
+            "conditions-not-met")
+              ACTION_DESC="⏳ Conditions not met"
+              ;;
+            "failed")
+              ACTION_DESC="❌ Failed to enable auto-merge"
+              ;;
+            *)
+              ACTION_DESC="❓ Unknown action: $ACTION"
+              ;;
+          esac
+
+          echo "## 🎯 Action Taken" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "$ACTION_DESC" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### 🔧 Current Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Extract configuration for display
+          MIN_APPROVALS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_MIN_APPROVALS')
+          REQUIRE_ALL_REVIEWS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_REQUIRE_ALL_REQUESTED_REVIEWS')
+          MERGE_TYPES=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_ALLOWED_MERGE_TYPES')
+          SKIP_DRAFT=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_DRAFT')
+          SKIP_WIP=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_WIP')
+          SKIP_BOT_PRS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_BOT_PRS')
+
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Min approvals | $MIN_APPROVALS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Require all reviews | $REQUIRE_ALL_REVIEWS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Allowed merge types | $MERGE_TYPES |" >> $GITHUB_STEP_SUMMARY
+          echo "| Skip draft PRs | $SKIP_DRAFT |" >> $GITHUB_STEP_SUMMARY
+          echo "| Skip WIP PRs | $SKIP_WIP |" >> $GITHUB_STEP_SUMMARY
+          echo "| Skip bot PRs | $SKIP_BOT_PRS |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "🤖 _Automated by GitHub Actions_" >> $GITHUB_STEP_SUMMARY
+
+      # ————————————————————————————————————————————————————————————————
+      # Report final workflow status
+      # ————————————————————————————————————————————————————————————————
+      - name: 📢 Report workflow status
+        run: |
+          echo "=== 🤖 Auto-merge on Approval Summary ==="
+          echo "📋 PR: #${{ needs.process-auto-merge.outputs.pr-number }}"
+
+          ACTION="${{ needs.process-auto-merge.outputs.action-taken }}"
+          case "$ACTION" in
+            enabled)
+              echo "✅ Action: Auto-merge enabled successfully"
+              ;;
+            already-enabled)
+              echo "✅ Action: Auto-merge was already enabled"
+              ;;
+            disabled-changes-requested)
+              echo "🛑 Action: Auto-merge disabled due to changes requested"
+              ;;
+            skip-*)
+              echo "⏭️ Action: Skipped - $ACTION"
+              ;;
+            conditions-not-met)
+              echo "⏳ Action: Waiting for conditions to be met"
+              ;;
+            failed)
+              echo "❌ Action: Failed to enable auto-merge"
+              ;;
+            *)
+              echo "❓ Action: $ACTION"
+              ;;
+          esac
+
+          echo "🕐 Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "✅ Workflow completed!"

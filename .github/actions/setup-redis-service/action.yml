@@ -1,0 +1,291 @@
+# ------------------------------------------------------------------------------------
+#  Setup Redis Service Composite Action (GoFortress)
+#
+#  Purpose: Verify Redis service availability and configure environment variables
+#  for tests and benchmarks. Provides cross-platform Redis CLI installation and
+#  robust connection verification with retry logic.
+#
+#  Features:
+#    - Cross-platform redis-cli installation (Linux, macOS, Windows)
+#    - Configurable connection retry logic with timeout
+#    - Standard Redis environment variable setup
+#    - Redis version detection and reporting
+#    - Performance tracking outputs
+#
+#  Usage:
+#    - uses: ./.github/actions/setup-redis-service
+#      with:
+#        redis-enabled: ${{ inputs.redis-enabled }}
+#        redis-host: ${{ inputs.redis-host }}
+#        redis-port: ${{ inputs.redis-port }}
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: "Setup Redis Service"
+description: "Verify Redis service availability and configure environment variables for tests/benchmarks"
+
+inputs:
+  redis-enabled:
+    description: "Whether Redis service is enabled (true/false)"
+    required: true
+  redis-version:
+    description: "Redis Docker image version for caching"
+    required: false
+    default: "7-alpine"
+  redis-host:
+    description: "Redis host address"
+    required: false
+    default: "localhost"
+  redis-port:
+    description: "Redis port number"
+    required: false
+    default: "6379"
+  max-retries:
+    description: "Maximum connection retry attempts"
+    required: false
+    default: "10"
+  retry-interval:
+    description: "Seconds between retry attempts"
+    required: false
+    default: "2"
+  use-cache:
+    description: "Whether to use cached Redis image (true/false)"
+    required: false
+    default: "true"
+  matrix-os:
+    description: "Matrix OS for consistent cache key generation (e.g., ubuntu-24.04)"
+    required: false
+    default: "ubuntu-24.04"
+  trust-service-health:
+    description: "Trust GitHub Actions service container health checks (skip redis-cli verification)"
+    required: false
+    default: "true"
+
+outputs:
+  redis-available:
+    description: "Whether Redis is successfully connected (true/false)"
+    value: ${{ steps.redis-verification.outputs.redis-available }}
+  redis-version:
+    description: "Detected Redis version"
+    value: ${{ steps.redis-verification.outputs.redis-version }}
+  connection-time:
+    description: "Time taken to establish connection in seconds"
+    value: ${{ steps.redis-verification.outputs.connection-time }}
+  installation-method:
+    description: "How redis-cli was obtained: pre-existing, installed, or unavailable"
+    value: ${{ steps.redis-verification.outputs.installation-method }}
+  cache-hit:
+    description: "Whether Redis image was restored from cache (true/false)"
+    value: ${{ steps.cache-redis.outputs.cache-hit }}
+  image-size:
+    description: "Size of Redis image in MB"
+    value: ${{ steps.cache-redis.outputs.image-size }}
+  cache-operation-time:
+    description: "Time taken for cache operations in seconds"
+    value: ${{ steps.cache-redis.outputs.operation-time }}
+
+runs:
+  using: "composite"
+  steps:
+    # ————————————————————————————————————————————————————————————————
+    # Skip all Redis setup if disabled
+    # ————————————————————————————————————————————————————————————————
+    - name: ℹ️ Redis Service Disabled
+      if: inputs.redis-enabled != 'true'
+      shell: bash
+      run: |
+        echo "ℹ️ Redis service is disabled - skipping Redis setup"
+        echo "redis-available=false" >> $GITHUB_OUTPUT
+        echo "redis-version=n/a" >> $GITHUB_OUTPUT
+        echo "connection-time=0" >> $GITHUB_OUTPUT
+        echo "installation-method=disabled" >> $GITHUB_OUTPUT
+
+    # ————————————————————————————————————————————————————————————————
+    # Cache Redis Docker image for faster startup
+    # ————————————————————————————————————————————————————————————————
+    - name: 🗄️ Cache Redis Docker Image
+      if: inputs.redis-enabled == 'true' && inputs.use-cache == 'true'
+      id: cache-redis
+      uses: ./.github/actions/cache-redis-image
+      with:
+        redis-version: ${{ inputs.redis-version }}
+        runner-os: ${{ inputs.matrix-os }}
+        cache-mode: "restore"
+
+    # ————————————————————————————————————————————————————————————————
+    # Verify Redis service and configure environment
+    # ————————————————————————————————————————————————————————————————
+    - name: 🗄️ Verify Redis Service
+      if: inputs.redis-enabled == 'true'
+      id: redis-verification
+      shell: bash
+      run: |
+        echo "🔍 Verifying Redis service availability..."
+        echo "📋 Redis Configuration:"
+        echo "   • Host: ${{ inputs.redis-host }}"
+        echo "   • Port: ${{ inputs.redis-port }}"
+        echo "   • Trust Service Health: ${{ inputs.trust-service-health }}"
+        echo ""
+
+        # Track connection timing
+        START_TIME=$(date +%s)
+
+        # Initialize outputs
+        REDIS_AVAILABLE="false"
+        REDIS_VERSION="unknown"
+        INSTALLATION_METHOD="unknown"
+
+        # Check if we should trust service container health checks
+        TRUST_SERVICE_HEALTH="${{ inputs.trust-service-health }}"
+        TRUST_SERVICE_HEALTH=$(echo "$TRUST_SERVICE_HEALTH" | xargs)  # Trim whitespace
+        if [[ "$TRUST_SERVICE_HEALTH" == "true" ]]; then
+          echo "✅ Trusting GitHub Actions service container health checks"
+          echo "🔗 Skipping redis-cli installation and verification"
+
+          # Assume Redis is available since service container health checks passed
+          REDIS_AVAILABLE="true"
+          REDIS_VERSION="service-container"
+          INSTALLATION_METHOD="trusted-service"
+
+          # Set Redis connection environment variables for tests/benchmarks
+          echo "REDIS_ADDR=${{ inputs.redis-host }}:${{ inputs.redis-port }}" >> $GITHUB_ENV
+          echo "REDIS_HOST=${{ inputs.redis-host }}" >> $GITHUB_ENV
+          echo "REDIS_PORT=${{ inputs.redis-port }}" >> $GITHUB_ENV
+          echo "REDIS_URL=redis://${{ inputs.redis-host }}:${{ inputs.redis-port }}" >> $GITHUB_ENV
+
+          echo "✅ Redis environment variables configured:"
+          echo "   • REDIS_ADDR=${{ inputs.redis-host }}:${{ inputs.redis-port }}"
+          echo "   • REDIS_HOST=${{ inputs.redis-host }}"
+          echo "   • REDIS_PORT=${{ inputs.redis-port }}"
+          echo "   • REDIS_URL=redis://${{ inputs.redis-host }}:${{ inputs.redis-port }}"
+
+        else
+          echo "🔧 Performing full Redis verification with redis-cli..."
+          echo "📋 Retry Configuration:"
+          echo "   • Max Retries: ${{ inputs.max-retries }}"
+          echo "   • Retry Interval: ${{ inputs.retry-interval }}s"
+          echo ""
+
+          # Install redis-cli if not available
+          if ! command -v redis-cli &> /dev/null; then
+            echo "📦 Installing redis-cli..."
+            if [[ "$RUNNER_OS" == "Linux" ]]; then
+              if sudo apt-get update && sudo apt-get install -y redis-tools; then
+                echo "✅ redis-cli installed successfully on Linux"
+                INSTALLATION_METHOD="installed"
+              else
+                echo "❌ Failed to install redis-cli on Linux"
+                INSTALLATION_METHOD="unavailable"
+              fi
+            elif [[ "$RUNNER_OS" == "macOS" ]]; then
+              if brew install redis; then
+                echo "✅ redis-cli installed successfully on macOS"
+                INSTALLATION_METHOD="installed"
+              else
+                echo "❌ Failed to install redis-cli on macOS"
+                INSTALLATION_METHOD="unavailable"
+              fi
+            elif [[ "$RUNNER_OS" == "Windows" ]]; then
+              echo "⚠️ Redis CLI not available on Windows runner - skipping verification"
+              INSTALLATION_METHOD="unavailable"
+              echo "redis-available=false" >> $GITHUB_OUTPUT
+              echo "redis-version=n/a" >> $GITHUB_OUTPUT
+              echo "connection-time=0" >> $GITHUB_OUTPUT
+              echo "installation-method=$INSTALLATION_METHOD" >> $GITHUB_OUTPUT
+              exit 0
+            else
+              echo "❌ Unsupported runner OS: $RUNNER_OS"
+              INSTALLATION_METHOD="unavailable"
+            fi
+          else
+            echo "✅ redis-cli already available"
+            INSTALLATION_METHOD="pre-existing"
+          fi
+
+          # Only proceed with verification if redis-cli is available
+          if command -v redis-cli &> /dev/null; then
+            echo "🔗 Testing Redis connection..."
+
+            # Test Redis connection with retries
+            MAX_RETRIES=${{ inputs.max-retries }}
+            RETRY_INTERVAL=${{ inputs.retry-interval }}
+            RETRY_COUNT=0
+
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              if redis-cli -h ${{ inputs.redis-host }} -p ${{ inputs.redis-port }} ping > /dev/null 2>&1; then
+                echo "✅ Redis is responding to PING"
+                REDIS_AVAILABLE="true"
+                break
+              fi
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              echo "⏳ Waiting for Redis... (attempt $RETRY_COUNT/$MAX_RETRIES)"
+              sleep $RETRY_INTERVAL
+            done
+
+            if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+              echo "❌ Redis failed to respond after $MAX_RETRIES attempts"
+              REDIS_AVAILABLE="false"
+            fi
+
+            # Get Redis version and additional info if connected
+            if [ "$REDIS_AVAILABLE" = "true" ]; then
+              echo "📊 Gathering Redis information..."
+              REDIS_VERSION=$(redis-cli -h ${{ inputs.redis-host }} -p ${{ inputs.redis-port }} INFO server 2>/dev/null | grep "redis_version:" | cut -d: -f2 | tr -d '\r\n' || echo "unknown")
+              echo "✅ Redis Version: $REDIS_VERSION"
+
+              # Set Redis connection environment variables for tests/benchmarks
+              echo "REDIS_ADDR=${{ inputs.redis-host }}:${{ inputs.redis-port }}" >> $GITHUB_ENV
+              echo "REDIS_HOST=${{ inputs.redis-host }}" >> $GITHUB_ENV
+              echo "REDIS_PORT=${{ inputs.redis-port }}" >> $GITHUB_ENV
+              echo "REDIS_URL=redis://${{ inputs.redis-host }}:${{ inputs.redis-port }}" >> $GITHUB_ENV
+
+              echo "✅ Redis environment variables configured:"
+              echo "   • REDIS_ADDR=${{ inputs.redis-host }}:${{ inputs.redis-port }}"
+              echo "   • REDIS_HOST=${{ inputs.redis-host }}"
+              echo "   • REDIS_PORT=${{ inputs.redis-port }}"
+              echo "   • REDIS_URL=redis://${{ inputs.redis-host }}:${{ inputs.redis-port }}"
+            fi
+          else
+            echo "❌ redis-cli not available - cannot verify Redis connection"
+            REDIS_AVAILABLE="false"
+          fi
+        fi
+
+        # Calculate connection time
+        END_TIME=$(date +%s)
+        CONNECTION_TIME=$((END_TIME - START_TIME))
+
+        # Set outputs
+        echo "redis-available=$REDIS_AVAILABLE" >> $GITHUB_OUTPUT
+        echo "redis-version=$REDIS_VERSION" >> $GITHUB_OUTPUT
+        echo "connection-time=$CONNECTION_TIME" >> $GITHUB_OUTPUT
+        echo "installation-method=$INSTALLATION_METHOD" >> $GITHUB_OUTPUT
+
+        # Final status with cache metrics
+        CACHE_HIT="${{ steps.cache-redis.outputs.cache-hit || 'false' }}"
+        CACHE_TIME="${{ steps.cache-redis.outputs.operation-time || '0' }}"
+        IMAGE_SIZE="${{ steps.cache-redis.outputs.image-size || '0' }}"
+
+        if [ "$REDIS_AVAILABLE" = "true" ]; then
+          echo "✅ Redis service verification completed successfully"
+          echo "📊 Performance Summary:"
+          echo "   • Connection Time: ${CONNECTION_TIME}s"
+          echo "   • Cache Hit: $CACHE_HIT"
+          echo "   • Cache Operation Time: ${CACHE_TIME}s"
+          echo "   • Image Size: ${IMAGE_SIZE}MB"
+          if [[ "${{ inputs.trust-service-health }}" == "true" ]]; then
+            echo "🚀 Redis service trusted via GitHub Actions health checks - ultra-fast startup!"
+          elif [[ "$CACHE_HIT" == "true" ]]; then
+            echo "🚀 Redis image restored from cache - faster startup achieved!"
+          else
+            echo "📥 Redis image pulled from Docker Hub - consider cache warming"
+          fi
+        else
+          echo "❌ Redis service verification failed after ${CONNECTION_TIME}s"
+          if [[ "$CACHE_HIT" == "true" ]]; then
+            echo "ℹ️ Cache was available but Redis service connection failed"
+          fi
+          exit 1
+        fi

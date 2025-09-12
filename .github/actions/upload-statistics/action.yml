@@ -1,0 +1,66 @@
+# ------------------------------------------------------------------------------------
+#  Upload Statistics Composite Action (GoFortress)
+#
+#  Purpose: Standardize all artifact uploads with consistent configuration and
+#  security best practices. Provides a unified interface for uploading statistics,
+#  cache data, test results, and other workflow artifacts.
+#
+#  Features:
+#    - Wraps actions/upload-artifact with pinned security version
+#    - Maintains exact version pinning for security compliance
+#    - Preserves retention-days flexibility per workflow needs
+#    - Consistent naming and configuration across all uploads
+#    - Always runs regardless of job success/failure status
+#
+#  Usage:
+#    - uses: ./.github/actions/upload-statistics
+#      with:
+#        artifact-name: "cache-stats-pre-commit"
+#        artifact-path: "cache-stats-pre-commit.json"
+#        retention-days: "1"
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: "Upload Statistics"
+description: "Upload statistics artifacts with standardized configuration and security practices"
+
+inputs:
+  artifact-name:
+    description: "Name of the artifact (will be displayed in GitHub UI)"
+    required: true
+  artifact-path:
+    description: "Path to the artifact file(s) to upload"
+    required: true
+  retention-days:
+    description: "Number of days to retain the artifact (1-90 days)"
+    required: false
+    default: "1"
+  if-no-files-found:
+    description: "Behavior when no files match the path (warn, error, ignore)"
+    required: false
+    default: "ignore"
+  compression-level:
+    description: "Compression level for the artifact (0-9, 6 is default)"
+    required: false
+    default: "6"
+
+runs:
+  using: "composite"
+  steps:
+    # ————————————————————————————————————————————————————————————————
+    # Upload artifact with standardized security and configuration
+    # ————————————————————————————————————————————————————————————————
+    - name: 📤 Upload ${{ inputs.artifact-name }}
+      if: always() # Always run to capture data even on job failure
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.artifact-path }}
+        retention-days: ${{ inputs.retention-days }}
+        if-no-files-found: ${{ inputs.if-no-files-found }}
+        compression-level: ${{ inputs.compression-level }}
+      env:
+        # Ensure consistent behavior across all environments
+        ACTIONS_UPLOAD_RETRY_COUNT: 3

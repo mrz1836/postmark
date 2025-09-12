@@ -1,0 +1,58 @@
+name: Bug report
+description: Report incorrect behavior, test failure, or unexpected output in this Go library
+title: "[Bug] <brief description of the issue>"
+labels: ["bug-p3"]
+assignees:
+  - mrz1836
+body:
+  - type: textarea
+    id: bug_description
+    attributes:
+      label: Describe the bug
+      description: Provide a clear and concise summary of the problem or unexpected behavior.
+      placeholder: The custom function strips the plus sign from numbers...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction_steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide minimal steps or code snippets to reproduce the issue.
+      placeholder: |
+        1. Call package.Func("input")
+        2. Observe that the result is "input" (missing 'symbol')
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected behavior
+      description: Describe what you expected to happen instead.
+      placeholder: I expected the result to be "symbol+input" since the plus sign is allowed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment details
+      description: Provide version information and your Go setup to help debug.
+      placeholder: |
+        - Go version: go1.24.3
+        - OS: macOS 14.5 (arm64)
+        - Library version/commit: v1.3.4 or commit 88aef9c
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context
+      description: Add any logs, test output, or relevant code here.
+      placeholder: |
+        Output from `go test -v ./...`
+        Any relevant stack traces, links to code, or affected functions.
+    validations:
+      required: false

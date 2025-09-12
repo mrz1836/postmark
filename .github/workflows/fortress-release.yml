@@ -1,0 +1,381 @@
+# ------------------------------------------------------------------------------------
+#  Version Release (Reusable Workflow) (GoFortress)
+#
+#  Purpose: Build & publish releases via GoReleaser when called from the orchestrator.
+#  This is a reusable workflow that handles the release process after successful tests.
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: GoFortress (Version Release)
+
+# ————————————————————————————————————————————————————————————————
+# Workflow Call Configuration
+# ————————————————————————————————————————————————————————————————
+on:
+  workflow_call:
+    inputs:
+      env-json:
+        description: "Environment configuration in JSON format"
+        required: true
+        type: string
+      primary-runner:
+        description: "Primary runner OS to use"
+        required: true
+        type: string
+      go-primary-version:
+        description: "Primary Go version"
+        required: true
+        type: string
+      golangci-lint-version:
+        description: "Version of golangci-lint to use"
+        required: true
+        type: string
+    secrets:
+      github-token:
+        description: "GitHub token for authentication"
+        required: true
+      slack-webhook:
+        description: "Slack webhook URL for notifications"
+        required: false
+
+# Security: Restrictive default permissions with job-level overrides for least privilege access
+permissions:
+  contents: read
+
+jobs:
+  # ----------------------------------------------------------------------------------
+  # Release Job
+  # ----------------------------------------------------------------------------------
+  release:
+    name: 🚀 Build and Release
+    runs-on: ${{ inputs.primary-runner }}
+    permissions:
+      contents: write # Required: "magex release" creates GitHub releases and uploads assets
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Checkout code and set up Go environment
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0 # Required for changelog generation
+          token: ${{ secrets.github-token }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Set environment variables from JSON input
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Set environment variables
+        env:
+          ENV_JSON: ${{ inputs.env-json }}
+        run: |
+          echo "📋 Setting environment variables..."
+          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
+            echo "$key=$value" >> $GITHUB_ENV
+          done
+
+      # ————————————————————————————————————————————————————————————————
+      # Setup Go with caching and version management
+      # ————————————————————————————————————————————————————————————————
+      - name: 🏗️ Setup Go with Cache
+        id: setup-go-release
+        uses: ./.github/actions/setup-go-with-cache
+        with:
+          go-version: ${{ inputs.go-primary-version }}
+          matrix-os: ${{ inputs.primary-runner }}
+          go-primary-version: ${{ inputs.go-primary-version }}
+          go-secondary-version: ${{ inputs.go-primary-version }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Validate version tag format
+      # ————————————————————————————————————————————————————————————————
+      - name: 🏷️ Validate version tag
+        id: validate-tag
+        run: |
+          echo "🔍 Validating version tag format..."
+
+          TAG="${{ github.ref_name }}"
+
+          # Check if tag matches semantic versioning pattern
+          if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-[a-zA-Z0-9\.\-]+)?(\+[a-zA-Z0-9\.\-]+)?$ ]]; then
+            echo "❌ ERROR: Tag '$TAG' does not follow semantic versioning (v1.2.3)" >&2
+            exit 1
+          fi
+
+          # Extract version components
+          MAJOR="${BASH_REMATCH[1]}"
+          MINOR="${BASH_REMATCH[2]}"
+          PATCH="${BASH_REMATCH[3]}"
+          PRERELEASE="${BASH_REMATCH[4]}"
+
+          echo "✅ Valid semantic version: v$MAJOR.$MINOR.$PATCH"
+          [[ -n "$PRERELEASE" ]] && echo "   Pre-release: $PRERELEASE"
+
+          # Set outputs
+          echo "version=$TAG" >> $GITHUB_OUTPUT
+          echo "version_without_v=${TAG#v}" >> $GITHUB_OUTPUT
+          echo "is_prerelease=$([[ -n "$PRERELEASE" ]] && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+
+      # ————————————————————————————————————————————————————————————————
+      # Setup MAGE-X (required for magex godocs command)
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Setup MAGE-X
+        uses: ./.github/actions/setup-magex
+        with:
+          magex-version: ${{ env.MAGE_X_VERSION }}
+          runner-os: ${{ inputs.primary-runner }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Extract GoReleaser version from environment
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Extract GoReleaser version
+        id: extract-goreleaser
+        run: |
+          GORELEASER_VERSION=$(echo '${{ inputs.env-json }}' | jq -r '.MAGE_X_GORELEASER_VERSION // empty')
+
+          if [[ -z "$GORELEASER_VERSION" || "$GORELEASER_VERSION" == "null" ]]; then
+            echo "❌ ERROR: MAGE_X_GORELEASER_VERSION not found in environment configuration" >&2
+            echo "Please ensure MAGE_X_GORELEASER_VERSION is defined in your environment JSON input" >&2
+            exit 1
+          fi
+
+          echo "✅ Using GoReleaser version: $GORELEASER_VERSION"
+          echo "version=$GORELEASER_VERSION" >> $GITHUB_OUTPUT
+
+      # ————————————————————————————————————————————————————————————————
+      # Setup GoReleaser (required for magex release:validate command)
+      # ————————————————————————————————————————————————————————————————
+      - name: 🚀 Setup GoReleaser
+        uses: ./.github/actions/setup-goreleaser
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          goreleaser-version: ${{ steps.extract-goreleaser.outputs.version }}
+          runner-os: ${{ inputs.primary-runner }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Restore Cache golangci-lint (helps if linter is run as part of release)
+      # ————————————————————————————————————————————————————————————————
+      - name: 💾 Cache golangci-lint analysis
+        id: cache-golangci-lint
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ env.GOLANGCI_LINT_CACHE }}
+          key: ${{ inputs.primary-runner }}-golangci-lint-analysis-${{ hashFiles('.golangci.json', '**/go.sum') }}-${{ inputs.golangci-lint-version }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Pre-flight config validation
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔍 Validate GoReleaser configuration
+        id: validate-goreleaser-configuration
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔍 Validating GoReleaser configuration via MAGE-X..."
+
+          if magex release:validate --verbose; then
+            echo "✅ GoReleaser configuration is valid"
+            echo "goreleaser_config_status=valid" >> $GITHUB_OUTPUT
+          else
+            echo "❌ GoReleaser configuration is invalid" >&2
+            echo "goreleaser_config_status=invalid" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Extract changelog information
+      # ————————————————————————————————————————————————————————————————
+      - name: 📝 Extract changelog information
+        id: changelog
+        run: |
+          echo "📋 Extracting changelog information..."
+
+          # Get previous tag for comparison
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 ${{ github.ref_name }}^ 2>/dev/null || echo "")
+
+          if [[ -n "$PREVIOUS_TAG" ]]; then
+            echo "📊 Comparing with previous tag: $PREVIOUS_TAG"
+            COMMIT_COUNT=$(git rev-list --count ${PREVIOUS_TAG}..${{ github.ref_name }})
+            echo "🔸 Total commits since $PREVIOUS_TAG: $COMMIT_COUNT"
+            echo "previous_tag=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
+
+            # Generate changelog content
+            echo "📝 Generating changelog content..."
+            CHANGELOG_CONTENT=""
+
+            # Get commit messages between tags
+            COMMITS=$(git log --pretty=format:"%s" ${PREVIOUS_TAG}..${{ github.ref_name }} 2>/dev/null || echo "")
+
+            if [[ -n "$COMMITS" ]]; then
+              # Group commits by type
+              FEATURES=""
+              FIXES=""
+              DOCS=""
+              OTHER=""
+
+              # Store regex patterns in variables to avoid shell parsing issues
+              FEAT_PATTERN='^feat(\([^)]*\))?!?:.*$'
+              FIX_PATTERN='^fix(\([^)]*\))?!?:.*$'
+              DOCS_PATTERN='^docs?(\([^)]*\))?!?:.*$'
+
+              while IFS= read -r commit; do
+                if [[ "$commit" =~ $FEAT_PATTERN ]]; then
+                  FEATURES+="- ${commit#feat*: }\n"
+                elif [[ "$commit" =~ $FIX_PATTERN ]]; then
+                  FIXES+="- ${commit#fix*: }\n"
+                elif [[ "$commit" =~ $DOCS_PATTERN ]]; then
+                  DOCS+="- ${commit#docs*: }\n"
+                else
+                  OTHER+="- $commit\n"
+                fi
+              done <<< "$COMMITS"
+
+              # Build formatted changelog
+              if [[ -n "$FEATURES" ]]; then
+                CHANGELOG_CONTENT+="### ✨ New Features\n${FEATURES}\n"
+              fi
+              if [[ -n "$FIXES" ]]; then
+                CHANGELOG_CONTENT+="### 🐛 Bug Fixes\n${FIXES}\n"
+              fi
+              if [[ -n "$DOCS" ]]; then
+                CHANGELOG_CONTENT+="### 📚 Documentation\n${DOCS}\n"
+              fi
+              if [[ -n "$OTHER" ]]; then
+                CHANGELOG_CONTENT+="### 🔧 Other Changes\n${OTHER}\n"
+              fi
+            else
+              CHANGELOG_CONTENT="No commits found between $PREVIOUS_TAG and ${{ github.ref_name }}"
+            fi
+
+            # Store changelog content using heredoc to handle multiline
+            {
+              echo "changelog_content<<EOF"
+              echo -e "$CHANGELOG_CONTENT"
+              echo "EOF"
+            } >> $GITHUB_OUTPUT
+          else
+            echo "ℹ️ No previous tag found - this appears to be the first release"
+            echo "previous_tag=" >> $GITHUB_OUTPUT
+            echo "changelog_content<<EOF" >> $GITHUB_OUTPUT
+            echo "🎉 This is the first release of this project!" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Build and publish the release (using magex to ensure Go version consistency)
+      # ————————————————————————————————————————————————————————————————
+      - name: 🚀 Run GoReleaser via MAGE-X
+        id: goreleaser
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SKIP_GORELEASER_TESTS: "true"
+        run: |
+          echo "🚀 Building and publishing release with GoReleaser..."
+
+          # Extract ENABLE_GODOCS_PUBLISHING from environment
+          ENABLE_GODOCS=$(echo '${{ inputs.env-json }}' | jq -r '.ENABLE_GODOCS_PUBLISHING // "false"')
+
+          # Run release with or without godocs based on configuration
+          if [[ "$ENABLE_GODOCS" == "true" ]]; then
+            echo "📚 Running release with godocs publishing enabled..."
+            if magex release godocs -v; then
+              echo "✅ GoReleaser with godocs via MAGE-X completed successfully"
+              echo "goreleaser_status=success" >> $GITHUB_OUTPUT
+              echo "godocs_published=true" >> $GITHUB_OUTPUT
+            else
+              echo "❌ GoReleaser with godocs via MAGE-X encountered issues" >&2
+              echo "goreleaser_status=failure" >> $GITHUB_OUTPUT
+              echo "godocs_published=false" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+          else
+            echo "ℹ️ Running release without godocs publishing..."
+            if magex release -v; then
+              echo "✅ GoReleaser via MAGE-X completed successfully"
+              echo "goreleaser_status=success" >> $GITHUB_OUTPUT
+              echo "godocs_published=skipped" >> $GITHUB_OUTPUT
+            else
+              echo "❌ GoReleaser via MAGE-X encountered issues" >&2
+              echo "goreleaser_status=failure" >> $GITHUB_OUTPUT
+              echo "godocs_published=skipped" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Generate release summary
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Generate release summary
+        if: always()
+        run: |
+          echo "# 🚀 Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📦 Release Information" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | \`${{ steps.validate-tag.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Pre-release | ${{ steps.validate-tag.outputs.is_prerelease }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Repository | ${{ github.repository }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Release URL | [View Release](https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}) |" >> $GITHUB_STEP_SUMMARY
+
+          # Add Go Docs status
+          if [[ "${{ steps.goreleaser.outputs.godocs_published }}" == "true" ]]; then
+            echo "| Go Docs | ✅ Published successfully |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ steps.goreleaser.outputs.godocs_published }}" == "false" ]]; then
+            echo "| Go Docs | ⚠️ Publishing failed (non-critical) |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Go Docs | ℹ️ Publishing skipped (disabled) |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ -n "${{ steps.changelog.outputs.previous_tag }}" ]]; then
+            echo "## 📝 Changelog" >> $GITHUB_STEP_SUMMARY
+            echo "Comparing: \`${{ steps.changelog.outputs.previous_tag }}\` → \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "${{ steps.changelog.outputs.changelog_content }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## 📝 Changelog" >> $GITHUB_STEP_SUMMARY
+            echo "${{ steps.changelog.outputs.changelog_content }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Add status
+          if [[ "${{ steps.goreleaser.outcome }}" == "success" ]]; then
+            echo "✅ **Release completed successfully!**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "🎉 Your release is now available at: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Release workflow encountered issues**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Please check the workflow logs for more details." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Collect cache statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Collect cache statistics
+        id: cache-stats-release
+        if: always()
+        uses: ./.github/actions/collect-cache-stats
+        with:
+          workflow-name: release
+          job-name: release
+          os: ${{ inputs.primary-runner }}
+          go-version: ${{ inputs.go-primary-version }}
+          cache-prefix: cache-stats
+          gomod-cache-hit: ${{ steps.setup-go-release.outputs.module-cache-hit }}
+          gobuild-cache-hit: ${{ steps.setup-go-release.outputs.build-cache-hit }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Upload infrastructure cache statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 📤 Upload infrastructure cache statistics
+        if: always()
+        uses: ./.github/actions/upload-statistics
+        with:
+          artifact-name: cache-stats-release
+          artifact-path: cache-stats-release.json
+          retention-days: 1

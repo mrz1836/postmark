@@ -1,0 +1,17 @@
+{
+    "tasks": [
+        {
+            "command": "magex",
+            "group": {
+                "isDefault": true,
+                "kind": "build"
+            },
+            "label": "magex",
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
+        }
+    ],
+    "version": "2.0.0"
+}

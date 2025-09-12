@@ -1,0 +1,49 @@
+name: New Function Request
+description: Request the addition of a new Go function with full test, benchmark, and documentation coverage.
+title: "[Function] Add <FunctionName>"
+labels: ["feature", "test", "documentation"]
+assignees:
+  - mrz1836
+body:
+  - type: input
+    id: function_name
+    attributes:
+      label: Function Name
+      description: Name of the new function to implement
+      placeholder: e.g., PhoneNumber
+    validations:
+      required: true
+
+  - type: textarea
+    id: function_description
+    attributes:
+      label: Function Description
+      description: Describe what the function should do (include allowed characters, formats, etc.)
+      placeholder: This function should return a sanitized string containing only digits and a plus sign...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: implementation_checklist
+    attributes:
+      label: Implementation Checklist
+      description: Please complete each step below to ensure the function is implemented thoroughly.
+      options:
+        - label: 🧠 Follow existing patterns and add function alphabetically to all applicable files
+        - label: ✍️ Add GoDoc-style comment to the function
+        - label: ✅ Create test function in `sanitize_test.go` (covering USA, international, mixed-format numbers)
+        - label: 📘 Create example function in `sanitize_example_test.go`
+        - label: 🧪 Create benchmark function in `sanitize_benchmark_test.go`
+        - label: 🧾 Add benchmark results to the performance table in `README.md`
+        - label: 🧩 Add function name and description to the function list in `README.md` (alphabetically)
+        - label: 📎 Add real-world example to `examples/example.go` (alphabetically)
+        - label: 🧬 Create fuzz test in `sanitize_fuzz_test.go` (ensure only allowed characters are output)
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional Notes or Edge Cases
+      description: Add any extra information, caveats, or unusual cases the developer should consider
+      placeholder: e.g., Handle inputs with international dial codes, or double plus signs
+    validations:
+      required: false

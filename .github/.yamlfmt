@@ -1,0 +1,79 @@
+# ------------------------------------------------------------------------------------
+#  yamlfmt Configuration
+#
+#  Purpose: YAML formatting configuration for the mage-x (yamlfmt) tool
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+formatter:
+  type: basic
+
+  # Indentation settings
+  indent: 2
+
+  # Do not include document start marker (---)
+  include_document_start: false
+
+  # Preserve existing line breaks where sensible
+  retain_line_breaks: true
+
+  # Use LF line endings
+  line_ending: lf
+
+  # Maximum line length (0 = disabled)
+  max_line_length: 0
+
+  # Handle folded strings as literal
+  scan_folded_as_literal: false
+
+  # Keep arrays indented
+  indentless_arrays: false
+
+  # Remove merge tags
+  drop_merge_tag: false
+
+  # Add padding after line comments
+  pad_line_comments: 1
+
+# File exclusions
+exclude:
+  # Version control and package managers
+  - "**/.git/**"
+  - "**/node_modules/**"
+  - "**/vendor/**"
+
+  # Build outputs
+  - "**/dist/**"
+  - "**/build/**"
+
+  # Coverage artifacts
+  - "**/coverage/**"
+  - "**/*.cover"
+  - "**/*.cov"
+  - "**/coverage.txt"
+  - "**/coverage.html"
+
+  # Generated code
+  - "**/*.generated.*"
+  - "**/*gen.go"
+  - "**/mock**.go"
+  - "**/*.pb.go"
+  - "**/*.pb.gw.go"
+  - "**/packaged.yaml"
+
+  # IDE metadata
+  - "**/.idea/**"
+  - "**/.vscode/**"
+
+  # Temporary files
+  - "**/*.tmp"
+  - "**/*.temp"
+  - "**/*.swp"
+  - "**/*.swo"
+  - "**/*~"
+
+  # Build configs
+  - "**/.env.base"
+  - "**/.env.custom"

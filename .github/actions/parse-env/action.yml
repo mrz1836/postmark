@@ -1,0 +1,73 @@
+# ------------------------------------------------------------------------------------
+#  Parse Environment Variables Composite Action (GoFortress)
+#
+#  Purpose: Parse JSON environment variables into GITHUB_ENV, eliminating duplicate
+#  parsing logic across all GoFortress workflows.
+#
+#  Features:
+#    - JSON validation with clear error messages
+#    - Preserves exact output format for compatibility
+#    - Maintains security boundaries (no secret exposure)
+#    - Follows existing fortress patterns (emoji prefixes, structured logging)
+#    - Error handling matches existing implementations
+#
+#  Usage:
+#    - uses: ./.github/actions/parse-env
+#      with:
+#        env-json: ${{ inputs.env-json }}
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: "Parse Environment Variables"
+description: "Parse JSON environment variables into GITHUB_ENV with validation and error handling"
+
+inputs:
+  env-json:
+    description: "JSON string of environment variables to parse and set"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    # ————————————————————————————————————————————————————————————————
+    # Parse and validate JSON environment variables
+    # ————————————————————————————————————————————————————————————————
+    - name: 🔧 Parse environment variables
+      shell: bash
+      run: |
+        echo "📋 Setting environment variables..."
+
+        # Get the input JSON
+        ENV_JSON='${{ inputs.env-json }}'
+
+        # Validate JSON format before processing
+        if ! echo "$ENV_JSON" | jq empty 2>/dev/null; then
+          echo "❌ ERROR: Invalid JSON format in env-json input!" >&2
+          echo "   Please ensure the input is valid JSON." >&2
+          exit 1
+        fi
+
+        # Check if JSON is empty or null
+        if [[ -z "$ENV_JSON" ]] || [[ "$ENV_JSON" == "null" ]] || [[ "$ENV_JSON" == "{}" ]]; then
+          echo "❌ ERROR: Empty or null JSON provided!" >&2
+          echo "   Please provide valid environment variables in JSON format." >&2
+          exit 1
+        fi
+
+        # Parse and set each variable (exact pattern from existing workflows)
+        echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
+          # Validate key name (basic safety check)
+          if [[ -z "$key" ]]; then
+            echo "⚠️  WARNING: Skipping empty variable name" >&2
+            continue
+          fi
+
+          # Set the environment variable
+          echo "$key=$value" >> $GITHUB_ENV
+        done
+
+        # Count and report variables set
+        VAR_COUNT=$(echo "$ENV_JSON" | jq 'keys | length')
+        echo "✅ Environment variables parsed successfully ($VAR_COUNT variables)"

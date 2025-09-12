@@ -1,0 +1,16 @@
+gha_enabled: true
+branch: master
+blocked_dirs: []
+draft: false
+description: |
+  Sweep AI must follow the repository guidelines in .github/AGENTS.md.
+rules:
+  - "Read .github/AGENTS.md first; it overrides these rules."
+  - "Format code with magex format:fix"
+  - "Lint with 'magex lint' and vet with 'magex vet'"
+  - "Run 'magex test' before committing"
+  - "Commit messages use '<type>(<scope>): <short description>'"
+  - "PR titles use '[Subsystem] Imperative and concise summary'"
+  - "PR descriptions include: What Changed, Why It Was Necessary, Testing Performed, Impact / Risk"
+  - "Run 'magex dep:tidy' after import changes"
+  - "Report vulnerabilities privately following SECURITY.md"

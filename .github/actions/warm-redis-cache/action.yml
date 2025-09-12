@@ -1,0 +1,339 @@
+# ------------------------------------------------------------------------------------
+#  Warm Redis Cache Composite Action (GoFortress)
+#
+#  Purpose: Proactively warm Redis Docker image cache to ensure fast startup times
+#  for test workflows. This action pulls and caches Redis images on a schedule
+#  to maintain optimal cache hit rates.
+#
+#  Features:
+#    - Proactive Redis image cache warming
+#    - Support for multiple Redis versions
+#    - Force pull to ensure latest images
+#    - Cache performance metrics and reporting
+#    - Integration with scheduled warm cache workflows
+#    - Configurable Redis version lists
+#
+#  Usage:
+#    - uses: ./.github/actions/warm-redis-cache
+#      with:
+#        redis-versions: "7-alpine,6-alpine,latest"
+#        runner-os: ${{ runner.os }}
+#        force-pull: "true"
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: "Warm Redis Cache"
+description: "Proactively warm Redis Docker image cache for faster test workflows"
+
+inputs:
+  redis-versions:
+    description: "Comma-separated list of Redis versions to cache (e.g., '7-alpine,6-alpine')"
+    required: false
+    default: "7-alpine"
+  runner-os:
+    description: "Operating system for cache keys (e.g., Linux, macOS)"
+    required: true
+  force-pull:
+    description: "Force pull images even if cache exists"
+    required: false
+    default: "true"
+  primary-version:
+    description: "Primary Redis version (will be warmed first)"
+    required: false
+    default: "7-alpine"
+
+outputs:
+  versions-warmed:
+    description: "Number of Redis versions successfully warmed"
+    value: ${{ steps.warm-summary.outputs.versions-warmed }}
+  total-cache-size:
+    description: "Total cache size across all versions in MB"
+    value: ${{ steps.warm-summary.outputs.total-cache-size }}
+  operation-time:
+    description: "Total warming operation time in seconds"
+    value: ${{ steps.warm-summary.outputs.operation-time }}
+  cache-keys:
+    description: "Comma-separated list of cache keys created"
+    value: ${{ steps.warm-summary.outputs.cache-keys }}
+  warming-status:
+    description: "Overall warming status: success, partial, failed"
+    value: ${{ steps.warm-summary.outputs.warming-status }}
+
+runs:
+  using: "composite"
+  steps:
+    # ————————————————————————————————————————————————————————————————
+    # Initialize warming operation
+    # ————————————————————————————————————————————————————————————————
+    - name: ⏱️ Initialize Redis cache warming
+      id: warming-start
+      shell: bash
+      run: |
+        echo "🗄️ Starting Redis cache warming operation..."
+        WARMING_START=$(date +%s)
+        echo "warming-start=$WARMING_START" >> $GITHUB_OUTPUT
+
+        # Parse Redis versions
+        REDIS_VERSIONS="${{ inputs.redis-versions }}"
+        PRIMARY_VERSION="${{ inputs.primary-version }}"
+
+        echo "📋 Warming Configuration:"
+        echo "   • Redis Versions: $REDIS_VERSIONS"
+        echo "   • Primary Version: $PRIMARY_VERSION"
+        echo "   • Runner OS: ${{ inputs.runner-os }}"
+        echo "   • Force Pull: ${{ inputs.force-pull }}"
+        echo ""
+
+        # Convert comma-separated versions to array
+        IFS=',' read -ra VERSION_ARRAY <<< "$REDIS_VERSIONS"
+
+        # Create unique list and prioritize primary version
+        UNIQUE_VERSIONS=()
+        if [[ -n "$PRIMARY_VERSION" && "$PRIMARY_VERSION" != "null" ]]; then
+          UNIQUE_VERSIONS+=("$PRIMARY_VERSION")
+        fi
+
+        for version in "${VERSION_ARRAY[@]}"; do
+          version=$(echo "$version" | xargs) # trim whitespace
+          if [[ -n "$version" && "$version" != "$PRIMARY_VERSION" ]]; then
+            UNIQUE_VERSIONS+=("$version")
+          fi
+        done
+
+        # Convert back to comma-separated for processing
+        ORDERED_VERSIONS=$(IFS=','; echo "${UNIQUE_VERSIONS[*]}")
+        echo "📋 Ordered versions (primary first): $ORDERED_VERSIONS"
+
+        echo "ordered-versions=$ORDERED_VERSIONS" >> $GITHUB_OUTPUT
+        echo "version-count=${#UNIQUE_VERSIONS[@]}" >> $GITHUB_OUTPUT
+
+    # ————————————————————————————————————————————————————————————————
+    # Warm primary Redis version first (critical path optimization)
+    # ————————————————————————————————————————————————————————————————
+    - name: 🚀 Warm primary Redis version
+      id: warm-primary
+      if: inputs.primary-version != '' && inputs.primary-version != 'null'
+      uses: ./.github/actions/cache-redis-image
+      with:
+        redis-version: ${{ inputs.primary-version }}
+        runner-os: ${{ inputs.runner-os }}
+        cache-mode: "restore-save"
+        force-pull: ${{ inputs.force-pull }}
+
+    # ————————————————————————————————————————————————————————————————
+    # Process all Redis versions for warming
+    # ————————————————————————————————————————————————————————————————
+    - name: 🔥 Warm Redis versions
+      id: warm-versions
+      shell: bash
+      run: |
+        echo "🔥 Warming Redis versions..."
+
+        ORDERED_VERSIONS="${{ steps.warming-start.outputs.ordered-versions }}"
+        RUNNER_OS="${{ inputs.runner-os }}"
+        FORCE_PULL="${{ inputs.force-pull }}"
+
+        # Initialize tracking variables
+        VERSIONS_WARMED=0
+        TOTAL_CACHE_SIZE=0
+        CACHE_KEYS=""
+        WARMING_ERRORS=0
+        WARMING_SUCCESS=0
+
+        # Convert to array for processing
+        IFS=',' read -ra VERSION_ARRAY <<< "$ORDERED_VERSIONS"
+
+        echo "🗂️ Processing ${#VERSION_ARRAY[@]} Redis versions..."
+
+        for i in "${!VERSION_ARRAY[@]}"; do
+          VERSION=$(echo "${VERSION_ARRAY[$i]}" | xargs) # trim whitespace
+
+          if [[ -z "$VERSION" ]]; then
+            continue
+          fi
+
+          echo ""
+          echo "📦 [$((i+1))/${#VERSION_ARRAY[@]}] Processing Redis version: $VERSION"
+
+          # Skip primary version if already warmed
+          if [[ "$VERSION" == "${{ inputs.primary-version }}" && "${{ steps.warm-primary.outputs.cache-hit }}" == "true" ]]; then
+            echo "✅ Primary version already warmed, using existing cache"
+            VERSIONS_WARMED=$((VERSIONS_WARMED + 1))
+            WARMING_SUCCESS=$((WARMING_SUCCESS + 1))
+
+            # Add cache information from primary warming
+            PRIMARY_SIZE="${{ steps.warm-primary.outputs.image-size || '0' }}"
+            PRIMARY_KEY="${{ steps.warm-primary.outputs.cache-key }}"
+
+            TOTAL_CACHE_SIZE=$((TOTAL_CACHE_SIZE + PRIMARY_SIZE))
+            if [[ -n "$CACHE_KEYS" ]]; then
+              CACHE_KEYS="${CACHE_KEYS},${PRIMARY_KEY}"
+            else
+              CACHE_KEYS="$PRIMARY_KEY"
+            fi
+            continue
+          fi
+
+          # Set up temporary outputs for this version
+          VERSION_SUCCESS="false"
+          VERSION_SIZE=0
+          VERSION_KEY=""
+
+          # Use a subshell to isolate the warming operation
+          (
+            echo "🔧 Setting up cache for Redis $VERSION..."
+
+            # Create normalized version for cache key
+            NORMALIZED_VERSION=$(echo "$VERSION" | sed 's/[^a-zA-Z0-9.-]/_/g')
+            CACHE_KEY="redis-image-${RUNNER_OS}-${NORMALIZED_VERSION}"
+
+            # Check if image needs to be pulled
+            REDIS_IMAGE="redis:$VERSION"
+            NEEDS_PULL="true"
+
+            if [[ "$FORCE_PULL" != "true" ]]; then
+              # Check if image exists locally
+              if docker image inspect "$REDIS_IMAGE" >/dev/null 2>&1; then
+                echo "ℹ️ Image already exists locally: $REDIS_IMAGE"
+                NEEDS_PULL="false"
+              fi
+            fi
+
+            # Pull image if needed
+            if [[ "$NEEDS_PULL" == "true" ]]; then
+              echo "📥 Pulling Redis image: $REDIS_IMAGE"
+              if docker pull "$REDIS_IMAGE"; then
+                echo "✅ Successfully pulled: $REDIS_IMAGE"
+              else
+                echo "❌ Failed to pull: $REDIS_IMAGE"
+                exit 1
+              fi
+            fi
+
+            # Get image size
+            IMAGE_SIZE_BYTES=$(docker image inspect "$REDIS_IMAGE" --format='{{.Size}}' 2>/dev/null || echo "0")
+            IMAGE_SIZE_MB=$((IMAGE_SIZE_BYTES / 1024 / 1024))
+
+            echo "📊 Image size: ${IMAGE_SIZE_MB}MB"
+
+            # Save results to temporary files for parent shell
+            echo "true" > "/tmp/version_success_${i}"
+            echo "$IMAGE_SIZE_MB" > "/tmp/version_size_${i}"
+            echo "$CACHE_KEY" > "/tmp/version_key_${i}"
+
+          ) && VERSION_SUCCESS="true" || VERSION_SUCCESS="false"
+
+          # Read results from temporary files
+          if [[ -f "/tmp/version_success_${i}" ]]; then
+            VERSION_SUCCESS=$(cat "/tmp/version_success_${i}")
+          fi
+          if [[ -f "/tmp/version_size_${i}" ]]; then
+            VERSION_SIZE=$(cat "/tmp/version_size_${i}")
+          fi
+          if [[ -f "/tmp/version_key_${i}" ]]; then
+            VERSION_KEY=$(cat "/tmp/version_key_${i}")
+          fi
+
+          # Update tracking based on results
+          if [[ "$VERSION_SUCCESS" == "true" ]]; then
+            echo "✅ Successfully warmed Redis $VERSION"
+            VERSIONS_WARMED=$((VERSIONS_WARMED + 1))
+            WARMING_SUCCESS=$((WARMING_SUCCESS + 1))
+            TOTAL_CACHE_SIZE=$((TOTAL_CACHE_SIZE + VERSION_SIZE))
+
+            if [[ -n "$CACHE_KEYS" ]]; then
+              CACHE_KEYS="${CACHE_KEYS},${VERSION_KEY}"
+            else
+              CACHE_KEYS="$VERSION_KEY"
+            fi
+          else
+            echo "❌ Failed to warm Redis $VERSION"
+            WARMING_ERRORS=$((WARMING_ERRORS + 1))
+          fi
+
+          # Clean up temporary files
+          rm -f "/tmp/version_success_${i}" "/tmp/version_size_${i}" "/tmp/version_key_${i}"
+        done
+
+        # Determine overall warming status
+        if [[ $WARMING_ERRORS -eq 0 ]]; then
+          WARMING_STATUS="success"
+        elif [[ $WARMING_SUCCESS -gt 0 ]]; then
+          WARMING_STATUS="partial"
+        else
+          WARMING_STATUS="failed"
+        fi
+
+        echo ""
+        echo "📊 Warming Results:"
+        echo "   • Versions Warmed: $VERSIONS_WARMED"
+        echo "   • Total Cache Size: ${TOTAL_CACHE_SIZE}MB"
+        echo "   • Successful: $WARMING_SUCCESS"
+        echo "   • Errors: $WARMING_ERRORS"
+        echo "   • Status: $WARMING_STATUS"
+
+        # Set outputs
+        echo "versions-warmed=$VERSIONS_WARMED" >> $GITHUB_OUTPUT
+        echo "total-cache-size=$TOTAL_CACHE_SIZE" >> $GITHUB_OUTPUT
+        echo "cache-keys=$CACHE_KEYS" >> $GITHUB_OUTPUT
+        echo "warming-status=$WARMING_STATUS" >> $GITHUB_OUTPUT
+        echo "warming-success=$WARMING_SUCCESS" >> $GITHUB_OUTPUT
+        echo "warming-errors=$WARMING_ERRORS" >> $GITHUB_OUTPUT
+
+    # ————————————————————————————————————————————————————————————————
+    # Cache warming summary and performance metrics
+    # ————————————————————————————————————————————————————————————————
+    - name: ✅ Warming operation summary
+      id: warm-summary
+      shell: bash
+      run: |
+        echo "✅ Redis cache warming operation completed"
+
+        # Calculate operation time
+        WARMING_START="${{ steps.warming-start.outputs.warming-start }}"
+        WARMING_END=$(date +%s)
+        OPERATION_TIME=$((WARMING_END - WARMING_START))
+
+        # Get results from warming step
+        VERSIONS_WARMED="${{ steps.warm-versions.outputs.versions-warmed }}"
+        TOTAL_CACHE_SIZE="${{ steps.warm-versions.outputs.total-cache-size }}"
+        CACHE_KEYS="${{ steps.warm-versions.outputs.cache-keys }}"
+        WARMING_STATUS="${{ steps.warm-versions.outputs.warming-status }}"
+        WARMING_SUCCESS="${{ steps.warm-versions.outputs.warming-success }}"
+        WARMING_ERRORS="${{ steps.warm-versions.outputs.warming-errors }}"
+
+        echo "🎯 Final Warming Summary:"
+        echo "   • Versions Warmed: $VERSIONS_WARMED"
+        echo "   • Total Cache Size: ${TOTAL_CACHE_SIZE}MB"
+        echo "   • Operation Time: ${OPERATION_TIME}s"
+        echo "   • Status: $WARMING_STATUS"
+        echo "   • Success Rate: $WARMING_SUCCESS/$((WARMING_SUCCESS + WARMING_ERRORS))"
+
+        if [[ -n "$CACHE_KEYS" ]]; then
+          echo "   • Cache Keys Created:"
+          IFS=',' read -ra KEY_ARRAY <<< "$CACHE_KEYS"
+          for key in "${KEY_ARRAY[@]}"; do
+            echo "     - $key"
+          done
+        fi
+
+        # Set final outputs
+        echo "versions-warmed=$VERSIONS_WARMED" >> $GITHUB_OUTPUT
+        echo "total-cache-size=$TOTAL_CACHE_SIZE" >> $GITHUB_OUTPUT
+        echo "operation-time=$OPERATION_TIME" >> $GITHUB_OUTPUT
+        echo "cache-keys=$CACHE_KEYS" >> $GITHUB_OUTPUT
+        echo "warming-status=$WARMING_STATUS" >> $GITHUB_OUTPUT
+
+        # Set appropriate exit code based on warming status
+        if [[ "$WARMING_STATUS" == "failed" ]]; then
+          echo "❌ Redis cache warming failed completely"
+          exit 1
+        elif [[ "$WARMING_STATUS" == "partial" ]]; then
+          echo "⚠️ Redis cache warming partially successful"
+          echo "Some versions may experience slower startup times"
+        else
+          echo "🚀 Redis cache warming completed successfully"
+          echo "All Redis versions cached and ready for fast startup"
+        fi

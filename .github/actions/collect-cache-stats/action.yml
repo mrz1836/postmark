@@ -1,0 +1,169 @@
+# ------------------------------------------------------------------------------------
+#  Collect Cache Statistics Composite Action (GoFortress)
+#
+#  Purpose: Standardize cache statistics collection across all GoFortress workflows.
+#  Creates performance cache statistics (perf-cache-*) for test/coverage workflows
+#  and infrastructure cache statistics (infra-cache-*) for tooling workflows.
+#
+#  Features:
+#    - Preserves exact JSON structure from existing implementations
+#    - Supports all cache types (gomod, gobuild, golangci-lint)
+#    - Maintains per-workflow customization capability
+#    - Follows existing naming conventions and file formats
+#    - Cross-platform cache size calculation
+#
+#  Usage:
+#    - uses: ./.github/actions/collect-cache-stats
+#      with:
+#        workflow-name: "pre-commit"
+#        job-name: "pre-commit-checks"
+#        os: ${{ inputs.primary-runner }}
+#        go-version: ${{ inputs.go-primary-version }}
+#        gomod-cache-hit: ${{ steps.setup-go.outputs.module-cache-hit }}
+#        gobuild-cache-hit: ${{ steps.setup-go.outputs.build-cache-hit }}
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: "Collect Cache Statistics"
+description: "Collect and format cache statistics for reporting and analysis"
+
+inputs:
+  workflow-name:
+    description: "Name of the workflow (e.g., 'pre-commit', 'coverage', 'test-suite')"
+    required: true
+  cache-prefix:
+    description: "Prefix for cache artifact (perf-cache for performance workflows, infra-cache for infrastructure)"
+    required: false
+    default: "perf-cache"
+  job-name:
+    description: "Name of the current job"
+    required: true
+  os:
+    description: "Operating system (for cache key compatibility)"
+    required: true
+  go-version:
+    description: "Go version being used"
+    required: true
+  gomod-cache-hit:
+    description: "Whether Go module cache was restored from cache"
+    required: false
+    default: "false"
+  gobuild-cache-hit:
+    description: "Whether Go build cache was restored from cache"
+    required: false
+    default: "false"
+  golangci-cache-hit:
+    description: "Whether golangci-lint cache was restored from cache"
+    required: false
+    default: "false"
+  include-golangci:
+    description: "Include golangci-lint cache statistics in output"
+    required: false
+    default: "false"
+  redis-enabled:
+    description: "Whether Redis cache statistics should be included"
+    required: false
+    default: "false"
+  redis-cache-hit:
+    description: "Whether Redis image was restored from cache"
+    required: false
+    default: "false"
+  redis-image-size:
+    description: "Size of Redis image in MB"
+    required: false
+    default: "0"
+  redis-operation-time:
+    description: "Time taken for Redis cache operations in seconds"
+    required: false
+    default: "0"
+
+outputs:
+  stats-file:
+    description: "Path to the generated cache statistics file"
+    value: ${{ inputs.cache-prefix }}-${{ inputs.workflow-name }}.json
+  stats-json:
+    description: "Cache statistics as JSON string"
+    value: ${{ steps.collect.outputs.stats-json }}
+
+runs:
+  using: "composite"
+  steps:
+    # ————————————————————————————————————————————————————————————————
+    # Collect cache statistics with size calculation
+    # ————————————————————————————————————————————————————————————————
+    - name: 📊 Collect cache statistics
+      id: collect
+      shell: bash
+      run: |
+        echo "📊 Collecting cache statistics for ${{ inputs.workflow-name }} job..."
+
+        # Get cache sizes using the exact pattern from existing workflows
+        GOMOD_SIZE="0B"
+        GOBUILD_SIZE="0B"
+        GOLANGCI_SIZE="0B"
+
+        # Calculate Go module cache size
+        if [ -d "$HOME/go/pkg/mod" ]; then
+          GOMOD_SIZE=$(du -sh "$HOME/go/pkg/mod" 2>/dev/null | cut -f1 || echo "0B")
+        fi
+
+        # Calculate Go build cache size
+        if [ -d "$HOME/.cache/go-build" ]; then
+          GOBUILD_SIZE=$(du -sh "$HOME/.cache/go-build" 2>/dev/null | cut -f1 || echo "0B")
+        fi
+
+        # Calculate golangci-lint cache size (if requested)
+        if [[ "${{ inputs.include-golangci }}" == "true" ]] && [ -d "$HOME/.cache/golangci-lint" ]; then
+          GOLANGCI_SIZE=$(du -sh "$HOME/.cache/golangci-lint" 2>/dev/null | cut -f1 || echo "0B")
+        fi
+
+        # Create cache statistics JSON file with new prefix-based naming
+        OUTPUT_FILE="${{ inputs.cache-prefix }}-${{ inputs.workflow-name }}.json"
+
+        echo '{' > "$OUTPUT_FILE"
+        echo '  "os": "${{ inputs.os }}",' >> "$OUTPUT_FILE"
+        echo '  "go_version": "${{ inputs.go-version }}",' >> "$OUTPUT_FILE"
+        echo "  \"gomod_cache_hit\": \"${{ inputs.gomod-cache-hit }}\"," >> "$OUTPUT_FILE"
+        echo "  \"gobuild_cache_hit\": \"${{ inputs.gobuild-cache-hit }}\"," >> "$OUTPUT_FILE"
+        echo "  \"cache_size_gomod\": \"$GOMOD_SIZE\"," >> "$OUTPUT_FILE"
+        echo "  \"cache_size_gobuild\": \"$GOBUILD_SIZE\"," >> "$OUTPUT_FILE"
+
+        # Include golangci-lint cache statistics if requested
+        if [[ "${{ inputs.include-golangci }}" == "true" ]]; then
+          echo "  \"golangci_cache_hit\": \"${{ inputs.golangci-cache-hit }}\"," >> "$OUTPUT_FILE"
+          echo "  \"cache_size_golangci_lint\": \"$GOLANGCI_SIZE\"," >> "$OUTPUT_FILE"
+        fi
+
+        # Include Redis cache statistics if requested
+        if [[ "${{ inputs.redis-enabled }}" == "true" ]]; then
+          echo "  \"redis_enabled\": \"${{ inputs.redis-enabled }}\"," >> "$OUTPUT_FILE"
+          echo "  \"redis_cache_hit\": \"${{ inputs.redis-cache-hit }}\"," >> "$OUTPUT_FILE"
+          echo "  \"redis_image_size_mb\": \"${{ inputs.redis-image-size }}\"," >> "$OUTPUT_FILE"
+          echo "  \"redis_operation_time_s\": \"${{ inputs.redis-operation-time }}\"," >> "$OUTPUT_FILE"
+        fi
+
+        echo '  "workflow": "${{ inputs.workflow-name }}",' >> "$OUTPUT_FILE"
+        echo '  "job_name": "${{ inputs.job-name }}",' >> "$OUTPUT_FILE"
+        echo "  \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"" >> "$OUTPUT_FILE"
+        echo '}' >> "$OUTPUT_FILE"
+
+        # Output JSON content for downstream use
+        STATS_JSON=$(cat "$OUTPUT_FILE")
+        echo "stats-json<<EOF" >> $GITHUB_OUTPUT
+        echo "$STATS_JSON" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+        echo "📊 Cache statistics collected for ${{ inputs.workflow-name }} job"
+
+        # Log summary for transparency (matching existing workflow patterns)
+        echo "📋 Cache Summary:"
+        echo "   - Go modules: $GOMOD_SIZE (hit: ${{ inputs.gomod-cache-hit }})"
+        echo "   - Go build: $GOBUILD_SIZE (hit: ${{ inputs.gobuild-cache-hit }})"
+        if [[ "${{ inputs.include-golangci }}" == "true" ]]; then
+          echo "   - golangci-lint: $GOLANGCI_SIZE (hit: ${{ inputs.golangci-cache-hit }})"
+        fi
+        if [[ "${{ inputs.redis-enabled }}" == "true" ]]; then
+          echo "   - Redis: ${{ inputs.redis-image-size }}MB (hit: ${{ inputs.redis-cache-hit }}, ${{ inputs.redis-operation-time }}s)"
+        fi

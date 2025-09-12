@@ -1,0 +1,2432 @@
+# ------------------------------------------------------------------------------------
+#  GoFortress Coverage System
+#
+#  Purpose: Process Go coverage data, use different coverage providers
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: GoFortress (Coverage System)
+
+on:
+  workflow_call:
+    inputs:
+      coverage-file:
+        description: "Path to coverage profile"
+        required: true
+        type: string
+      branch-name:
+        description: "Current branch name"
+        required: true
+        type: string
+      commit-sha:
+        description: "Commit SHA"
+        required: true
+        type: string
+      env-json:
+        description: "Environment configuration"
+        required: true
+        type: string
+      primary-runner:
+        description: "Primary runner OS"
+        required: true
+        type: string
+      event-name:
+        description: "GitHub event name (push, pull_request, etc)"
+        required: false
+        type: string
+      pr-number:
+        description: "Pull request number if applicable"
+        required: false
+        type: string
+    secrets:
+      github-token:
+        description: "GitHub token for API access"
+        required: true
+      CODECOV_TOKEN:
+        description: "Codecov token for uploading coverage (required when coverage-provider is codecov)"
+        required: false
+
+# Security: Restrictive default permissions with job-level overrides
+permissions:
+  contents: read
+
+jobs:
+  # ----------------------------------------------------------------------------------
+  # Check Coverage Provider
+  # ----------------------------------------------------------------------------------
+  check-provider:
+    name: 🔍 Check Coverage Provider
+    runs-on: ubuntu-latest
+    outputs:
+      provider: ${{ steps.check.outputs.provider }}
+      should-run-internal: ${{ steps.check.outputs.should-run-internal }}
+      should-run-codecov: ${{ steps.check.outputs.should-run-codecov }}
+    steps:
+      - name: 🔧 Parse environment variables
+        env:
+          ENV_JSON: ${{ inputs.env-json }}
+        run: |
+          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
+            echo "$key=$value" >> $GITHUB_ENV
+          done
+
+      - name: 🔍 Check coverage provider
+        id: check
+        run: |
+          echo "🔍 Checking coverage provider configuration..."
+          PROVIDER="${{ env.GO_COVERAGE_PROVIDER }}"
+          echo "provider=$PROVIDER" >> $GITHUB_OUTPUT
+
+          if [[ "$PROVIDER" == "internal" ]]; then
+            echo "✅ Coverage provider is 'internal' - will use go-coverage with GitHub Pages"
+            echo "should-run-internal=true" >> $GITHUB_OUTPUT
+            echo "should-run-codecov=false" >> $GITHUB_OUTPUT
+          elif [[ "$PROVIDER" == "codecov" ]]; then
+            echo "✅ Coverage provider is 'codecov' - will upload to Codecov service"
+            echo "should-run-internal=false" >> $GITHUB_OUTPUT
+            echo "should-run-codecov=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Invalid provider: $PROVIDER"
+            echo "should-run-internal=false" >> $GITHUB_OUTPUT
+            echo "should-run-codecov=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+  # ----------------------------------------------------------------------------------
+  # Process Coverage and Deploy to GitHub Pages (Internal Provider)
+  # ----------------------------------------------------------------------------------
+  process-coverage:
+    name: 📊 Process Coverage & Deploy (Internal)
+    needs: check-provider
+    if: needs.check-provider.outputs.should-run-internal == 'true'
+    runs-on: ${{ inputs.primary-runner }}
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: write # Required: Push coverage data to gh-pages branch
+      pages: write # Required: Deploy to GitHub Pages
+      id-token: write # Required: GitHub Pages authentication
+      pull-requests: write # Required: Create PR comments with coverage
+      statuses: write # Required: Create commit status checks
+
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Setup and environment
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Parse environment variables
+        env:
+          ENV_JSON: ${{ inputs.env-json }}
+        run: |
+          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
+            echo "$key=$value" >> $GITHUB_ENV
+          done
+
+      - name: 🔧 Setup branch helper functions
+        run: |
+          # Create helper function to check if branch is a main branch
+          cat << 'EOF' > /tmp/branch_helpers.sh
+          #!/bin/bash
+
+          # Function to check if a branch is a main branch
+          is_main_branch() {
+            local branch_name="$1"
+            local main_branches="${MAIN_BRANCHES:-master,main}"
+
+            # Convert comma-separated list to array
+            IFS=',' read -ra BRANCH_ARRAY <<< "$main_branches"
+
+            # Check if branch matches any main branch
+            for main_branch in "${BRANCH_ARRAY[@]}"; do
+              # Trim whitespace
+              main_branch=$(echo "$main_branch" | xargs)
+              if [[ "$branch_name" == "$main_branch" ]]; then
+                return 0  # true
+              fi
+            done
+
+            return 1  # false
+          }
+          EOF
+          chmod +x /tmp/branch_helpers.sh
+          echo "✅ Branch helper functions created"
+
+      - name: 📥 Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0 # Fetch all history including tags for version display
+
+      # ————————————————————————————————————————————————————————————————
+      # Setup Go with caching and version management
+      # ————————————————————————————————————————————————————————————————
+      - name: 🏗️ Setup Go with Cache
+        id: setup-go-coverage
+        uses: ./.github/actions/setup-go-with-cache
+        with:
+          go-version: ${{ env.GO_PRIMARY_VERSION }}
+          matrix-os: ${{ inputs.primary-runner }}
+          go-primary-version: ${{ env.GO_PRIMARY_VERSION }}
+          go-secondary-version: ${{ env.GO_SECONDARY_VERSION }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Restore (and later save) a compact cache for the go-coverage binary
+      # Skip cache when using local development version
+      # ————————————————————————————————————————————————————————————————
+      - name: 💾 Restore go-coverage binary cache (production)
+        id: go-coverage-cache
+        if: env.GO_COVERAGE_USE_LOCAL != 'true'
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cache/go-coverage-bin
+          key: ${{ inputs.primary-runner }}-go-coverage-${{ env.GO_COVERAGE_VERSION }}
+
+      # Restore cache for local development builds (branch and commit specific)
+      # ————————————————————————————————————————————————————————————————
+      - name: 💾 Restore go-coverage binary cache (local)
+        id: go-coverage-local-cache
+        if: env.GO_COVERAGE_USE_LOCAL == 'true'
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cache/go-coverage-local
+          key: ${{ inputs.primary-runner }}-local-go-coverage-${{ inputs.branch-name }}-${{ inputs.commit-sha }}
+          restore-keys: |
+            ${{ inputs.primary-runner }}-local-go-coverage-${{ inputs.branch-name }}-
+
+      - name: 🛠️ Make cached go-coverage usable (production)
+        if: env.GO_COVERAGE_USE_LOCAL != 'true'
+        run: |
+          set -euo pipefail
+          BIN_DIR="$HOME/.cache/go-coverage-bin"
+          GO_COVERAGE_BIN="$BIN_DIR/go-coverage"
+          # If we restored a cache, copy/link it into GOPATH/bin so the binary works.
+          if [[ -f "$GO_COVERAGE_BIN" ]]; then
+            echo "✅ Using cached go-coverage binary"
+            mkdir -p "$(go env GOPATH)/bin"
+            cp "$GO_COVERAGE_BIN" "$(go env GOPATH)/bin/"
+          fi
+          # Make sure the binary location is on PATH for *all* subsequent steps.
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: 🛠️ Make cached go-coverage usable (local)
+        if: env.GO_COVERAGE_USE_LOCAL == 'true'
+        run: |
+          set -euo pipefail
+          BIN_DIR="$HOME/.cache/go-coverage-local"
+          GO_COVERAGE_BIN="$BIN_DIR/go-coverage"
+          COMMIT_MARKER="$BIN_DIR/commit-sha"
+          # If we restored a cache, verify it's from the correct commit
+          if [[ -f "$GO_COVERAGE_BIN" && -f "$COMMIT_MARKER" ]]; then
+            CACHED_COMMIT=$(cat "$COMMIT_MARKER")
+            if [[ "$CACHED_COMMIT" == "${{ inputs.commit-sha }}" ]]; then
+              echo "✅ Using cached local go-coverage binary (commit: ${CACHED_COMMIT:0:8})"
+              mkdir -p "$(go env GOPATH)/bin"
+              cp "$GO_COVERAGE_BIN" "$(go env GOPATH)/bin/"
+            else
+              echo "⚠️  Cached binary is from different commit (cached: ${CACHED_COMMIT:0:8}, current: ${{ inputs.commit-sha }}), will rebuild"
+              rm -f "$GO_COVERAGE_BIN" "$COMMIT_MARKER"
+            fi
+          fi
+          # Make sure the binary location is on PATH for *all* subsequent steps.
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: 🎯 Set go-coverage binary path
+        run: |
+          # Set the binary path for both cache hit and cache miss scenarios
+          GO_BIN="$(go env GOPATH)/bin"
+          echo "GO_COVERAGE_BINARY=$GO_BIN/go-coverage" >> $GITHUB_ENV
+
+      # ————————————————————————————————————————————————————————————————
+      # Install go-coverage tool when cache miss OR using local version
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔨 Install go-coverage tool
+        if: steps.go-coverage-cache.outputs.cache-hit != 'true' || env.GO_COVERAGE_USE_LOCAL == 'true'
+        run: |
+          # Check if we should use local development version
+          if [[ "${{ env.GO_COVERAGE_USE_LOCAL }}" == "true" ]]; then
+            # Check if we already have a current binary from cache restoration
+            if [[ -f "$(go env GOPATH)/bin/go-coverage" ]]; then
+              echo "✅ Local go-coverage binary already available from cache"
+              echo "GO_COVERAGE_BINARY=$(go env GOPATH)/bin/go-coverage" >> $GITHUB_ENV
+              "$(go env GOPATH)/bin/go-coverage" --version || echo "Version info not available for cached build"
+            else
+              echo "📦 Building local development version of go-coverage"
+              echo "  Building from source at: $GITHUB_WORKSPACE/cmd/go-coverage"
+              echo "  Branch: ${{ inputs.branch-name }}"
+              echo "  Commit: ${{ inputs.commit-sha }}"
+
+              # Build from local source
+              cd "$GITHUB_WORKSPACE"
+              go build -v -o /tmp/go-coverage ./cmd/go-coverage
+              chmod +x /tmp/go-coverage
+
+              # Copy the freshly built binary to local cache directory
+              mkdir -p ~/.cache/go-coverage-local
+              cp /tmp/go-coverage ~/.cache/go-coverage-local/
+
+              # Store commit SHA marker for cache validation
+              echo "${{ inputs.commit-sha }}" > ~/.cache/go-coverage-local/commit-sha
+
+              # Also copy to GOPATH/bin for immediate use
+              mkdir -p "$(go env GOPATH)/bin"
+              cp /tmp/go-coverage "$(go env GOPATH)/bin/go-coverage"
+
+              # Store the binary path
+              echo "GO_COVERAGE_BINARY=$(go env GOPATH)/bin/go-coverage" >> $GITHUB_ENV
+
+              # Show version info
+              echo "✅ Local go-coverage built and cached (commit: ${{ inputs.commit-sha }})"
+              "$(go env GOPATH)/bin/go-coverage" --version || echo "Version info not available for local build"
+            fi
+          else
+            # Use production version
+            VERSION="${{ env.GO_COVERAGE_VERSION }}"
+            echo "⬇️ Cache miss – installing go-coverage version: $VERSION"
+
+            # Install using go install
+            go install github.com/mrz1836/go-coverage/cmd/go-coverage@$VERSION
+
+            # Copy the freshly installed binary to cache directory
+            mkdir -p ~/.cache/go-coverage-bin
+            cp "$(go env GOPATH)/bin/go-coverage" ~/.cache/go-coverage-bin/
+
+            # Store the binary path
+            GO_BIN="$(go env GOPATH)/bin"
+            echo "GO_COVERAGE_BINARY=$GO_BIN/go-coverage" >> $GITHUB_ENV
+
+            # Verify installation
+            echo "✅ go-coverage installed and stored in cache"
+            "$GO_BIN/go-coverage" --version
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Download and restore coverage history
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Download previous coverage history
+        # Download history for all branches to enable trend analysis
+        if: github.event_name == 'push'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "📥 Downloading previous coverage history using GitHub API..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          # Create history artifacts directory
+          mkdir -p .github/coverage/history-artifacts/
+          echo "📁 Created history artifacts directory"
+
+          # Check GitHub CLI availability and authentication
+          if ! command -v gh &> /dev/null; then
+            echo "❌ GitHub CLI (gh) is not available"
+            echo "ℹ️ Skipping history download - this will not affect coverage processing"
+            exit 0
+          fi
+
+          if ! gh auth status &> /dev/null; then
+            echo "❌ GitHub CLI is not authenticated"
+            echo "ℹ️ Skipping history download - this will not affect coverage processing"
+            exit 0
+          fi
+
+          echo "✅ GitHub CLI is available and authenticated"
+
+          # Get recent workflow runs that may have recorded history (include failed deployments)
+          echo "🔍 Fetching recent workflow runs with potential history data..."
+          CURRENT_BRANCH="${{ inputs.branch-name }}"
+          echo "📌 Current branch: $CURRENT_BRANCH"
+
+          # First try to get completed runs from current branch (success OR failure after history step)
+          # This includes runs that recorded coverage history but failed in later steps (like deployment)
+          WORKFLOW_RUNS=$(gh api repos/${{ github.repository }}/actions/runs \
+            --jq ".workflow_runs[] | select(.status == \"completed\" and (.conclusion == \"success\" or .conclusion == \"failure\") and .head_branch == \"$CURRENT_BRANCH\") | .id" \
+            --paginate 2>/dev/null | head -8 || echo "")
+
+          # If no runs found for current branch and it's not master, also get master branch history
+          if [[ -z "$WORKFLOW_RUNS" ]] && [[ "$CURRENT_BRANCH" != "master" ]]; then
+            echo "ℹ️ No history found for branch '$CURRENT_BRANCH', checking master branch..."
+            WORKFLOW_RUNS=$(gh api repos/${{ github.repository }}/actions/runs \
+              --jq '.workflow_runs[] | select(.status == "completed" and (.conclusion == "success" or .conclusion == "failure") and .head_branch == "master") | .id' \
+              --paginate 2>/dev/null | head -5 || echo "")
+          fi
+
+          if [[ -z "$WORKFLOW_RUNS" ]]; then
+            echo "ℹ️ No recent workflow runs with potential history found"
+            echo "📝 This is normal for:"
+            echo "  - First run on this repository"
+            echo "  - All recent runs were cancelled or timed out"
+            echo "  - GitHub API rate limiting or connectivity issues"
+            exit 0
+          fi
+
+          echo "📊 Found $(echo "$WORKFLOW_RUNS" | wc -l) recent runs to check for history"
+          echo "📋 Workflow run IDs: $(echo "$WORKFLOW_RUNS" | tr '\n' ' ')"
+
+          # Download coverage history artifacts from recent runs
+          DOWNLOADED_COUNT=0
+          MAX_ARTIFACTS=3
+
+          for run_id in $WORKFLOW_RUNS; do
+            if [[ $DOWNLOADED_COUNT -ge $MAX_ARTIFACTS ]]; then
+              echo "📊 Reached maximum artifact limit ($MAX_ARTIFACTS), stopping download"
+              break
+            fi
+
+            echo ""
+            echo "🔍 Checking run $run_id for coverage history artifacts..."
+
+            ARTIFACTS=$(gh api repos/${{ github.repository }}/actions/runs/$run_id/artifacts \
+              --jq '.artifacts[] | select(.name | startswith("coverage-history-")) | .archive_download_url' \
+              2>/dev/null || echo "")
+
+            if [[ -n "$ARTIFACTS" ]]; then
+              echo "✅ Found coverage history artifacts in run $run_id"
+
+              echo "$ARTIFACTS" | while read -r download_url; do
+                if [[ -n "$download_url" ]]; then
+                  echo "📥 Downloading artifact from: $download_url"
+                  cd .github/coverage/history-artifacts/
+
+                  # Download with detailed logging
+                  DOWNLOAD_SUCCESS=false
+                  for attempt in 1 2 3; do
+                    echo "    📥 Download attempt $attempt/3..."
+                    if curl -L -H "Authorization: Bearer $GITHUB_TOKEN" \
+                            -H "Accept: application/vnd.github+json" \
+                            --max-time 30 --connect-timeout 10 \
+                            "$download_url" -o "history-$run_id.zip" 2>/dev/null; then
+                      if [[ -s "history-$run_id.zip" ]]; then
+                        echo "    ✅ Download successful ($(wc -c < "history-$run_id.zip") bytes)"
+                        DOWNLOAD_SUCCESS=true
+                        break
+                      else
+                        echo "    ⚠️ Downloaded file is empty"
+                        rm -f "history-$run_id.zip"
+                      fi
+                    else
+                      echo "    ⚠️ Download attempt $attempt failed"
+                      rm -f "history-$run_id.zip"
+                    fi
+
+                    if [[ $attempt -lt 3 ]]; then
+                      echo "    ⏳ Waiting 2 seconds before retry..."
+                      sleep 2
+                    fi
+                  done
+
+                  if [[ "$DOWNLOAD_SUCCESS" == "true" ]]; then
+                    if unzip -q "history-$run_id.zip" 2>/dev/null; then
+                      rm -f "history-$run_id.zip"
+                      echo "    ✅ Extracted history from run $run_id"
+
+                      # Validate extracted history files contain actual coverage data
+                      EXTRACTED_FILES=$(find . -name "*.json" -type f 2>/dev/null | wc -l || echo "0")
+                      VALID_FILES=0
+                      for json_file in $(find . -name "*.json" -type f 2>/dev/null); do
+                        if [[ -s "$json_file" ]] && grep -q "coverage" "$json_file" 2>/dev/null; then
+                          VALID_FILES=$((VALID_FILES + 1))
+                        else
+                          echo "    ⚠️ Removing invalid history file: $(basename "$json_file")"
+                          rm -f "$json_file"
+                        fi
+                      done
+                      echo "    📄 Extracted $EXTRACTED_FILES files, $VALID_FILES valid history entries"
+                    else
+                      echo "    ⚠️ Failed to extract history-$run_id.zip (possibly corrupted)"
+                      rm -f "history-$run_id.zip"
+                    fi
+                  else
+                    echo "    ❌ Failed to download after 3 attempts"
+                  fi
+
+                  cd - > /dev/null
+                fi
+              done
+              DOWNLOADED_COUNT=$((DOWNLOADED_COUNT + 1))
+            else
+              echo "ℹ️ No coverage history artifacts found in run $run_id"
+            fi
+          done
+
+          if [[ $DOWNLOADED_COUNT -gt 0 ]]; then
+            echo ""
+            echo "✅ Successfully downloaded $DOWNLOADED_COUNT coverage history artifacts"
+
+            # Show summary of downloaded files
+            TOTAL_JSON_FILES=$(find .github/coverage/history-artifacts -name "*.json" -type f 2>/dev/null | wc -l || echo "0")
+            echo "📊 Total JSON files downloaded: $TOTAL_JSON_FILES"
+
+            if [[ $TOTAL_JSON_FILES -gt 0 ]]; then
+              echo "📋 Downloaded files:"
+              find .github/coverage/history-artifacts -name "*.json" -type f -exec basename {} \; | head -10
+            fi
+          else
+            echo "ℹ️ No coverage history artifacts available from previous runs"
+            echo "📝 This is normal for the first few runs of the coverage system"
+          fi
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        continue-on-error: true
+
+      - name: 🔄 Restore history from artifacts
+        # Restore history for all branches to enable trend analysis
+        if: github.event_name == 'push'
+        run: |
+          echo "🔄 Restoring coverage history from artifacts..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          # Create history directory
+          HISTORY_DIR=".github/coverage/history"
+          mkdir -p "$HISTORY_DIR"
+          echo "📁 Created history directory: $HISTORY_DIR"
+
+          # Check if artifacts were downloaded
+          ARTIFACTS_DIR=".github/coverage/history-artifacts"
+          if [[ -d "$ARTIFACTS_DIR" ]]; then
+            echo "✅ Artifacts directory found: $ARTIFACTS_DIR"
+
+            # Show available artifacts
+            echo "📋 Contents of artifacts directory:"
+            ls -la "$ARTIFACTS_DIR" || echo "Unable to list directory"
+
+            # Count available JSON files
+            ARTIFACT_FILES=$(find "$ARTIFACTS_DIR" -name "*.json" -type f 2>/dev/null | wc -l || echo "0")
+            echo "📦 Found $ARTIFACT_FILES JSON files in artifacts"
+
+            if [[ $ARTIFACT_FILES -gt 0 ]]; then
+              echo ""
+              echo "🔄 Starting file restoration process..."
+
+              # List all JSON files found
+              echo "📋 JSON files to be restored:"
+              find "$ARTIFACTS_DIR" -name "*.json" -type f -exec echo "  - {}" \; 2>/dev/null
+
+              # Copy files with detailed logging
+              COPY_SUCCESS=0
+              COPY_FAILED=0
+
+              find "$ARTIFACTS_DIR" -name "*.json" -type f | while read -r file; do
+                filename=$(basename "$file")
+                destination="$HISTORY_DIR/$filename"
+
+                if cp "$file" "$destination" 2>/dev/null; then
+                  echo "  ✅ Copied: $filename"
+                  COPY_SUCCESS=$((COPY_SUCCESS + 1))
+                else
+                  echo "  ❌ Failed to copy: $filename"
+                  COPY_FAILED=$((COPY_FAILED + 1))
+                fi
+              done
+
+              echo ""
+              echo "✅ File restoration completed"
+            else
+              echo "ℹ️ No JSON files found in artifacts directory"
+            fi
+          else
+            echo "ℹ️ No artifacts directory found - this is normal for first run"
+          fi
+
+          # Verify restoration results
+          HISTORY_COUNT=$(find "$HISTORY_DIR" -name "*.json" -type f 2>/dev/null | wc -l || echo "0")
+          echo ""
+          echo "📊 History restoration summary:"
+          echo "  - History directory: $HISTORY_DIR"
+          echo "  - Total history files: $HISTORY_COUNT"
+
+          if [[ $HISTORY_COUNT -gt 0 ]]; then
+            echo "  - History files available for trend analysis: ✅"
+            echo "📋 Restored history files (newest first):"
+            find "$HISTORY_DIR" -name "*.json" -type f -exec basename {} \; | sort -r | head -5
+
+            # Show disk usage
+            HISTORY_SIZE=$(du -sh "$HISTORY_DIR" 2>/dev/null | cut -f1 || echo "unknown")
+            echo "  - Total history size: $HISTORY_SIZE"
+          else
+            echo "  - History files available: ❌ (first run or no previous data)"
+          fi
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ————————————————————————————————————————————————————————————————
+      # Download coverage artifact and process
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Download coverage artifact
+        uses: ./.github/actions/download-artifact-resilient
+        with:
+          pattern: "coverage-data"
+          path: ./coverage-artifacts/
+          merge-multiple: false
+          max-retries: ${{ env.ARTIFACT_DOWNLOAD_RETRIES }}
+          retry-delay: ${{ env.ARTIFACT_DOWNLOAD_RETRY_DELAY }}
+          timeout: ${{ env.ARTIFACT_DOWNLOAD_TIMEOUT }}
+          continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
+      - name: 📊 Process coverage data
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          GITHUB_PR_NUMBER: ${{ inputs.pr-number || github.event.pull_request.number }}
+          GITHUB_SHA: ${{ inputs.commit-sha }}
+          GITHUB_REF_NAME: ${{ inputs.branch-name }}
+          GO_COVERAGE_HISTORY_PATH: ${{ github.workspace }}/.github/coverage/history
+        run: |
+          echo "📊 Processing coverage data with complete pipeline..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          # Debug: Show current working directory and paths
+          echo "🔍 Environment information:"
+          echo "  - Current working directory: $(pwd)"
+          echo "  - Repository root should be: $(pwd)"
+          echo "  - History path from env: $GO_COVERAGE_HISTORY_PATH"
+          echo "  - GitHub repository: $GITHUB_REPOSITORY"
+          echo "  - Branch: $GITHUB_REF_NAME"
+          echo "  - Commit SHA: $GITHUB_SHA"
+          echo "  - PR Number: ${GITHUB_PR_NUMBER:-Not in PR context}"
+
+          # Find coverage file with detailed logging
+          REPO_ROOT="$(pwd)"
+          echo ""
+          echo "🔍 Locating coverage input file..."
+          echo "  - Repository root: $REPO_ROOT"
+          echo "  - Looking for: ${{ inputs.coverage-file }}"
+
+          COVERAGE_FILE=""
+          COVERAGE_LOCATIONS=(
+            "$REPO_ROOT/coverage-artifacts/coverage-data/${{ inputs.coverage-file }}"
+            "$REPO_ROOT/coverage-artifacts/${{ inputs.coverage-file }}"
+            "$REPO_ROOT/${{ inputs.coverage-file }}"
+          )
+
+          for location in "${COVERAGE_LOCATIONS[@]}"; do
+            echo "  - Checking: $location"
+            if [[ -f "$location" ]]; then
+              COVERAGE_FILE="$location"
+              FILE_SIZE=$(wc -c < "$COVERAGE_FILE" 2>/dev/null || echo "unknown")
+              echo "    ✅ Found ($FILE_SIZE bytes)"
+              break
+            else
+              echo "    ❌ Not found"
+            fi
+          done
+
+          if [[ -z "$COVERAGE_FILE" ]]; then
+            echo ""
+            echo "❌ Coverage file not found: ${{ inputs.coverage-file }}"
+            echo "🔍 Available files in coverage-artifacts:"
+            ls -la "$REPO_ROOT/coverage-artifacts/" 2>/dev/null || echo "No coverage-artifacts directory"
+            echo "🔍 Available files in coverage-artifacts/coverage-data/:"
+            ls -la "$REPO_ROOT/coverage-artifacts/coverage-data/" 2>/dev/null || echo "No coverage-data subdirectory"
+            echo "🔍 Available files in repository root:"
+            ls -la "$REPO_ROOT"/*.out "$REPO_ROOT"/*.txt 2>/dev/null || echo "No .out or .txt files in root"
+            exit 1
+          fi
+
+          echo "✅ Using coverage file: $COVERAGE_FILE"
+
+          # Create clean output directory with branch-specific structure
+          OUTPUT_DIR="$REPO_ROOT/pages-deploy"
+          BRANCH_NAME="${{ inputs.branch-name }}"
+          BRANCH_OUTPUT_DIR="$OUTPUT_DIR/coverage/branch/$BRANCH_NAME"
+
+          echo ""
+          echo "🔧 Preparing output directory with branch-specific structure..."
+          echo "  - Main output directory: $OUTPUT_DIR"
+          echo "  - Branch-specific directory: $BRANCH_OUTPUT_DIR"
+          echo "  - Branch name: $BRANCH_NAME"
+
+          # Create branch-specific directory structure
+          mkdir -p "$BRANCH_OUTPUT_DIR/data"
+          mkdir -p "$OUTPUT_DIR/data"
+
+          echo "  - Created branch-specific directory structure"
+          echo "  - Created main and branch data subdirectories"
+
+          # Show history availability for trend analysis
+          HISTORY_DIR="$REPO_ROOT/.github/coverage/history"
+          HISTORY_COUNT=$(find "$HISTORY_DIR" -name "*.json" -type f 2>/dev/null | wc -l || echo "0")
+          echo ""
+          echo "📈 History availability for trend analysis:"
+          echo "  - History directory: $HISTORY_DIR"
+          echo "  - Available history files: $HISTORY_COUNT"
+          if [[ $HISTORY_COUNT -gt 0 ]]; then
+            echo "  - Trend analysis: ✅ Enabled"
+            echo "  - Recent history files:"
+            find "$HISTORY_DIR" -name "*.json" -type f -exec basename {} \; | sort -r | head -3 | sed 's/^/    - /'
+          else
+            echo "  - Trend analysis: ⚠️ No history available (first run)"
+          fi
+
+          # Process coverage with complete command for main output
+          echo ""
+          echo "🚀 Running go-coverage complete command for main output..."
+          echo "  Command: $GO_COVERAGE_BINARY complete --input \"$COVERAGE_FILE\" --output \"$OUTPUT_DIR\""
+
+          if "$GO_COVERAGE_BINARY" complete \
+            --input "$COVERAGE_FILE" \
+            --output "$OUTPUT_DIR"; then
+            echo "✅ Main coverage processing completed successfully"
+          else
+            echo "❌ Main coverage processing failed"
+            exit 1
+          fi
+
+          # Generate coverage statistics for completion report
+          echo ""
+          echo "📊 Generating coverage statistics..."
+          STATS_START_TIME=$(date +%s)
+          COVERAGE_PERCENTAGE=""
+          FILES_PROCESSED=0
+          BADGE_GENERATED=false
+          PAGES_DEPLOYED=false
+
+          # Calculate coverage percentage from coverage file first (more accurate)
+          if [ -f "$COVERAGE_FILE" ]; then
+            # Calculate coverage from .out file using go tool cover
+            COVERAGE_PERCENTAGE=$(go tool cover -func="$COVERAGE_FILE" | tail -1 | awk '{print $3}' | sed 's/%//' || echo "0")
+            echo "📈 Calculated coverage percentage from profile: ${COVERAGE_PERCENTAGE}%"
+
+            # Validate result - if we get 0% but have coverage data, try HTML fallback
+            if [[ "$COVERAGE_PERCENTAGE" == "0" ]] && [[ -s "$COVERAGE_FILE" ]]; then
+              COVERAGE_LINES=$(wc -l < "$COVERAGE_FILE" || echo "0")
+              if [[ $COVERAGE_LINES -gt 1 ]]; then
+                echo "⚠️ Got 0% coverage despite $COVERAGE_LINES lines in coverage file - trying HTML fallback"
+                if [ -f "$OUTPUT_DIR/coverage.html" ]; then
+                  HTML_COVERAGE=$(grep -io 'coverage: [0-9.]*%' "$OUTPUT_DIR/coverage.html" | head -1 | grep -o '[0-9.]*' || echo "0")
+                  if [[ "$HTML_COVERAGE" != "0" ]]; then
+                    COVERAGE_PERCENTAGE="$HTML_COVERAGE"
+                    echo "📈 Used HTML fallback coverage: ${COVERAGE_PERCENTAGE}%"
+                  else
+                    echo "⚠️ HTML also shows 0% - this may indicate a go-coverage tool issue"
+                  fi
+                fi
+              fi
+            fi
+          elif [ -f "$OUTPUT_DIR/coverage.html" ]; then
+            # Fallback: Extract coverage percentage from HTML if no profile file
+            COVERAGE_PERCENTAGE=$(grep -io 'coverage: [0-9.]*%' "$OUTPUT_DIR/coverage.html" | head -1 | grep -o '[0-9.]*' || echo "0")
+            echo "📈 Extracted coverage percentage from HTML (fallback): ${COVERAGE_PERCENTAGE}%"
+          fi
+
+          # Count processed files from coverage output
+          if [ -f "$COVERAGE_FILE" ]; then
+            FILES_PROCESSED=$(wc -l < "$COVERAGE_FILE" || echo "0")
+            echo "📁 Files processed: $FILES_PROCESSED"
+          fi
+
+          # Check if badge was generated (look for badge files in output)
+          if ls "$OUTPUT_DIR"/*.svg >/dev/null 2>&1 || ls "$OUTPUT_DIR"/*badge* >/dev/null 2>&1; then
+            BADGE_GENERATED=true
+            echo "🏷️ Coverage badge generated"
+          fi
+
+          # Check if pages deployment is configured (placeholder for future)
+          # This can be enhanced when pages deployment is implemented
+          PAGES_DEPLOYED=false
+
+          # Calculate processing time
+          STATS_END_TIME=$(date +%s)
+          PROCESSING_TIME=$((STATS_END_TIME - STATS_START_TIME))
+
+          # Create coverage statistics JSON file
+          STATS_FILENAME="coverage-stats-internal-$(date +%Y%m%d-%H%M%S).json"
+          cat > "$STATS_FILENAME" <<EOF
+          {
+            "coverage_percentage": "${COVERAGE_PERCENTAGE}",
+            "files_processed": ${FILES_PROCESSED},
+            "processing_time_seconds": ${PROCESSING_TIME},
+            "badge_generated": ${BADGE_GENERATED},
+            "pages_deployed": ${PAGES_DEPLOYED},
+            "coverage_file": "$(basename "$COVERAGE_FILE")",
+            "output_directory": "$(basename "$OUTPUT_DIR")",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "workflow": "fortress-coverage",
+            "job": "internal"
+          }
+          EOF
+
+          echo "📊 Coverage statistics saved to: $STATS_FILENAME"
+          echo "  Coverage: ${COVERAGE_PERCENTAGE}%"
+          echo "  Files processed: $FILES_PROCESSED"
+          echo "  Processing time: ${PROCESSING_TIME}s"
+          echo "  Badge generated: $BADGE_GENERATED"
+          echo "  Pages deployed: $PAGES_DEPLOYED"
+
+          # Process coverage for branch-specific output
+          echo ""
+          echo "🚀 Running go-coverage complete command for branch-specific output..."
+          echo "  Command: $GO_COVERAGE_BINARY complete --input \"$COVERAGE_FILE\" --output \"$BRANCH_OUTPUT_DIR\""
+
+          if "$GO_COVERAGE_BINARY" complete \
+            --input "$COVERAGE_FILE" \
+            --output "$BRANCH_OUTPUT_DIR"; then
+            echo "✅ Branch-specific coverage processing completed successfully"
+          else
+            echo "❌ Branch-specific coverage processing failed"
+            exit 1
+          fi
+
+          # Verify outputs were created
+          echo ""
+          echo "🔍 Verifying generated outputs..."
+          EXPECTED_FILES=("index.html" "coverage.html" "coverage.svg")
+
+          echo ""
+          echo "📋 Checking main output files:"
+          MAIN_ALL_GENERATED=true
+          for file in "${EXPECTED_FILES[@]}"; do
+            if [[ -f "$OUTPUT_DIR/$file" ]]; then
+              FILE_SIZE=$(wc -c < "$OUTPUT_DIR/$file" 2>/dev/null || echo "unknown")
+              echo "  ✅ Main: $file ($FILE_SIZE bytes)"
+            else
+              echo "  ❌ MISSING Main: $file"
+              MAIN_ALL_GENERATED=false
+            fi
+          done
+
+          echo ""
+          echo "📋 Checking branch-specific output files:"
+          BRANCH_ALL_GENERATED=true
+          for file in "${EXPECTED_FILES[@]}"; do
+            if [[ -f "$BRANCH_OUTPUT_DIR/$file" ]]; then
+              FILE_SIZE=$(wc -c < "$BRANCH_OUTPUT_DIR/$file" 2>/dev/null || echo "unknown")
+              echo "  ✅ Branch ($BRANCH_NAME): $file ($FILE_SIZE bytes)"
+            else
+              echo "  ❌ MISSING Branch ($BRANCH_NAME): $file"
+              BRANCH_ALL_GENERATED=false
+            fi
+          done
+
+          if [[ "$MAIN_ALL_GENERATED" != "true" ]] || [[ "$BRANCH_ALL_GENERATED" != "true" ]]; then
+            echo ""
+            echo "❌ Some expected files were not generated"
+            echo "🔍 All files in output directory:"
+            find "$OUTPUT_DIR" -type f -exec echo "  - {}" \;
+            exit 1
+          fi
+
+          # Show processing summary
+          TOTAL_FILES=$(find "$OUTPUT_DIR" -type f | wc -l)
+          OUTPUT_SIZE=$(du -sh "$OUTPUT_DIR" 2>/dev/null | cut -f1 || echo "unknown")
+
+          echo ""
+          echo "📊 Processing summary:"
+          echo "  - Total files generated: $TOTAL_FILES"
+          echo "  - Total output size: $OUTPUT_SIZE"
+          echo "  - Output directory: $OUTPUT_DIR"
+
+          # CRITICAL: Verify what's about to be deployed
+          echo ""
+          echo "🔍 CRITICAL: Pre-deployment content verification"
+          echo "   This shows EXACTLY what will be deployed to GitHub Pages"
+          echo "   Expected size: <100KB for optimal performance"
+          echo ""
+
+          DEPLOY_DIR="$OUTPUT_DIR"
+          if [[ -d "$DEPLOY_DIR" ]]; then
+            echo "📊 Deployment directory analysis:"
+            ACTUAL_SIZE=$(du -sh "$DEPLOY_DIR" 2>/dev/null | cut -f1 || echo "unknown")
+            FILE_COUNT=$(find "$DEPLOY_DIR" -type f | wc -l)
+            echo "   - Size: $ACTUAL_SIZE"
+            echo "   - Files: $FILE_COUNT"
+
+            if [[ "$ACTUAL_SIZE" =~ ^[0-9]+M ]]; then
+              echo ""
+              echo "🚨 CRITICAL ISSUE: Deployment size is $ACTUAL_SIZE (MB range)"
+              echo "   This indicates the deployment contains too many files"
+              echo "   Expected size: <100KB for coverage files only"
+            fi
+          fi
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: 📈 Record coverage history
+        # Record history for all branches to enable trend tracking
+        if: github.event_name == 'push'
+        env:
+          GO_COVERAGE_HISTORY_PATH: ${{ github.workspace }}/.github/coverage/history
+        run: |
+          echo "📈 Recording coverage history..."
+
+          # Find coverage file
+          REPO_ROOT="$(pwd)"
+          if [[ -f "$REPO_ROOT/coverage-artifacts/coverage-data/${{ inputs.coverage-file }}" ]]; then
+            COVERAGE_FILE="$REPO_ROOT/coverage-artifacts/coverage-data/${{ inputs.coverage-file }}"
+          elif [[ -f "$REPO_ROOT/coverage-artifacts/${{ inputs.coverage-file }}" ]]; then
+            COVERAGE_FILE="$REPO_ROOT/coverage-artifacts/${{ inputs.coverage-file }}"
+          elif [[ -f "$REPO_ROOT/${{ inputs.coverage-file }}" ]]; then
+            COVERAGE_FILE="$REPO_ROOT/${{ inputs.coverage-file }}"
+          else
+            echo "⚠️ Coverage file not found for history recording"
+            exit 0
+          fi
+
+          # Record coverage in history
+          if ! "$GO_COVERAGE_BINARY" history \
+            --add "$COVERAGE_FILE" \
+            --branch "${{ inputs.branch-name }}" \
+            --commit "${{ inputs.commit-sha }}" \
+            --format text; then
+            echo "⚠️ Failed to record history"
+            exit 1
+          fi
+
+          # Verify history files were created
+          HISTORY_COUNT=$(find "$GO_COVERAGE_HISTORY_PATH" -name "*.json" -type f 2>/dev/null | wc -l || echo "0")
+          echo "✅ History recording completed - $HISTORY_COUNT history files in directory"
+
+          # Debug: List history files
+          if [[ $HISTORY_COUNT -gt 0 ]]; then
+            echo "📋 History files created:"
+            find "$GO_COVERAGE_HISTORY_PATH" -name "*.json" -type f -exec basename {} \; | head -5
+          else
+            echo "⚠️ WARNING: No history files found after recording"
+            ls -la "$GO_COVERAGE_HISTORY_PATH" 2>/dev/null || echo "Directory not found: $GO_COVERAGE_HISTORY_PATH"
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Create PR comment (if in PR context)
+      # Note: This handles both pull_request events AND push events to PR branches
+      # when a PR number is provided via inputs
+      # ————————————————————————————————————————————————————————————————
+      - name: 💬 Create or update PR coverage comment
+        if: (github.event_name == 'pull_request' || inputs.event-name == 'pull_request' || inputs.pr-number != '') && env.GO_COVERAGE_POST_COMMENTS == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.github-token }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_PR_NUMBER: ${{ inputs.pr-number || github.event.pull_request.number }}
+          GITHUB_SHA: ${{ inputs.commit-sha || github.event.pull_request.head.sha }}
+          GITHUB_REF_NAME: ${{ inputs.branch-name || github.event.pull_request.head.ref }}
+          GITHUB_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref || 'master' }}
+          COVERAGE_PR_COMMENT_BEHAVIOR: ${{ env.COVERAGE_PR_COMMENT_BEHAVIOR }}
+          COVERAGE_LOG_LEVEL: debug
+        run: |
+          echo "💬 Creating or updating PR coverage comment..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📋 PR Information:"
+          echo "  - PR Number: $GITHUB_PR_NUMBER"
+          echo "  - Head SHA: $GITHUB_SHA"
+          echo "  - Repository: $GITHUB_REPOSITORY"
+          echo "  - Comment behavior: ${{ env.COVERAGE_PR_COMMENT_BEHAVIOR }}"
+          echo ""
+
+          # Get the coverage file path
+          REPO_ROOT="$(pwd)"
+          COVERAGE_FILE="$REPO_ROOT/coverage-artifacts/coverage-data/${{ inputs.coverage-file }}"
+
+          if [[ ! -f "$COVERAGE_FILE" ]]; then
+            # Try alternate paths
+            COVERAGE_FILE="$REPO_ROOT/coverage-artifacts/${{ inputs.coverage-file }}"
+            if [[ ! -f "$COVERAGE_FILE" ]]; then
+              COVERAGE_FILE="$REPO_ROOT/${{ inputs.coverage-file }}"
+            fi
+          fi
+
+          if [[ ! -f "$COVERAGE_FILE" ]]; then
+            echo "❌ Coverage file not found: ${{ inputs.coverage-file }}"
+            echo "🔍 Searched in:"
+            echo "  - $REPO_ROOT/coverage-artifacts/coverage-data/"
+            echo "  - $REPO_ROOT/coverage-artifacts/"
+            echo "  - $REPO_ROOT/"
+            exit 1
+          fi
+
+          echo "✅ Found coverage file: $COVERAGE_FILE"
+
+          # Check if we have a base coverage file for comparison (in PR context)
+          BASE_COVERAGE_ARG=""
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "📊 Attempting to fetch base branch coverage for comparison..."
+
+            BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            echo "📋 Base branch: $BASE_BRANCH (SHA: $BASE_SHA)"
+
+            # Define repository root for consistent path handling
+            REPO_ROOT="$(pwd)"
+            echo "📁 Repository root: $REPO_ROOT"
+
+            # Try to fetch base coverage profile from recent workflow artifacts
+            echo "🔍 Searching for base coverage in recent workflow artifacts..."
+
+            BASE_COVERAGE_FILE=""
+            # Look for recent successful workflow runs on the base branch
+            if command -v gh &> /dev/null && gh auth status &> /dev/null; then
+              echo "📋 Searching for recent artifacts with base coverage..."
+
+              # Get recent successful runs on base branch
+              RECENT_RUNS=$(gh api repos/${{ github.repository }}/actions/runs \
+                --jq ".workflow_runs[] | select(.status == \"completed\" and .conclusion == \"success\" and .head_branch == \"$BASE_BRANCH\") | .id" \
+                --paginate 2>/dev/null | head -3 || echo "")
+
+              if [[ -n "$RECENT_RUNS" ]]; then
+                for run_id in $RECENT_RUNS; do
+                  echo "🔍 Checking run $run_id for coverage artifacts..."
+
+                  # Look for coverage-data artifact
+                  COVERAGE_ARTIFACTS=$(gh api repos/${{ github.repository }}/actions/runs/$run_id/artifacts \
+                    --jq '.artifacts[] | select(.name == "coverage-data") | .archive_download_url' \
+                    2>/dev/null || echo "")
+
+                  if [[ -n "$COVERAGE_ARTIFACTS" ]]; then
+                    echo "✅ Found coverage-data artifact in run $run_id"
+
+                    # Create temporary directory for extraction
+                    TEMP_EXTRACT_DIR="/tmp/base-coverage-extract-$$"
+                    mkdir -p "$TEMP_EXTRACT_DIR"
+                    cd "$TEMP_EXTRACT_DIR"
+
+                    # Download the artifact
+                    if curl -L -H "Authorization: Bearer $GITHUB_TOKEN" \
+                            -H "Accept: application/vnd.github+json" \
+                            --connect-timeout 10 --max-time 30 \
+                            "$COVERAGE_ARTIFACTS" -o "base-coverage-artifact.zip" 2>/dev/null; then
+
+                      if [[ -s "base-coverage-artifact.zip" ]]; then
+                        echo "✅ Downloaded base coverage artifact ($(wc -c < base-coverage-artifact.zip) bytes)"
+
+                        # Extract and find coverage file
+                        if unzip -q "base-coverage-artifact.zip" 2>/dev/null; then
+                          # Look for coverage files with common extensions
+                          BASE_PROFILE=$(find . -name "*.out" -o -name "*.txt" -o -name "coverage.*" | grep -E '\.(out|txt)$' | head -1)
+                          if [[ -n "$BASE_PROFILE" ]] && [[ -f "$BASE_PROFILE" ]]; then
+                            echo "✅ Extracted base coverage profile: $BASE_PROFILE"
+
+                            # Copy to working directory
+                            cp "$BASE_PROFILE" "$REPO_ROOT/base-coverage.out"
+                            BASE_COVERAGE_FILE="$REPO_ROOT/base-coverage.out"
+
+                            # Verify the file has content
+                            if [[ -s "$BASE_COVERAGE_FILE" ]]; then
+                              echo "✅ Base coverage file ready: $(wc -c < "$BASE_COVERAGE_FILE") bytes"
+                              break
+                            else
+                              echo "⚠️ Base coverage file is empty"
+                              rm -f "$BASE_COVERAGE_FILE"
+                              BASE_COVERAGE_FILE=""
+                            fi
+                          else
+                            echo "⚠️ No coverage profile found in artifact"
+                            echo "📋 Available files in artifact:"
+                            find . -type f | head -10
+                          fi
+                        else
+                          echo "⚠️ Failed to extract artifact (may be corrupted)"
+                        fi
+                      else
+                        echo "⚠️ Downloaded artifact is empty"
+                      fi
+                    else
+                      echo "⚠️ Failed to download artifact from: $COVERAGE_ARTIFACTS"
+                    fi
+
+                    # Cleanup temp directory
+                    cd "$REPO_ROOT"
+                    rm -rf "$TEMP_EXTRACT_DIR"
+
+                    # If we found a valid base coverage file, break out of the loop
+                    if [[ -n "$BASE_COVERAGE_FILE" ]]; then
+                      break
+                    fi
+                  else
+                    echo "ℹ️ No coverage-data artifact found in run $run_id"
+                  fi
+                done
+              else
+                echo "ℹ️ No recent successful runs found on base branch: $BASE_BRANCH"
+              fi
+            else
+              echo "⚠️ GitHub CLI not available or not authenticated - skipping artifact search"
+            fi
+
+            # Set BASE_COVERAGE_ARG if we have base coverage
+            if [[ -n "$BASE_COVERAGE_FILE" ]] && [[ -f "$BASE_COVERAGE_FILE" ]]; then
+              echo "✅ Base coverage available for comparison: $BASE_COVERAGE_FILE"
+              BASE_COVERAGE_ARG="--base-coverage \"$BASE_COVERAGE_FILE\""
+            else
+              echo "ℹ️ No base coverage available - PR comment will show as initial coverage report"
+              echo "📝 This is normal for:"
+              echo "  - First PR on this repository"
+              echo "  - PRs where base branch has no recent successful coverage runs"
+              echo "  - Temporary GitHub API issues"
+            fi
+          fi
+
+
+          # Get URLs for the comment - use branch-specific URLs for PRs
+          BRANCH_NAME="${{ inputs.branch-name }}"
+          BADGE_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/coverage/branch/$BRANCH_NAME/coverage.svg"
+          REPORT_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/coverage/branch/$BRANCH_NAME/"
+
+          # Create PR comment
+          "$GO_COVERAGE_BINARY" comment \
+            --pr "$GITHUB_PR_NUMBER" \
+            --coverage "$COVERAGE_FILE" \
+            $BASE_COVERAGE_ARG \
+            --badge-url "$BADGE_URL" \
+            --report-url "$REPORT_URL" \
+            --enable-analysis \
+            --anti-spam \
+            --generate-badges
+
+          if [[ $? -eq 0 ]]; then
+            echo "✅ PR comment created/updated successfully"
+          else
+            echo "⚠️ Failed to create PR comment (non-fatal)"
+          fi
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ————————————————————————————————————————————————————————————————
+      # Create clean deployment directory for GitHub Pages
+      # Ensures only coverage files are deployed, not the entire repository
+      # ————————————————————————————————————————————————————————————————
+      - name: 🧹 Create clean Pages deployment
+        run: |
+          echo "🧹 Creating clean GitHub Pages deployment"
+          echo "Filtering deployment to include only coverage files"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          # Create a completely clean deployment directory
+          CLEAN_DEPLOY_DIR="pages-deploy-clean"
+          rm -rf "$CLEAN_DEPLOY_DIR"
+          mkdir -p "$CLEAN_DEPLOY_DIR"
+
+          SOURCE_DIR="pages-deploy"
+          if [[ ! -d "$SOURCE_DIR" ]]; then
+            echo "❌ Source deployment directory not found: $SOURCE_DIR"
+            exit 1
+          fi
+
+          echo "📋 Original deployment contents:"
+          du -sh "$SOURCE_DIR" || echo "Size unknown"
+          find "$SOURCE_DIR" -type f | wc -l | xargs echo "Files:"
+
+          # Define ONLY the files we want to deploy (coverage files only)
+          COVERAGE_FILES_TO_COPY=(
+            "index.html"
+            "coverage.html"
+            "coverage.svg"
+          )
+
+          # Selectively copy coverage files to avoid nested directory structures
+          COVERAGE_DIRS_TO_COPY=(
+            "data"
+            "assets"
+          )
+
+          # Define coverage directory structure to copy selectively (avoid duplication)
+          COVERAGE_SELECTIVE_COPY=true
+
+          echo "Copying ONLY coverage files to clean deployment:"
+
+          # Copy individual coverage files
+          for file in "${COVERAGE_FILES_TO_COPY[@]}"; do
+            if [[ -f "$SOURCE_DIR/$file" ]]; then
+              cp "$SOURCE_DIR/$file" "$CLEAN_DEPLOY_DIR/"
+              size=$(ls -lah "$CLEAN_DEPLOY_DIR/$file" | awk '{print $5}')
+              echo "  ✅ Copied file: $file ($size)"
+            else
+              echo "  ⚠️ Missing file: $file"
+            fi
+          done
+
+          # Copy simple directories (data, badges)
+          for dir in "${COVERAGE_DIRS_TO_COPY[@]}"; do
+            if [[ -d "$SOURCE_DIR/$dir" ]]; then
+              cp -r "$SOURCE_DIR/$dir" "$CLEAN_DEPLOY_DIR/"
+              size=$(du -sh "$CLEAN_DEPLOY_DIR/$dir" 2>/dev/null | cut -f1 || echo "unknown")
+              files=$(find "$CLEAN_DEPLOY_DIR/$dir" -type f | wc -l)
+              echo "  ✅ Copied directory: $dir ($size, $files files)"
+            else
+              echo "  ⚠️ Missing directory: $dir"
+            fi
+          done
+
+          # Selectively copy coverage directory with clean structure
+          # Avoids nested paths and ensures efficient file organization
+          echo "  🔧 SELECTIVE COVERAGE COPY: Organizing coverage files..."
+
+          if [[ -d "$SOURCE_DIR/coverage" ]]; then
+            echo "    📋 Original coverage directory structure:"
+            du -sh "$SOURCE_DIR/coverage" | sed 's/^/      /'
+            find "$SOURCE_DIR/coverage" -type f | wc -l | xargs echo "      Files:"
+
+            # Create coverage directory structure in clean deployment
+            mkdir -p "$CLEAN_DEPLOY_DIR/coverage"
+
+            # Copy only essential coverage files, avoiding nested duplication
+            COVERAGE_ESSENTIAL_FILES=(
+              "coverage.svg"
+              "coverage.html"
+              "index.html"
+              "dashboard.html"
+              "coverage-data.json"
+              "assets"
+            )
+
+            # First, try to copy branch-specific files (avoid nested reports/branch/X structure)
+            if [[ -d "$SOURCE_DIR/coverage/branch" ]]; then
+              echo "    📁 Processing branch coverage (avoiding duplication)..."
+              mkdir -p "$CLEAN_DEPLOY_DIR/coverage/branch"
+
+              # For each branch directory
+              for branch_dir in "$SOURCE_DIR/coverage/branch"/*; do
+                if [[ -d "$branch_dir" ]]; then
+                  branch_name=$(basename "$branch_dir")
+                  echo "      🌿 Processing branch: $branch_name"
+
+                  # Create clean branch directory
+                  CLEAN_BRANCH_DIR="$CLEAN_DEPLOY_DIR/coverage/branch/$branch_name"
+                  mkdir -p "$CLEAN_BRANCH_DIR"
+
+                  # Copy essential files from the TOP LEVEL of the branch directory
+                  # (avoiding the nested reports/branch/X duplication)
+                  for file in "${COVERAGE_ESSENTIAL_FILES[@]}"; do
+                    # Try multiple possible locations for the file
+                    POSSIBLE_LOCATIONS=(
+                      "$branch_dir/$file"
+                      "$branch_dir/reports/branch/$branch_name/$file"
+                    )
+
+                    for location in "${POSSIBLE_LOCATIONS[@]}"; do
+                      if [[ -f "$location" ]]; then
+                        cp "$location" "$CLEAN_BRANCH_DIR/"
+                        file_size=$(ls -lah "$CLEAN_BRANCH_DIR/$file" | awk '{print $5}')
+                        echo "        ✅ Copied: $file ($file_size)"
+                        break
+                      fi
+                    done
+                  done
+
+                  # Copy data directory if it exists (avoid nested duplication)
+                  DATA_LOCATIONS=(
+                    "$branch_dir/data"
+                    "$branch_dir/reports/branch/$branch_name/data"
+                  )
+
+                  for data_location in "${DATA_LOCATIONS[@]}"; do
+                    if [[ -d "$data_location" ]]; then
+                      cp -r "$data_location" "$CLEAN_BRANCH_DIR/"
+                      data_size=$(du -sh "$CLEAN_BRANCH_DIR/data" 2>/dev/null | cut -f1 || echo "unknown")
+                      echo "        ✅ Copied data directory ($data_size)"
+                      break
+                    fi
+                  done
+                fi
+              done
+            fi
+
+
+            # Show size comparison
+            if [[ -d "$CLEAN_DEPLOY_DIR/coverage" ]]; then
+              ORIGINAL_SIZE=$(du -sh "$SOURCE_DIR/coverage" 2>/dev/null | cut -f1 || echo "unknown")
+              CLEAN_SIZE=$(du -sh "$CLEAN_DEPLOY_DIR/coverage" 2>/dev/null | cut -f1 || echo "unknown")
+              ORIGINAL_FILES=$(find "$SOURCE_DIR/coverage" -type f | wc -l)
+              CLEAN_FILES=$(find "$CLEAN_DEPLOY_DIR/coverage" -type f | wc -l)
+
+              echo "    📊 Coverage directory structure:"
+              echo "      📉 Before: $ORIGINAL_SIZE ($ORIGINAL_FILES files)"
+              echo "      📈 After: $CLEAN_SIZE ($CLEAN_FILES files)"
+
+              if [[ "$ORIGINAL_SIZE" =~ ^([0-9]+)([KMG]) ]] && [[ "$CLEAN_SIZE" =~ ^([0-9]+)([KMG]) ]]; then
+                echo "      🎯 Successfully eliminated nested duplication!"
+              fi
+            fi
+          else
+            echo "  ⚠️ Missing directory: coverage"
+          fi
+
+          echo ""
+          echo "📊 Clean deployment summary:"
+          CLEAN_SIZE=$(du -sh "$CLEAN_DEPLOY_DIR" 2>/dev/null | cut -f1 || echo "unknown")
+          CLEAN_FILES=$(find "$CLEAN_DEPLOY_DIR" -type f | wc -l)
+          echo "  - Size: $CLEAN_SIZE (should be <100KB)"
+          echo "  - Files: $CLEAN_FILES (should be <20)"
+
+          # Verify no unwanted files made it through
+          echo ""
+          echo "🔍 Verifying clean deployment (should have NO unwanted files):"
+          UNWANTED_FOUND=false
+          for ext in go mod sum md yml yaml txt; do
+            count=$(find "$CLEAN_DEPLOY_DIR" -name "*.$ext" 2>/dev/null | wc -l)
+            if [[ $count -gt 0 ]]; then
+              echo "  ❌ UNWANTED: *.$ext files: $count"
+              UNWANTED_FOUND=true
+            fi
+          done
+
+          if [[ "$UNWANTED_FOUND" == "false" ]]; then
+            echo "  ✅ No unwanted file types found!"
+          fi
+
+          # Replace the original deployment directory with clean version
+          echo ""
+          echo "🔄 Replacing original deployment with clean version..."
+          rm -rf "$SOURCE_DIR"
+          mv "$CLEAN_DEPLOY_DIR" "$SOURCE_DIR"
+
+          echo "✅ Clean deployment ready - GitHub Pages should deploy optimally sized content"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ————————————————————————————————————————————————————————————————
+      # Prepare for GitHub Pages deployment
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Prepare GitHub Pages deployment
+        run: |
+          echo "🔧 Preparing GitHub Pages deployment..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          DEPLOY_DIR="pages-deploy"
+          echo "📁 Deployment directory: $DEPLOY_DIR"
+
+          # Verify deployment directory exists
+          if [[ ! -d "$DEPLOY_DIR" ]]; then
+            echo "❌ Deployment directory does not exist: $DEPLOY_DIR"
+            echo "🔍 This suggests coverage processing failed"
+            exit 1
+          fi
+
+          echo "✅ Deployment directory found"
+
+          # Size verification: Ensure deployment stays under reasonable limits
+          echo ""
+          echo "📉 Size verification: Checking deployment size limits..."
+          CURRENT_SIZE=$(du -sh "$DEPLOY_DIR" 2>/dev/null | cut -f1 || echo "unknown")
+          CURRENT_FILES=$(find "$DEPLOY_DIR" -type f | wc -l)
+
+          echo "  📊 Current deployment:"
+          echo "    - Size: $CURRENT_SIZE"
+          echo "    - Files: $CURRENT_FILES"
+
+          # Define size limits (in KB for easier comparison)
+
+          TARGET_LIMIT_KB=1000
+          WARNING_LIMIT_KB=2500
+          HARD_LIMIT_KB=5000
+
+          # Convert size to KB for comparison
+          SIZE_KB=0
+          if [[ "$CURRENT_SIZE" =~ ^([0-9]+)K$ ]]; then
+            SIZE_KB=${BASH_REMATCH[1]}
+          elif [[ "$CURRENT_SIZE" =~ ^([0-9]+\.?[0-9]*)M$ ]]; then
+            SIZE_MB=${BASH_REMATCH[1]}
+            SIZE_KB=$(echo "$SIZE_MB * 1024" | bc -l | cut -d. -f1)
+          elif [[ "$CURRENT_SIZE" =~ ^([0-9]+)B$ ]]; then
+            SIZE_B=${BASH_REMATCH[1]}
+            SIZE_KB=$(echo "$SIZE_B / 1024" | bc -l | cut -d. -f1)
+          fi
+
+          echo "  📈 Size analysis (KB): $SIZE_KB"
+          echo "    - Target: <${TARGET_LIMIT_KB}KB (optimal)"
+          echo "    - Warning: <${WARNING_LIMIT_KB}KB (acceptable)"
+          echo "    - Hard limit: <${HARD_LIMIT_KB}KB (maximum)"
+
+          # Determine status and actions
+          if [[ $SIZE_KB -le $TARGET_LIMIT_KB ]]; then
+            echo "  ✅ EXCELLENT: Deployment size is optimal (<${TARGET_LIMIT_KB}KB)"
+          elif [[ $SIZE_KB -le $WARNING_LIMIT_KB ]]; then
+            echo "  ⚠️ WARNING: Deployment size is acceptable but could be optimized (${SIZE_KB}KB)"
+            echo "  💡 Size reduction suggestions:"
+            echo "    - Check for large coverage files"
+            echo "    - Verify no duplicated content"
+            echo "    - Review file compression"
+          elif [[ $SIZE_KB -le $HARD_LIMIT_KB ]]; then
+            echo "  🚨 ALERT: Deployment size is large (${SIZE_KB}KB) - exceeds recommended limits"
+            echo "  🔍 Analyzing large files:"
+            find "$DEPLOY_DIR" -type f -exec ls -lah {} \; | sort -k5 -hr | head -10 | while read line; do
+              echo "    $line"
+            done
+            echo "  ⚠️ Consider optimizing before deployment"
+          else
+            echo "  ❌ CRITICAL: Deployment size (${SIZE_KB}KB) exceeds hard limit (${HARD_LIMIT_KB}KB)"
+            echo "  🚨 DEPLOYMENT BLOCKED - Size reduction required"
+            echo ""
+            echo "  🔍 Large files analysis:"
+            find "$DEPLOY_DIR" -type f -exec ls -lah {} \; | sort -k5 -hr | head -15 | while read line; do
+              echo "    $line"
+            done
+            echo ""
+            echo "  🛠️ Required actions:"
+            echo "    1. Review coverage directory structure for duplication"
+            echo "    2. Compress large HTML/JSON files"
+            echo "    3. Remove unnecessary data files"
+            echo "    4. Check for embedded assets that should be external"
+            echo ""
+            echo "  🐛 This ensures deployments remain within size limits"
+            exit 1
+          fi
+
+          # Add .nojekyll to disable Jekyll processing
+          echo ""
+          echo "🔧 Adding .nojekyll file to disable Jekyll processing..."
+          touch "$DEPLOY_DIR/.nojekyll"
+
+          if [[ -f "$DEPLOY_DIR/.nojekyll" ]]; then
+            echo "✅ .nojekyll file created successfully"
+            echo "📝 This disables Jekyll processing that was filtering out coverage files"
+          else
+            echo "❌ Failed to create .nojekyll file"
+            exit 1
+          fi
+
+          # Show complete directory structure before deployment
+          echo ""
+          echo "🌳 Complete deployment directory structure:"
+          find "$DEPLOY_DIR" -type f -exec ls -la {} \; | sort
+          echo ""
+
+          # Verify critical files exist with detailed reporting
+          CRITICAL_FILES=("index.html" "coverage.html" "coverage.svg" ".nojekyll")
+          echo "🎯 Verifying critical files for GitHub Pages:"
+
+          ALL_EXIST=true
+          for file in "${CRITICAL_FILES[@]}"; do
+            if [[ -f "$DEPLOY_DIR/$file" ]]; then
+              FILE_SIZE=$(wc -c < "$DEPLOY_DIR/$file" 2>/dev/null || echo "unknown")
+              echo "  ✅ $file ($FILE_SIZE bytes)"
+
+              # Show content preview for important files
+              if [[ "$file" == "data/build-status.json" ]]; then
+                echo "    📋 Content preview:"
+                head -3 "$DEPLOY_DIR/$file" | sed 's/^/      /'
+              fi
+            else
+              echo "  ❌ MISSING: $file"
+              ALL_EXIST=false
+            fi
+          done
+
+          if [[ "$ALL_EXIST" != "true" ]]; then
+            echo ""
+            echo "❌ Missing critical files for deployment"
+            echo "🔍 This will cause 404 errors on the deployed site"
+            echo "🚨 Available files in deployment directory:"
+            find "$DEPLOY_DIR" -type f -exec echo "  - {}" \;
+            exit 1
+          fi
+
+          # File analysis by type
+          echo ""
+          echo "📋 File analysis by type:"
+          echo "  HTML files:"
+          find "$DEPLOY_DIR" -name "*.html" -exec echo "    - {}" \;
+          echo "  JSON files:"
+          find "$DEPLOY_DIR" -name "*.json" -exec echo "    - {}" \;
+          echo "  SVG files:"
+          find "$DEPLOY_DIR" -name "*.svg" -exec echo "    - {}" \;
+          echo "  Jekyll control files:"
+          find "$DEPLOY_DIR" -name ".nojekyll" -exec echo "    - {}" \;
+
+          # Deployment summary
+          TOTAL_FILES=$(find "$DEPLOY_DIR" -type f | wc -l)
+          TOTAL_SIZE=$(du -sh "$DEPLOY_DIR" 2>/dev/null | cut -f1 || echo "unknown")
+
+          echo ""
+          echo "📊 Deployment summary:"
+          echo "  - Total files to deploy: $TOTAL_FILES"
+          echo "  - Total deployment size: $TOTAL_SIZE"
+          echo "  - Jekyll processing: ❌ DISABLED (.nojekyll present)"
+          echo "  - Expected URLs after deployment:"
+          echo "    - https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/ (dashboard)"
+          echo "    - https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/coverage.html (detailed report)"
+          echo "    - https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data/build-status.json (build status)"
+          echo "    - https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/coverage.svg (coverage badge)"
+          echo "  - Alternative paths to check:"
+          echo "    - https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/coverage.html"
+          echo "    - https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/index.html"
+
+          echo ""
+          echo "✅ Deployment directory prepared and verified"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ————————————————————————————————————————————————————————————————
+      # Deploy to GitHub Pages (Incremental, Non-Destructive)
+      # ————————————————————————————————————————————————————————————————
+      - name: 🚀 Deploy to GitHub Pages (Incremental)
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.github-token }}
+        run: |
+          echo "🚀 Starting incremental GitHub Pages deployment..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          REPO_ROOT="$(pwd)"
+          DEPLOY_DIR="$REPO_ROOT/pages-deploy"
+          BRANCH_NAME="${{ inputs.branch-name }}"
+          TEMP_PAGES_DIR="/tmp/gh-pages-deploy-$$"
+
+          # Determine if we're in PR context
+          EVENT_NAME="${{ inputs.event-name || github.event_name }}"
+          PR_NUMBER="${{ inputs.pr-number || github.event.pull_request.number }}"
+
+          echo "📋 Deployment context:"
+          echo "  - Event: $EVENT_NAME"
+          echo "  - Branch: $BRANCH_NAME"
+          if [[ -n "$PR_NUMBER" ]]; then
+            echo "  - PR Number: $PR_NUMBER"
+          fi
+
+          # Verify deployment directory
+          if [[ ! -d "$DEPLOY_DIR" ]]; then
+            echo "❌ Deployment directory does not exist: $DEPLOY_DIR"
+            exit 1
+          fi
+
+          echo "📁 Deployment source: $DEPLOY_DIR"
+          echo "🌿 Current branch: $BRANCH_NAME"
+
+          # Configure git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Clone existing gh-pages branch (or create new)
+          echo "📥 Cloning gh-pages branch..."
+          if git clone --depth 1 --branch gh-pages "https://x-access-token:$GITHUB_TOKEN@github.com/${{ github.repository }}.git" "$TEMP_PAGES_DIR" 2>/dev/null; then
+            echo "✅ Successfully cloned existing gh-pages branch"
+            cd "$TEMP_PAGES_DIR"
+
+            # Show current content summary
+            echo "📊 Current gh-pages content:"
+            TOTAL_BEFORE=$(find . -type f -not -path './.git/*' | wc -l)
+            echo "  - Total files: $TOTAL_BEFORE"
+            echo "  - Coverage branches: $(find coverage/branch -maxdepth 1 -type d 2>/dev/null | wc -l || echo "0")"
+
+            # AGGRESSIVE CLEANUP: Remove unwanted files from existing gh-pages content
+            # This addresses the 317 unwanted files issue (.go, .yml, .md, etc.)
+            echo ""
+            echo "🧹 AGGRESSIVE CLEANUP: Removing unwanted files from existing gh-pages content..."
+
+            # Count unwanted files before cleanup
+            UNWANTED_EXTENSIONS=(".go" ".mod" ".sum" ".yml" ".yaml" ".md" ".txt" ".toml" ".json" ".log")
+            CLEANUP_COUNT=0
+
+            echo "  📊 Before cleanup:"
+            for ext in "${UNWANTED_EXTENSIONS[@]}"; do
+              count=$(find . -name "*$ext" -not -path './.git/*' -not -name "coverage-data.json" -not -name "metadata.json" -not -name "*.coverage.json" | wc -l)
+              if [[ $count -gt 0 ]]; then
+                echo "    $ext files: $count"
+                CLEANUP_COUNT=$((CLEANUP_COUNT + count))
+              fi
+            done
+
+            if [[ $CLEANUP_COUNT -gt 0 ]]; then
+              echo "  🚨 Found $CLEANUP_COUNT unwanted files to remove"
+
+              # Remove unwanted file types (preserve essential coverage JSON files)
+              for ext in "${UNWANTED_EXTENSIONS[@]}"; do
+                if [[ "$ext" == ".json" ]]; then
+                  # For JSON files, be selective - remove non-coverage JSON files
+                  find . -name "*$ext" -not -path './.git/*' \
+                    -not -name "coverage-data.json" \
+                    -not -name "metadata.json" \
+                    -not -name "*.coverage.json" \
+                    -not -name "package.json" \
+                    -not -name "package-lock.json" \
+                    -delete 2>/dev/null || true
+                else
+                  # Remove all files with these extensions
+                  find . -name "*$ext" -not -path './.git/*' -delete 2>/dev/null || true
+                fi
+              done
+
+              # Remove common unwanted directories (preserve coverage-related ones)
+              UNWANTED_DIRS=(
+                "cmd"
+                "internal"
+                "examples"
+                "docs"
+                "test"
+                "tests"
+                "spec"
+                "specs"
+                "node_modules"
+                ".vscode"
+                ".idea"
+              )
+
+              for dir in "${UNWANTED_DIRS[@]}"; do
+                if [[ -d "$dir" ]] && [[ "$dir" != "coverage" ]] && [[ "$dir" != "data" ]] && [[ "$dir" != "badges" ]]; then
+                  echo "    🗑️ Removing directory: $dir"
+                  rm -rf "$dir" 2>/dev/null || true
+                fi
+              done
+
+              # Remove common root-level unwanted files
+              UNWANTED_ROOT_FILES=(
+                ".mage.yaml"
+                "LICENSE"
+                "README.md"
+                "CHANGELOG.md"
+                "CONTRIBUTING.md"
+                ".gitignore"
+                ".gitattributes"
+                ".editorconfig"
+                ".dockerignore"
+                "Dockerfile"
+                "_config.yml"
+              )
+
+              for file in "${UNWANTED_ROOT_FILES[@]}"; do
+                if [[ -f "$file" ]]; then
+                  echo "    🗑️ Removing root file: $file"
+                  rm -f "$file" 2>/dev/null || true
+                fi
+              done
+
+              # Show cleanup results
+              TOTAL_AFTER=$(find . -type f -not -path './.git/*' | wc -l)
+              REMOVED_COUNT=$((TOTAL_BEFORE - TOTAL_AFTER))
+
+              echo "  📊 After cleanup:"
+              echo "    - Files before: $TOTAL_BEFORE"
+              echo "    - Files after: $TOTAL_AFTER"
+              echo "    - Files removed: $REMOVED_COUNT"
+
+              if [[ $REMOVED_COUNT -gt 0 ]]; then
+                echo "  ✅ Successfully cleaned $REMOVED_COUNT unwanted files!"
+              else
+                echo "  ⚠️ No files were removed (may already be clean)"
+              fi
+            else
+              echo "  ✅ No unwanted files found - gh-pages branch is already clean"
+            fi
+          else
+            echo "📝 Creating new gh-pages branch..."
+            mkdir -p "$TEMP_PAGES_DIR"
+            cd "$TEMP_PAGES_DIR"
+            git init
+            git checkout -b gh-pages
+            echo "✅ Created new gh-pages branch"
+          fi
+
+
+          # Apply selective content filtering before merging
+          echo ""
+          echo "🔄 Merging new content with selective filtering..."
+
+          # Create a temporary staging area for filtered content
+          TEMP_STAGING="/tmp/coverage-staging-$$"
+          mkdir -p "$TEMP_STAGING"
+          echo "📁 Created temporary staging area: $TEMP_STAGING"
+
+          # Update root files (main branch deployments) with filtering
+          source /tmp/branch_helpers.sh
+          if is_main_branch "$BRANCH_NAME"; then
+            echo "📋 Updating root coverage files for main branch (with filtering)..."
+
+            # Define allowed root files explicitly
+            ALLOWED_ROOT_FILES=("index.html" "coverage.html" "coverage.svg" ".nojekyll" "data" "assets")
+
+            # Copy only allowed root files
+            for file in "${ALLOWED_ROOT_FILES[@]}"; do
+              if [[ -e "$DEPLOY_DIR/$file" ]]; then
+                # Stage in temp area first for verification
+                cp -r "$DEPLOY_DIR/$file" "$TEMP_STAGING/"
+                echo "  📋 Staged: $file"
+              fi
+            done
+
+            # Verify staged content matches filter rules
+            echo "🔍 Verifying staged content against .gitignore rules..."
+            cd "$TEMP_STAGING"
+
+            # Count files that would be ignored
+            IGNORED_COUNT=0
+            if [[ -f "$GH_PAGES_GITIGNORE" ]]; then
+              # Test each file against gitignore patterns
+              while IFS= read -r pattern; do
+                [[ "$pattern" =~ ^[[:space:]]*# ]] && continue  # Skip comments
+                [[ -z "$pattern" ]] && continue  # Skip empty lines
+                if [[ "$pattern" == /* ]]; then
+                  # Absolute pattern - remove leading /
+                  pattern="${pattern#/}"
+                fi
+                # Count matches that should be ignored
+                if find . -name "$pattern" -type f 2>/dev/null | grep -q .; then
+                  IGNORED_COUNT=$((IGNORED_COUNT + 1))
+                fi
+              done < "$GH_PAGES_GITIGNORE"
+            fi
+
+            if [[ $IGNORED_COUNT -gt 0 ]]; then
+              echo "⚠️ Found $IGNORED_COUNT files that match ignore patterns"
+              echo "🧹 Removing ignored files from staging..."
+              # Apply gitignore to staging area
+              cp "$GH_PAGES_GITIGNORE" .gitignore
+              git init . >/dev/null 2>&1
+              git add . >/dev/null 2>&1
+              git reset >/dev/null 2>&1
+              # Remove untracked files that match .gitignore
+              git clean -fX . >/dev/null 2>&1
+              rm -rf .git
+            fi
+
+            cd "$TEMP_PAGES_DIR"
+
+            # Copy verified content from staging
+            echo "📋 Copying verified content to deployment..."
+            if [[ -d "$TEMP_STAGING" ]]; then
+              cp -r "$TEMP_STAGING"/* . 2>/dev/null || true
+              echo "✅ Root files updated with filtering applied"
+            fi
+          fi
+
+          # Always update branch-specific content
+          BRANCH_DIR="coverage/branch/$BRANCH_NAME"
+          echo "📋 Updating branch-specific content: $BRANCH_DIR (with filtering)"
+          mkdir -p "$BRANCH_DIR"
+
+          # Clear temp staging for branch content
+          rm -rf "$TEMP_STAGING"/*
+
+          # Define allowed branch files
+          ALLOWED_BRANCH_FILES=("index.html" "coverage.html" "coverage.svg" "data" "assets")
+
+          # Copy branch-specific files from deployment directory to staging first
+          if [[ -d "$DEPLOY_DIR/coverage/branch/$BRANCH_NAME" ]]; then
+            echo "  📋 Staging branch-specific content..."
+            for file in "${ALLOWED_BRANCH_FILES[@]}"; do
+              if [[ -e "$DEPLOY_DIR/coverage/branch/$BRANCH_NAME/$file" ]]; then
+                cp -r "$DEPLOY_DIR/coverage/branch/$BRANCH_NAME/$file" "$TEMP_STAGING/"
+                echo "    ✅ Staged branch file: $file"
+              fi
+            done
+          else
+            # If no branch-specific dir, copy from root (backwards compatibility) to staging
+            echo "  📋 Staging root content for branch (backwards compatibility)..."
+            for file in "${ALLOWED_BRANCH_FILES[@]}"; do
+              if [[ -e "$DEPLOY_DIR/$file" ]]; then
+                cp -r "$DEPLOY_DIR/$file" "$TEMP_STAGING/"
+                echo "    ✅ Staged root file: $file"
+              fi
+            done
+          fi
+
+          # Apply filtering to staged branch content
+          echo "  🔍 Applying .gitignore filter to branch content..."
+          cd "$TEMP_STAGING"
+          if [[ -f "$GH_PAGES_GITIGNORE" ]]; then
+            cp "$GH_PAGES_GITIGNORE" .gitignore
+            git init . >/dev/null 2>&1
+            git add . >/dev/null 2>&1 || true
+            git clean -fX . >/dev/null 2>&1 || true
+            rm -rf .git .gitignore
+          fi
+          cd "$TEMP_PAGES_DIR"
+
+          # Copy filtered content to branch directory
+          if [[ "$(ls -A "$TEMP_STAGING" 2>/dev/null)" ]]; then
+            cp -r "$TEMP_STAGING"/* "$BRANCH_DIR/" 2>/dev/null || true
+            echo "  ✅ Updated branch coverage: $BRANCH_NAME (filtered)"
+          else
+            echo "  ⚠️ No content remaining after filtering for branch: $BRANCH_NAME"
+          fi
+
+          # Ensure .nojekyll exists
+          touch .nojekyll
+
+          # Create index.html with branch/PR listing if on main branch
+          source /tmp/branch_helpers.sh
+          if is_main_branch "$BRANCH_NAME"; then
+            echo "📝 Generating branch/PR index..."
+
+            # Create the HTML file using echo commands to avoid heredoc indentation issues
+            echo '<!DOCTYPE html>' > branches.html
+            echo '<html lang="en">' >> branches.html
+            echo '<head>' >> branches.html
+            echo '    <meta charset="UTF-8">' >> branches.html
+            echo '    <meta name="viewport" content="width=device-width, initial-scale=1.0">' >> branches.html
+            echo '    <title>Coverage Reports - All Branches</title>' >> branches.html
+            echo '    <style>' >> branches.html
+            echo '        body { font-family: -apple-system, BlinkMacSystemFont, '"'"'Segoe UI'"'"', Roboto, sans-serif; margin: 40px; background: #f6f8fa; }' >> branches.html
+            echo '        .container { max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }' >> branches.html
+            echo '        h1 { color: #24292e; border-bottom: 1px solid #e1e4e8; padding-bottom: 10px; }' >> branches.html
+            echo '        h2 { color: #586069; margin-top: 30px; }' >> branches.html
+            echo '        .branch-list, .pr-list { list-style: none; padding: 0; }' >> branches.html
+            echo '        .branch-list li, .pr-list li { padding: 10px; margin: 5px 0; background: #f6f8fa; border-radius: 6px; }' >> branches.html
+            echo '        .branch-list a, .pr-list a { color: #0366d6; text-decoration: none; font-weight: 500; }' >> branches.html
+            echo '        .branch-list a:hover, .pr-list a:hover { text-decoration: underline; }' >> branches.html
+            echo '        .badge { display: inline-block; margin-left: 10px; }' >> branches.html
+            echo '        .main-link { display: inline-block; margin: 20px 0; padding: 10px 20px; background: #0366d6; color: white; border-radius: 6px; text-decoration: none; }' >> branches.html
+            echo '        .main-link:hover { background: #0256c7; }' >> branches.html
+            echo '    </style>' >> branches.html
+            echo '</head>' >> branches.html
+            echo '<body>' >> branches.html
+            echo '    <div class="container">' >> branches.html
+            echo '        <h1>📊 Coverage Reports</h1>' >> branches.html
+            echo '        <a href="/" class="main-link">View Main Coverage Dashboard</a>' >> branches.html
+            echo '' >> branches.html
+            echo '        <h2>🌿 Branch Coverage</h2>' >> branches.html
+            echo '        <ul class="branch-list">' >> branches.html
+
+            # List all branch coverage reports
+            if [[ -d coverage/branch ]]; then
+              for branch_dir in coverage/branch/*/; do
+                if [[ -d "$branch_dir" ]]; then
+                  branch=$(basename "$branch_dir")
+                  echo "            <li>📁 <a href=\"/coverage/branch/$branch/\">$branch</a> <img src=\"/coverage/branch/$branch/coverage.svg\" alt=\"Coverage\" class=\"badge\"></li>" >> branches.html
+                fi
+              done
+            fi
+
+            echo '        </ul>' >> branches.html
+            echo '    </div>' >> branches.html
+            echo '</body>' >> branches.html
+            echo '</html>' >> branches.html
+
+            echo "  ✅ Generated branch/PR index"
+          fi
+
+          # Cleanup temp staging
+          rm -rf "$TEMP_STAGING"
+
+          # Show deployment summary with file filtering report
+          echo ""
+          echo "📊 Deployment content summary (after filtering):"
+          TOTAL_FILES=$(find . -type f -not -path './.git/*' | wc -l)
+          BRANCH_REPORTS=$(find coverage/branch -maxdepth 1 -type d 2>/dev/null | tail -n +2 | wc -l || echo "0")
+
+          echo "  - Total files: $TOTAL_FILES"
+          echo "  - Branch coverage reports: $BRANCH_REPORTS"
+
+          # Show file types for verification
+          echo "  - File types breakdown:"
+          echo "    - HTML files: $(find . -name "*.html" -not -path './.git/*' | wc -l)"
+          echo "    - SVG files: $(find . -name "*.svg" -not -path './.git/*' | wc -l)"
+          echo "    - JSON files: $(find . -name "*.json" -not -path './.git/*' | wc -l)"
+          echo "    - Other files: $(find . -type f -not -name "*.html" -not -name "*.svg" -not -name "*.json" -not -path './.git/*' | wc -l)"
+
+          # Verify no unwanted files
+          echo "  🔍 Checking for unwanted file types..."
+          UNWANTED_EXTENSIONS=(".go" ".mod" ".sum" ".yml" ".yaml" ".md" ".txt")
+          UNWANTED_COUNT=0
+          for ext in "${UNWANTED_EXTENSIONS[@]}"; do
+            COUNT=$(find . -name "*$ext" -not -path './.git/*' | wc -l)
+            if [[ $COUNT -gt 0 ]]; then
+              echo "    ⚠️ Found $COUNT files with extension $ext"
+              UNWANTED_COUNT=$((UNWANTED_COUNT + COUNT))
+            fi
+          done
+
+          if [[ $UNWANTED_COUNT -eq 0 ]]; then
+            echo "    ✅ No unwanted file types found"
+          else
+            echo "    ⚠️ Total unwanted files: $UNWANTED_COUNT"
+            echo "    📋 Unwanted files found:"
+            for ext in "${UNWANTED_EXTENSIONS[@]}"; do
+              find . -name "*$ext" -not -path './.git/*' | head -5 | sed 's/^/      /' || true
+            done
+          fi
+
+          # Stage all changes
+          git add .
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "ℹ️ No changes to deploy"
+            cd "$REPO_ROOT"
+            rm -rf "$TEMP_PAGES_DIR"
+            exit 0
+          fi
+
+          # Commit changes
+          source /tmp/branch_helpers.sh
+          if [[ "$EVENT_NAME" == "pull_request" ]] && [[ -n "$PR_NUMBER" ]]; then
+            COMMIT_MSG="Deploy PR #$PR_NUMBER coverage (commit ${{ inputs.commit-sha }})"
+          elif is_main_branch "$BRANCH_NAME"; then
+            COMMIT_MSG="Deploy main coverage dashboard (commit ${{ inputs.commit-sha }})"
+          else
+            COMMIT_MSG="Deploy coverage for branch '$BRANCH_NAME' (commit ${{ inputs.commit-sha }})"
+          fi
+
+          git commit -m "$COMMIT_MSG"$'\n\n🏷️ Generated with GoFortress'
+
+          # Push to GitHub Pages
+          if git push origin gh-pages --force; then
+            echo "✅ Successfully deployed to GitHub Pages"
+            echo ""
+            echo "🌐 Deployment URLs:"
+            echo "  - Main dashboard: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+            echo "  - Branch coverage: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/coverage/branch/$BRANCH_NAME/"
+            source /tmp/branch_helpers.sh
+            if is_main_branch "$BRANCH_NAME"; then
+              echo "  - All branches: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/branches.html"
+            fi
+          else
+            echo "❌ Failed to push to GitHub Pages"
+            cd "$REPO_ROOT"
+            rm -rf "$TEMP_PAGES_DIR"
+            exit 1
+          fi
+
+          # Cleanup
+          cd "$REPO_ROOT"
+          rm -rf "$TEMP_PAGES_DIR"
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ————————————————————————————————————————————————————————————————
+      # Update coverage statistics with successful deployment status
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Update coverage statistics (deployment successful)
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        run: |
+          echo "📊 Updating coverage statistics with successful deployment status..."
+
+          # Find the existing coverage statistics file
+          if ls coverage-stats-internal-*.json 1> /dev/null 2>&1; then
+            ORIGINAL_STATS_FILE=$(ls coverage-stats-internal-*.json | head -1)
+            echo "✅ Found original statistics file: $ORIGINAL_STATS_FILE"
+
+            # Extract values from the original file
+            COVERAGE_PERCENTAGE=$(jq -r '.coverage_percentage' "$ORIGINAL_STATS_FILE")
+            FILES_PROCESSED=$(jq -r '.files_processed' "$ORIGINAL_STATS_FILE")
+            PROCESSING_TIME=$(jq -r '.processing_time_seconds' "$ORIGINAL_STATS_FILE")
+            BADGE_GENERATED=$(jq -r '.badge_generated' "$ORIGINAL_STATS_FILE")
+            COVERAGE_FILE=$(jq -r '.coverage_file' "$ORIGINAL_STATS_FILE")
+            OUTPUT_DIRECTORY=$(jq -r '.output_directory' "$ORIGINAL_STATS_FILE")
+
+            # Create updated statistics file with pages_deployed: true
+            UPDATED_STATS_FILENAME="coverage-stats-internal-updated-$(date +%Y%m%d-%H%M%S).json"
+            cat > "$UPDATED_STATS_FILENAME" <<EOF
+          {
+            "coverage_percentage": "${COVERAGE_PERCENTAGE}",
+            "files_processed": ${FILES_PROCESSED},
+            "processing_time_seconds": ${PROCESSING_TIME},
+            "badge_generated": ${BADGE_GENERATED},
+            "pages_deployed": true,
+            "coverage_file": "${COVERAGE_FILE}",
+            "output_directory": "${OUTPUT_DIRECTORY}",
+            "provider": "internal",
+            "deployment_confirmed": true,
+            "updated_after_deployment": true
+          }
+          EOF
+
+            echo "✅ Updated coverage statistics file created: $UPDATED_STATS_FILENAME"
+            echo "   - Pages deployed: true"
+            echo "   - Deployment confirmed: true"
+
+            # Keep both files for debugging, but the completion report will use the updated one
+            echo "📋 Statistics files available for completion report:"
+            ls -la coverage-stats-internal-*.json
+          else
+            echo "⚠️ No original coverage statistics file found to update"
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Test deployed URLs (30 second timeout max)
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔍 Test deployed URLs
+        if: (github.event_name == 'push' || github.event_name == 'pull_request') && env.GO_COVERAGE_SKIP_URL_CHECKS != 'true'
+        run: |
+          echo "🔍 Testing deployed URLs..."
+
+          BASE_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          BRANCH_NAME="${{ inputs.branch-name }}"
+
+          # First, check if this is likely a first deployment
+          echo "🔍 Checking deployment status..."
+          IS_FIRST_RUN=false
+          MAIN_SITE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 "$BASE_URL/" 2>/dev/null || echo "000")
+
+          if [[ "$MAIN_SITE_STATUS" == "404" ]] || [[ "$MAIN_SITE_STATUS" == "000" ]]; then
+            echo "📝 This appears to be a first deployment (main site returned $MAIN_SITE_STATUS)"
+            IS_FIRST_RUN=true
+
+            # For first run, wait longer for GitHub Pages to initialize
+            echo "⏳ First deployment detected - waiting 60 seconds for GitHub Pages initialization..."
+            sleep 60
+          else
+            echo "✅ Existing deployment detected (main site returned $MAIN_SITE_STATUS)"
+            echo "⏳ Waiting 30 seconds for deployment to propagate..."
+            sleep 30
+          fi
+
+          # Define URLs to test based on event type and branch
+          EVENT_NAME="${{ inputs.event-name || github.event_name }}"
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            # PR event - test branch URLs since PRs use branch deployment
+            CRITICAL_URLS=(
+              "$BASE_URL/coverage/branch/$BRANCH_NAME/"
+              "$BASE_URL/coverage/branch/$BRANCH_NAME/index.html"
+              "$BASE_URL/coverage/branch/$BRANCH_NAME/coverage.html"
+              "$BASE_URL/coverage/branch/$BRANCH_NAME/coverage.svg"
+            )
+            OPTIONAL_URLS=()
+          elif is_main_branch "$BRANCH_NAME"; then
+            # Main branch deployment - test root URLs
+            CRITICAL_URLS=(
+              "$BASE_URL/"
+              "$BASE_URL/index.html"
+              "$BASE_URL/coverage.html"
+              "$BASE_URL/coverage.svg"
+            )
+            OPTIONAL_URLS=(
+              "$BASE_URL/coverage/branch/$BRANCH_NAME/"
+              "$BASE_URL/coverage/branch/$BRANCH_NAME/index.html"
+              "$BASE_URL/coverage/branch/$BRANCH_NAME/coverage.html"
+              "$BASE_URL/coverage/branch/$BRANCH_NAME/coverage.svg"
+            )
+          else
+            # Feature branch deployment - only branch URLs are critical
+            CRITICAL_URLS=(
+              "$BASE_URL/coverage/branch/$BRANCH_NAME/"
+              "$BASE_URL/coverage/branch/$BRANCH_NAME/index.html"
+              "$BASE_URL/coverage/branch/$BRANCH_NAME/coverage.html"
+              "$BASE_URL/coverage/branch/$BRANCH_NAME/coverage.svg"
+            )
+            OPTIONAL_URLS=(
+              "$BASE_URL/"
+              "$BASE_URL/index.html"
+              "$BASE_URL/coverage.html"
+              "$BASE_URL/coverage.svg"
+            )
+          fi
+
+          echo "🌐 Base URL: $BASE_URL"
+          echo "🌿 Branch: $BRANCH_NAME"
+          echo "🚀 First run: $IS_FIRST_RUN"
+
+          # Enhanced URL verification with progressive backoff and configurable timeout
+          TIMEOUT_SECONDS="${{ env.GO_COVERAGE_URL_CHECK_TIMEOUT }}"
+          FAIL_ON_ERRORS="${{ env.GO_COVERAGE_FAIL_ON_URL_ERRORS }}"
+          START_TIME=$(date +%s)
+
+          echo "⚙️ URL verification settings:"
+          echo "  - Total timeout: ${TIMEOUT_SECONDS}s"
+          echo "  - Fail on errors: $FAIL_ON_ERRORS"
+
+          # Test critical URLs with progressive backoff
+          CRITICAL_SUCCESS=0
+          CRITICAL_TOTAL=${#CRITICAL_URLS[@]}
+
+          echo ""
+          echo "📋 Testing critical URLs with progressive backoff..."
+
+          for url in "${CRITICAL_URLS[@]}"; do
+            echo ""
+            echo "🔗 Testing: $url"
+
+            # Progressive backoff retry logic with configurable timeout
+            HTTP_STATUS=""
+            ATTEMPT=1
+            BACKOFF_DELAYS=(5 10 20 30 45)  # Progressive delays in seconds
+            URL_SUCCESS=false
+
+            while [[ $ATTEMPT -le 5 ]]; do
+              # Check if we've exceeded the total timeout
+              CURRENT_TIME=$(date +%s)
+              ELAPSED=$((CURRENT_TIME - START_TIME))
+              if [[ $ELAPSED -ge $TIMEOUT_SECONDS ]]; then
+                echo "  ⏰ Total timeout (${TIMEOUT_SECONDS}s) exceeded, stopping retries"
+                break
+              fi
+
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 "$url" 2>/dev/null || echo "000")
+
+              if [[ "$HTTP_STATUS" == "200" ]]; then
+                echo "  ✅ SUCCESS ($HTTP_STATUS) on attempt $ATTEMPT"
+                CRITICAL_SUCCESS=$((CRITICAL_SUCCESS + 1))
+                URL_SUCCESS=true
+                break
+              else
+                echo "  ❌ FAILED ($HTTP_STATUS) on attempt $ATTEMPT"
+
+                if [[ $ATTEMPT -lt 5 ]]; then
+                  DELAY=${BACKOFF_DELAYS[$((ATTEMPT - 1))]}
+                  echo "  ⏳ Retrying in ${DELAY}s... (progressive backoff)"
+                  sleep $DELAY
+                fi
+              fi
+
+              ATTEMPT=$((ATTEMPT + 1))
+            done
+
+            if [[ "$URL_SUCCESS" == "false" ]]; then
+              echo "  💥 Final result: FAILED after $((ATTEMPT - 1)) attempts"
+            fi
+          done
+
+          # Test optional URLs (failures are warnings only)
+          OPTIONAL_SUCCESS=0
+          OPTIONAL_TOTAL=${#OPTIONAL_URLS[@]}
+
+          if [[ $OPTIONAL_TOTAL -gt 0 ]]; then
+            echo ""
+            echo "📋 Testing optional URLs..."
+            for url in "${OPTIONAL_URLS[@]}"; do
+              echo ""
+              echo "🔗 Testing: $url"
+
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 "$url" 2>/dev/null || echo "000")
+
+              if [[ "$HTTP_STATUS" == "200" ]]; then
+                echo "  ✅ SUCCESS ($HTTP_STATUS)"
+                OPTIONAL_SUCCESS=$((OPTIONAL_SUCCESS + 1))
+              else
+                echo "  ⚠️ NOT AVAILABLE ($HTTP_STATUS) - This is expected for feature branches"
+              fi
+            done
+          fi
+
+          # Calculate final elapsed time
+          END_TIME=$(date +%s)
+          TOTAL_ELAPSED=$((END_TIME - START_TIME))
+
+          # Summary
+          echo ""
+          echo "📊 RESULTS:"
+          echo "  - Critical URLs: $CRITICAL_SUCCESS/$CRITICAL_TOTAL"
+          echo "  - Optional URLs: $OPTIONAL_SUCCESS/$OPTIONAL_TOTAL (informational)"
+          echo "  - Total time elapsed: ${TOTAL_ELAPSED}s / ${TIMEOUT_SECONDS}s"
+
+          if [[ "$IS_FIRST_RUN" == "true" ]]; then
+            echo "  - First deployment: Some URLs may take time to propagate"
+          fi
+
+          # Determine success based on critical URLs and configuration
+          if [[ $CRITICAL_SUCCESS -eq $CRITICAL_TOTAL ]]; then
+            echo ""
+            echo "🎉 DEPLOYMENT SUCCESSFUL! All critical URLs are accessible."
+            echo ""
+            EVENT_NAME="${{ inputs.event-name || github.event_name }}"
+            if [[ "$EVENT_NAME" == "pull_request" ]]; then
+              echo "🔀 Branch Coverage Report (PR): $BASE_URL/coverage/branch/$BRANCH_NAME/"
+              echo "📊 Branch Coverage HTML: $BASE_URL/coverage/branch/$BRANCH_NAME/index.html"
+              echo "🏷️ Branch Coverage Badge: $BASE_URL/coverage/branch/$BRANCH_NAME/coverage.svg"
+            elif is_main_branch "$BRANCH_NAME"; then
+              echo "🌐 Main Coverage Dashboard: $BASE_URL/"
+              echo "📊 Main Coverage Report: $BASE_URL/coverage.html"
+              echo "🏷️ Main Coverage Badge: $BASE_URL/coverage.svg"
+              echo "📑 All Branches Index: $BASE_URL/branches.html"
+              echo ""
+              echo "🔍 Alternative URLs to check if main URLs fail:"
+              echo "    - $BASE_URL/coverage/coverage.html"
+              echo "    - $BASE_URL/coverage/index.html"
+            fi
+
+            if [[ "$EVENT_NAME" != "pull_request" ]]; then
+              echo ""
+              echo "🌲 Branch Coverage Dashboard: $BASE_URL/coverage/branch/$BRANCH_NAME/"
+              echo "📈 Branch Coverage Report: $BASE_URL/coverage/branch/$BRANCH_NAME/coverage.html"
+              echo "🏷️ Branch Coverage Badge: $BASE_URL/coverage/branch/$BRANCH_NAME/coverage.svg"
+            fi
+          else
+            echo ""
+            if [[ "$FAIL_ON_ERRORS" == "true" ]]; then
+              echo "❌ DEPLOYMENT VERIFICATION FAILED"
+              echo "🚨 Critical URLs are not accessible after progressive backoff retries"
+            else
+              echo "⚠️ DEPLOYMENT VERIFICATION WARNING"
+              echo "🔔 Some critical URLs are not accessible, but continuing due to GO_COVERAGE_FAIL_ON_URL_ERRORS=false"
+            fi
+
+            # Add detailed URL failure analysis
+            echo ""
+            echo "📝 Specific URL failures:"
+            for url in "${CRITICAL_URLS[@]}"; do
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 "$url" 2>/dev/null || echo "000")
+              if [[ "$STATUS" != "200" ]]; then
+                echo "    ❌ $url (HTTP $STATUS)"
+                if [[ "$url" =~ coverage\.html$ ]]; then
+                  echo "      ℹ️ This is typically the main coverage report file"
+                fi
+              fi
+            done
+
+            # Provide helpful diagnostic information
+            echo ""
+            echo "🔍 Diagnostic information:"
+            echo "  - Is this a first deployment? $IS_FIRST_RUN"
+            echo "  - Branch being deployed: $BRANCH_NAME"
+            echo "  - Failed critical URLs: $((CRITICAL_TOTAL - CRITICAL_SUCCESS))"
+            echo "  - Total verification time: ${TOTAL_ELAPSED}s"
+            echo "  - Configuration: FAIL_ON_ERRORS=$FAIL_ON_ERRORS, TIMEOUT=${TIMEOUT_SECONDS}s"
+            echo ""
+            echo "💡 Common causes:"
+            echo "  - GitHub Pages not enabled for the repository"
+            echo "  - Deployment still propagating (can take up to 10 minutes)"
+            echo "  - Branch protection rules blocking deployment"
+            echo "  - File structure mismatch (files in wrong directories)"
+            echo "  - Jekyll processing despite .nojekyll (check file extensions)"
+            echo "  - Previous deployment failed"
+
+            # Add file structure diagnosis
+            echo ""
+            echo "🔍 File structure diagnosis:"
+            echo "  Checking what was actually deployed to identify path issues..."
+
+            # Test alternative paths that might exist
+            ALT_PATHS=(
+              "$BASE_URL/coverage.html"
+              "$BASE_URL/index.html"
+            )
+
+            echo "  Alternative paths found:"
+            for alt_url in "${ALT_PATHS[@]}"; do
+              ALT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 5 "$alt_url" 2>/dev/null || echo "000")
+              if [[ "$ALT_STATUS" == "200" ]]; then
+                echo "    ✅ $alt_url (HTTP $ALT_STATUS) - FOUND!"
+                echo "      ℹ️ This suggests files are in a different directory structure"
+              else
+                echo "    ❌ $alt_url (HTTP $ALT_STATUS)"
+              fi
+            done
+
+            # Exit with error only if configured to fail on URL errors
+            if [[ "$FAIL_ON_ERRORS" == "true" ]]; then
+              echo ""
+              echo "💡 To allow the job to continue despite URL verification failures, set:"
+              echo "   GO_COVERAGE_FAIL_ON_URL_ERRORS=false in .github/.env.custom"
+              exit 1
+            else
+              echo ""
+              echo "✅ Continuing despite URL verification issues due to configuration"
+            fi
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Collect cache statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Collect cache statistics
+        id: cache-stats
+        if: always()
+        run: |
+          echo "📊 Collecting cache statistics..."
+
+          # Get cache hit information
+          GOMOD_HIT="${{ steps.setup-go-coverage.outputs.module-cache-hit }}"
+          GOBUILD_HIT="${{ steps.setup-go-coverage.outputs.build-cache-hit }}"
+
+          # Get cache sizes
+          GOMOD_SIZE="0B"
+          GOBUILD_SIZE="0B"
+
+          if [ -d "$HOME/go/pkg/mod" ]; then
+            GOMOD_SIZE=$(du -sh "$HOME/go/pkg/mod" 2>/dev/null | cut -f1 || echo "0B")
+          fi
+
+          if [ -d "$HOME/.cache/go-build" ]; then
+            GOBUILD_SIZE=$(du -sh "$HOME/.cache/go-build" 2>/dev/null | cut -f1 || echo "0B")
+          fi
+
+          echo "📊 Cache statistics will be collected by standardized action"
+
+      # ————————————————————————————————————————————————————————————————
+      # Collect performance cache statistics using standardized action
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Collect performance cache statistics
+        uses: ./.github/actions/collect-cache-stats
+        with:
+          workflow-name: coverage
+          job-name: generate-coverage-report
+          os: ${{ inputs.primary-runner }}
+          go-version: ${{ env.GO_PRIMARY_VERSION }}
+          cache-prefix: cache-stats
+          gomod-cache-hit: ${{ steps.setup-go-coverage.outputs.module-cache-hit }}
+          gobuild-cache-hit: ${{ steps.setup-go-coverage.outputs.build-cache-hit }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Upload performance cache statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 📤 Upload performance cache statistics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cache-stats-coverage
+          path: cache-stats-coverage.json
+          retention-days: 1
+
+      # ————————————————————————————————————————————————————————————————
+      # Upload coverage statistics for completion report
+      # ————————————————————————————————————————————————————————————————
+      - name: 📤 Upload coverage statistics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-stats-internal
+          path: coverage-stats-internal-*.json
+          retention-days: 1
+
+      # ————————————————————————————————————————————————————————————————
+      # Upload coverage history for future runs (WORKING SYSTEM - PRESERVED)
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔍 Verify history files before upload
+        if: github.event_name == 'push'
+        run: |
+          echo "🔍 Checking history files before upload..."
+          HISTORY_PATH="${{ github.workspace }}/.github/coverage/history"
+          if [[ -d "$HISTORY_PATH" ]]; then
+            FILE_COUNT=$(find "$HISTORY_PATH" -name "*.json" -type f 2>/dev/null | wc -l || echo "0")
+            echo "  - History directory: $HISTORY_PATH"
+            echo "  - JSON files found: $FILE_COUNT"
+            if [[ $FILE_COUNT -gt 0 ]]; then
+              echo "  - Files to upload:"
+              find "$HISTORY_PATH" -name "*.json" -type f -exec basename {} \; | head -5
+              echo "  - Total size: $(du -sh "$HISTORY_PATH" | cut -f1)"
+            else
+              echo "⚠️ No JSON files found in history directory"
+            fi
+          else
+            echo "⚠️ History directory does not exist: $HISTORY_PATH"
+          fi
+
+      - name: 📤 Upload coverage history artifacts
+        # Upload history for all branches to preserve trend data
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-history-${{ inputs.commit-sha }}
+          path: .github/coverage/history/*.json
+          retention-days: 90
+          compression-level: 9
+        continue-on-error: true
+  # ----------------------------------------------------------------------------------
+  # Upload Coverage to Codecov (External Provider)
+  # ----------------------------------------------------------------------------------
+  codecov-upload:
+    name: 📈 Upload to Codecov
+    needs: check-provider
+    if: needs.check-provider.outputs.should-run-codecov == 'true'
+    runs-on: ${{ inputs.primary-runner }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Setup and environment
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Parse environment variables
+        env:
+          ENV_JSON: ${{ inputs.env-json }}
+        run: |
+          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
+            echo "$key=$value" >> $GITHUB_ENV
+          done
+
+      - name: 📥 Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 2 # Need history for codecov to detect changes
+
+      # ————————————————————————————————————————————————————————————————
+      # Download coverage artifact
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Download coverage artifact
+        uses: ./.github/actions/download-artifact-resilient
+        with:
+          pattern: "coverage-data"
+          path: ./coverage-artifacts/
+          merge-multiple: false
+          max-retries: ${{ env.ARTIFACT_DOWNLOAD_RETRIES }}
+          retry-delay: ${{ env.ARTIFACT_DOWNLOAD_RETRY_DELAY }}
+          timeout: ${{ env.ARTIFACT_DOWNLOAD_TIMEOUT }}
+          continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
+
+      - name: 🔍 Verify coverage file
+        run: |
+          echo "🔍 Verifying coverage file for Codecov upload..."
+          if [[ -f "coverage-artifacts/coverage-data/coverage.txt" ]]; then
+            echo "✅ Coverage file found"
+            echo "📊 File size: $(wc -c < coverage-artifacts/coverage-data/coverage.txt) bytes"
+            echo "📊 Line count: $(wc -l < coverage-artifacts/coverage-data/coverage.txt)"
+
+            # Verify format
+            FIRST_LINE=$(head -1 coverage-artifacts/coverage-data/coverage.txt)
+            if [[ "$FIRST_LINE" == "mode: atomic" ]] || [[ "$FIRST_LINE" == "mode: count" ]] || [[ "$FIRST_LINE" == "mode: set" ]]; then
+              echo "✅ Coverage file format is valid"
+            else
+              echo "❌ Invalid coverage file format"
+              exit 1
+            fi
+          else
+            echo "❌ Coverage file not found!"
+            exit 1
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Upload to Codecov
+      # ————————————————————————————————————————————————————————————————
+      - name: 📈 Upload coverage to Codecov
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
+        with:
+          #file: ./coverage.txt # This is the old format
+          files: ./coverage-artifacts/coverage-data/coverage.txt
+          fail_ci_if_error: true
+          flags: unittests
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
+          name: codecov-${{ inputs.branch-name }}
+          override_branch: ${{ inputs.branch-name }}
+          override_commit: ${{ inputs.commit-sha }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Generate coverage statistics for completion report
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Generate coverage statistics (Codecov)
+        if: always()
+        run: |
+          echo "📊 Generating coverage statistics for Codecov job..."
+          STATS_START_TIME=$(date +%s)
+          COVERAGE_PERCENTAGE=""
+          FILES_PROCESSED=0
+          BADGE_GENERATED=false
+          PAGES_DEPLOYED=false
+
+          # Calculate coverage from coverage.txt file using go tool cover
+          if [ -f "coverage-artifacts/coverage-data/coverage.txt" ]; then
+            COVERAGE_PERCENTAGE=$(go tool cover -func="coverage-artifacts/coverage-data/coverage.txt" | tail -1 | awk '{print $3}' | sed 's/%//' || echo "0")
+            FILES_PROCESSED=$(wc -l < "coverage-artifacts/coverage-data/coverage.txt" || echo "0")
+            echo "📈 Calculated coverage percentage: ${COVERAGE_PERCENTAGE}%"
+            echo "📁 Files processed: $FILES_PROCESSED"
+          else
+            echo "⚠️ Coverage file not found for statistics"
+          fi
+
+          # Codecov job doesn't generate badges or deploy pages directly
+          BADGE_GENERATED=false
+          PAGES_DEPLOYED=false
+
+          # Calculate processing time
+          STATS_END_TIME=$(date +%s)
+          PROCESSING_TIME=$((STATS_END_TIME - STATS_START_TIME))
+
+          # Create coverage statistics JSON file
+          STATS_FILENAME="coverage-stats-codecov-$(date +%Y%m%d-%H%M%S).json"
+          cat > "$STATS_FILENAME" <<EOF
+          {
+            "coverage_percentage": "${COVERAGE_PERCENTAGE}",
+            "files_processed": ${FILES_PROCESSED},
+            "processing_time_seconds": ${PROCESSING_TIME},
+            "badge_generated": ${BADGE_GENERATED},
+            "pages_deployed": ${PAGES_DEPLOYED},
+            "coverage_file": "coverage.txt",
+            "provider": "codecov",
+            "branch": "${{ inputs.branch-name }}",
+            "commit": "${{ inputs.commit-sha }}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "workflow": "fortress-coverage",
+            "job": "codecov-upload"
+          }
+          EOF
+
+          echo "📊 Coverage statistics saved to: $STATS_FILENAME"
+          echo "  Coverage: ${COVERAGE_PERCENTAGE}%"
+          echo "  Files processed: $FILES_PROCESSED"
+          echo "  Processing time: ${PROCESSING_TIME}s"
+          echo "  Provider: codecov"
+
+      - name: 📤 Upload coverage statistics (Codecov)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-stats-codecov
+          path: coverage-stats-codecov-*.json
+          retention-days: 1

@@ -1,0 +1,42 @@
+name: Feature request
+description: Suggest an idea or improvement for this project
+title: "[Feature] <brief description of feature>"
+labels: ["idea"]
+assignees:
+  - mrz1836
+body:
+  - type: textarea
+    id: problem_description
+    attributes:
+      label: Is your feature request related to a problem?
+      description: Describe the problem you're experiencing. What makes this feature necessary or helpful?
+      placeholder: I'm always frustrated when I try to use X and it doesn't support Y...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Describe the solution you'd like
+      description: Provide a clear and concise description of what you'd like to see implemented.
+      placeholder: Add support for this custom function to custom map...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Describe alternatives you've considered
+      description: List any alternative solutions or features you’ve thought about or tried.
+      placeholder: I also considered doing this through a wrapper or middleware...
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add any other context or screenshots that help explain your feature request.
+      placeholder: Links to relevant docs, examples, or screenshots
+    validations:
+      required: false

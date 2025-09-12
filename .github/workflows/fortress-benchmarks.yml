@@ -1,0 +1,368 @@
+# ------------------------------------------------------------------------------------
+#  Benchmark Suite (Reusable Workflow) (GoFortress)
+#
+#  Purpose: Run Go benchmarks across multiple Go versions and operating systems,
+#  collecting performance metrics for analysis and comparison.
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: GoFortress (Benchmark Suite)
+
+on:
+  workflow_call:
+    inputs:
+      env-json:
+        description: "JSON string of environment variables"
+        required: true
+        type: string
+      benchmark-matrix:
+        description: "Benchmark matrix JSON"
+        required: true
+        type: string
+      primary-runner:
+        description: "Primary runner OS"
+        required: true
+        type: string
+      go-primary-version:
+        description: "Primary Go version"
+        required: true
+        type: string
+      go-secondary-version:
+        description: "Secondary Go version"
+        required: true
+        type: string
+      benchmark-timeout:
+        description: "Timeout in minutes for benchmark jobs"
+        required: false
+        type: number
+        default: 30
+      redis-enabled:
+        description: "Whether Redis service is enabled"
+        required: false
+        type: string
+        default: "false"
+      redis-version:
+        description: "Redis Docker image version"
+        required: false
+        type: string
+        default: "7-alpine"
+      redis-host:
+        description: "Redis host for benchmarks"
+        required: false
+        type: string
+        default: "localhost"
+      redis-port:
+        description: "Redis port for benchmarks"
+        required: false
+        type: string
+        default: "6379"
+      redis-health-retries:
+        description: "Redis health check retry count"
+        required: false
+        type: string
+        default: "10"
+      redis-health-interval:
+        description: "Redis health check interval in seconds"
+        required: false
+        type: string
+        default: "10"
+      redis-health-timeout:
+        description: "Redis health check timeout in seconds"
+        required: false
+        type: string
+        default: "5"
+      redis-trust-service-health:
+        description: "Trust GitHub Actions service container health checks"
+        required: false
+        type: string
+        default: "true"
+    secrets:
+      github-token:
+        description: "GitHub token for API access"
+        required: true
+
+# Security: Restrictive default permissions with job-level overrides for least privilege access
+permissions:
+  contents: read
+
+jobs:
+  # ----------------------------------------------------------------------------------
+  # Benchmark Matrix for Go (Parallel)
+  # ----------------------------------------------------------------------------------
+  benchmark-go:
+    name: 🏃 Benchmark (${{ matrix.name }})
+    timeout-minutes: ${{ inputs.benchmark-timeout }}
+    strategy:
+      fail-fast: false # Continue running other benchmarks if one fails
+      matrix: ${{ fromJSON(inputs.benchmark-matrix) }}
+    runs-on: ${{ matrix.os }}
+
+    # Redis service container (conditionally enabled)
+    services:
+      redis:
+        image: ${{ inputs.redis-enabled == 'true' && format('redis:{0}', inputs.redis-version) || 'busybox:latest' }}
+        options: ${{ inputs.redis-enabled == 'true' && format('--health-cmd "redis-cli ping" --health-interval {0}s --health-timeout {1}s --health-retries {2}', inputs.redis-health-interval, inputs.redis-health-timeout, inputs.redis-health-retries) || '--entrypoint sh' }}
+        ports:
+          - ${{ inputs.redis-enabled == 'true' && format('{0}:{0}', inputs.redis-port) || '9999:9999' }}
+
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Parse environment variables
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Parse environment variables
+        env:
+          ENV_JSON: ${{ inputs.env-json }}
+        run: |
+          echo "📋 Setting environment variables..."
+          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
+            echo "$key=$value" >> $GITHUB_ENV
+          done
+
+      # ————————————————————————————————————————————————————————————————
+      # Checkout code and set up Go environment
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      # ————————————————————————————————————————————————————————————————
+      # Setup Go with caching and version management
+      # ————————————————————————————————————————————————————————————————
+      - name: 🏗️ Setup Go with Cache
+        id: setup-go-bench
+        uses: ./.github/actions/setup-go-with-cache
+        with:
+          go-version: ${{ matrix.go-version }}
+          matrix-os: ${{ matrix.os }}
+          go-primary-version: ${{ inputs.go-primary-version }}
+          go-secondary-version: ${{ inputs.go-secondary-version }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Setup MAGE-X (required for magex bench:run command)
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Setup MAGE-X
+        uses: ./.github/actions/setup-magex
+        with:
+          magex-version: ${{ env.MAGE_X_VERSION }}
+          runner-os: ${{ matrix.os }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Setup Redis service using composite action with caching
+      # ————————————————————————————————————————————————————————————————
+      - name: 🗄️ Setup Redis Service
+        id: setup-redis
+        uses: ./.github/actions/setup-redis-service
+        with:
+          redis-enabled: ${{ inputs.redis-enabled }}
+          redis-version: ${{ inputs.redis-version }}
+          redis-host: ${{ inputs.redis-host }}
+          redis-port: ${{ inputs.redis-port }}
+          use-cache: "true"
+          trust-service-health: ${{ inputs.redis-trust-service-health }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Start benchmark timer
+      # ————————————————————————————————————————————————————————————————
+      - name: ⏱️ Start benchmark timer
+        id: bench-timer
+        run: |
+          echo "bench-start=$(date +%s)" >> $GITHUB_OUTPUT
+
+      # ————————————————————————————————————————————————————————————————
+      # Run benchmarks and capture output
+      # ————————————————————————————————————————————————————————————————
+      - name: 🏃 Run benchmarks
+        id: run-benchmarks
+        run: |
+          echo "🏃 Running benchmarks..."
+          echo "📋 Benchmark Mode: ${{ env.BENCHMARK_MODE }}"
+
+          # Create output file for raw benchmark results
+          BENCH_OUTPUT_FILE="bench-results-${{ matrix.os }}-${{ matrix.go-version }}.txt"
+
+          # Determine which benchmark command to run based on mode
+          case "${{ env.BENCHMARK_MODE }}" in
+            quick)
+              echo "⚡ Running quick benchmarks (50ms runs)..."
+              BENCH_CMD="magex bench time=50ms"
+              ;;
+            full)
+              echo "🔬 Running comprehensive benchmarks (5s runs)..."
+              BENCH_CMD="magex bench time=5s"
+              ;;
+            normal|*)
+              echo "📊 Running normal benchmarks (100ms runs)..."
+              BENCH_CMD="magex bench time=100ms"
+              ;;
+          esac
+
+          # Run benchmarks and capture output
+          if $BENCH_CMD > "$BENCH_OUTPUT_FILE" 2>&1; then
+            echo "✅ Benchmarks command completed"
+            BENCH_STATUS="success"
+          else
+            echo "❌ Benchmarks command failed"
+            BENCH_STATUS="failure"
+          fi
+
+          # Check for panic, FAIL, or fatal errors in output
+          if grep -q -E "(panic:|FAIL|fatal error:|runtime error:|test timed out|unexpected Method Call)" "$BENCH_OUTPUT_FILE"; then
+            echo "❌ Benchmarks contain panic or fatal errors"
+            BENCH_STATUS="failure"
+          fi
+
+          # Additional check for mock expectation failures
+          if grep -q -i "mock: Unexpected Method Call" "$BENCH_OUTPUT_FILE"; then
+            echo "❌ Benchmarks contain mock expectation failures"
+            BENCH_STATUS="failure"
+          fi
+
+          # Display benchmark output
+          echo "📊 Benchmark Results:"
+          cat "$BENCH_OUTPUT_FILE"
+
+          # Fail the step if benchmarks failed or contained errors
+          if [ "$BENCH_STATUS" = "failure" ]; then
+            echo "::error::Benchmark execution failed or contained errors"
+            exit 1
+          fi
+
+          # Save status for later
+          echo "bench_status=$BENCH_STATUS" >> $GITHUB_OUTPUT
+
+      # ————————————————————————————————————————————————————————————————
+      # Parse benchmark results and create statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Parse benchmark statistics
+        id: bench-summary
+        if: always()
+        run: |
+          BENCH_END=$(date +%s)
+          BENCH_DURATION=$((BENCH_END - ${{ steps.bench-timer.outputs.bench-start }}))
+
+          # Count benchmarks
+          BENCHMARK_COUNT=$(find . -type f -name '*_test.go' \
+            -not -path './vendor/*' \
+            -not -path './third_party/*' \
+            -exec grep -h '^func Benchmark' {} + | wc -l)
+
+          # Parse benchmark results
+          BENCH_OUTPUT_FILE="bench-results-${{ matrix.os }}-${{ matrix.go-version }}.txt"
+          STATS_FILE="bench-stats-${{ matrix.os }}-${{ matrix.go-version }}.json"
+
+          # Create a pretty summary of benchmark results
+          BENCH_SUMMARY=""
+          if [ -f "$BENCH_OUTPUT_FILE" ]; then
+            # Step 1: Extract benchmark result lines using a more specific pattern
+            # Expected format: BenchmarkName-N  iterations  ns/op  [B/op]  [allocs/op]
+            # Example: BenchmarkMyFunc-8  1000000  1234.5 ns/op  56 B/op  2 allocs/op
+
+            # Primary pattern: Match benchmark name with dash-number, iterations, and ns/op
+            BENCH_LINES=$(grep -E '^Benchmark[A-Za-z0-9_-]+-[0-9]+\s+[0-9]+\s+[0-9.]+ ns/op' "$BENCH_OUTPUT_FILE" || true)
+
+            if [ -n "$BENCH_LINES" ]; then
+              BENCH_SUMMARY=$(echo "$BENCH_LINES" | while read -r line; do
+                # Step 2: Parse each component of the benchmark line
+
+                # Extract benchmark name (remove the -N suffix where N is the GOMAXPROCS)
+                BENCH_NAME=$(echo "$line" | awk '{print $1}' | sed 's/-[0-9]*$//')
+
+                # Extract iteration count (second field)
+                ITERATIONS=$(echo "$line" | awk '{print $2}')
+
+                # Extract nanoseconds per operation (third field)
+                NS_PER_OP=$(echo "$line" | awk '{print $3}')
+
+                # Step 3: Extract optional memory metrics using targeted grep
+                # Look for "X B/op" pattern (bytes per operation)
+                B_PER_OP=$(echo "$line" | grep -oE '[0-9.]+ B/op' | awk '{print $1}' || echo "N/A")
+
+                # Look for "X allocs/op" pattern (allocations per operation)
+                ALLOCS_PER_OP=$(echo "$line" | grep -oE '[0-9.]+ allocs/op' | awk '{print $1}' || echo "N/A")
+
+                # Step 4: Format the summary line
+                echo "- **$BENCH_NAME**: $NS_PER_OP ns/op, $B_PER_OP B/op, $ALLOCS_PER_OP allocs/op ($ITERATIONS iterations)"
+              done)
+            fi
+          fi
+
+          # Escape the summary for JSON
+          BENCH_SUMMARY_JSON=$(echo "$BENCH_SUMMARY" | jq -Rsa .)
+
+          # Create statistics file using jq to safely construct JSON
+          jq -n \
+            --arg name "${{ matrix.name }}" \
+            --arg os "${{ matrix.os }}" \
+            --arg go_version "${{ matrix.go-version }}" \
+            --argjson duration_seconds "$BENCH_DURATION" \
+            --argjson benchmark_count "$BENCHMARK_COUNT" \
+            --arg status "${{ steps.run-benchmarks.outputs.bench_status }}" \
+            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg benchmark_mode "${{ env.BENCHMARK_MODE }}" \
+            --argjson benchmark_summary "$BENCH_SUMMARY_JSON" \
+            '{
+              "name": $name,
+              "os": $os,
+              "go_version": $go_version,
+              "duration_seconds": $duration_seconds,
+              "benchmark_count": $benchmark_count,
+              "benchmark_mode": $benchmark_mode,
+              "status": $status,
+              "timestamp": $timestamp,
+              "benchmark_summary": $benchmark_summary
+            }' > "$STATS_FILE"
+
+          echo "📊 Benchmark statistics:"
+          jq . "$STATS_FILE"
+
+      # ————————————————————————————————————————————————————————————————
+      # Collect performance cache statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Collect performance cache statistics
+        uses: ./.github/actions/collect-cache-stats
+        with:
+          workflow-name: benchmark-${{ matrix.os }}-${{ matrix.go-version }}
+          job-name: benchmarks
+          os: ${{ matrix.os }}
+          go-version: ${{ matrix.go-version }}
+          cache-prefix: cache-stats
+          gomod-cache-hit: ${{ steps.setup-go-bench.outputs.module-cache-hit }}
+          gobuild-cache-hit: ${{ steps.setup-go-bench.outputs.build-cache-hit }}
+          redis-enabled: ${{ inputs.redis-enabled }}
+          redis-cache-hit: ${{ steps.setup-redis.outputs.cache-hit }}
+          redis-image-size: ${{ steps.setup-redis.outputs.image-size }}
+          redis-operation-time: ${{ steps.setup-redis.outputs.cache-operation-time }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Upload performance cache statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 📤 Upload performance cache statistics
+        if: always()
+        uses: ./.github/actions/upload-statistics
+        with:
+          artifact-name: cache-stats-benchmark-${{ matrix.os }}-${{ matrix.go-version }}
+          artifact-path: cache-stats-benchmark-${{ matrix.os }}-${{ matrix.go-version }}.json
+          retention-days: "1"
+
+      # ————————————————————————————————————————————————————————————————
+      # Upload benchmark statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 📤 Upload benchmark statistics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bench-stats-${{ matrix.os }}-${{ matrix.go-version }}
+          path: bench-stats-${{ matrix.os }}-${{ matrix.go-version }}.json
+          retention-days: 1
+
+      # ————————————————————————————————————————————————————————————————
+      # Upload raw benchmark results
+      # ————————————————————————————————————————————————————————————————
+      - name: 📤 Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bench-results-${{ matrix.os }}-${{ matrix.go-version }}
+          path: bench-results-${{ matrix.os }}-${{ matrix.go-version }}.txt
+          retention-days: 7 # Keep raw results longer for analysis

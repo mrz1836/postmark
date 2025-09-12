@@ -1,0 +1,328 @@
+# ------------------------------------------------------------------------------------
+#  Completion Report Finalization (Reusable Workflow) (GoFortress)
+#
+#  Purpose: Finalize the completion report by generating job summaries, performance
+#  insights, and assembling all report sections into the final published report.
+#
+#  This workflow handles:
+#    - Job results summary with status indicators
+#    - Performance insights and workflow analytics
+#    - Report assembly from all sub-workflow sections
+#    - Final publication to GitHub Step Summary
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: GoFortress (Completion Finalize)
+
+on:
+  workflow_call:
+    inputs:
+      all-inputs:
+        description: "JSON string of all original workflow inputs"
+        required: true
+        type: string
+      statistics-report:
+        description: "Statistics section markdown content"
+        required: true
+        type: string
+      tests-report:
+        description: "Tests section markdown content"
+        required: true
+        type: string
+      timing-data:
+        description: "JSON string of timing metrics"
+        required: true
+        type: string
+    outputs:
+      final-report:
+        description: "Complete assembled report"
+        value: ${{ jobs.finalize-report.outputs.report-content }}
+
+# Security: Restrictive default permissions with job-level overrides for least privilege access
+permissions:
+  contents: read
+
+jobs:
+  # ----------------------------------------------------------------------------------
+  # Report Finalization
+  # ----------------------------------------------------------------------------------
+  finalize-report:
+    name: ✅ Finalize Report
+    runs-on: ubuntu-latest
+    if: always()
+    outputs:
+      report-content: ${{ steps.set-output.outputs.content }}
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Checkout repository for local actions
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      # ————————————————————————————————————————————————————————————————
+      # Parse inputs and setup
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Parse workflow inputs
+        env:
+          ALL_INPUTS: ${{ inputs.all-inputs }}
+          TIMING_DATA: ${{ inputs.timing-data }}
+        run: |
+          echo "📋 Parsing workflow inputs..."
+          echo "$ALL_INPUTS" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
+            echo "INPUT_$key=$value" >> $GITHUB_ENV
+          done
+
+          echo "📋 Parsing timing data..."
+          echo "$TIMING_DATA" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
+            echo "TIMING_$key=$value" >> $GITHUB_ENV
+          done
+
+      # ————————————————————————————————————————————————————————————————
+      # Download report sections from sub-workflows
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Download statistics section
+        if: always()
+        uses: ./.github/actions/download-artifact-resilient
+        with:
+          pattern: "statistics-section"
+          path: ./sections/
+          merge-multiple: false
+          max-retries: ${{ env.ARTIFACT_DOWNLOAD_RETRIES }}
+          retry-delay: ${{ env.ARTIFACT_DOWNLOAD_RETRY_DELAY }}
+          timeout: ${{ env.ARTIFACT_DOWNLOAD_TIMEOUT }}
+          continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
+
+      - name: 📥 Download tests section
+        if: always()
+        uses: ./.github/actions/download-artifact-resilient
+        with:
+          pattern: "tests-section"
+          path: ./sections/
+          merge-multiple: false
+          max-retries: ${{ env.ARTIFACT_DOWNLOAD_RETRIES }}
+          retry-delay: ${{ env.ARTIFACT_DOWNLOAD_RETRY_DELAY }}
+          timeout: ${{ env.ARTIFACT_DOWNLOAD_TIMEOUT }}
+          continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Initialize final report with header
+      # ————————————————————————————————————————————————————————————————
+      - name: 📝 Initialize Final Report
+        run: |
+          # Create the initial completion report with professional structure
+          SUMMARY_TIME=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          {
+            echo "# 🏰 GoFortress Workflow Completion Report"
+            echo "_Generated at: ${SUMMARY_TIME}_"
+            echo ""
+            echo "**GoFortress System Version:** \`${{ env.INPUT_gofortress-version }}\` | **Released:** ${{ env.INPUT_gofortress-released }}"
+            echo ""
+            echo "---"
+            echo ""
+            echo "## 🏁 Workflow Summary"
+            echo ""
+            echo "### ⏱️ Execution Timeline"
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| **Total Duration** | ${TIMING_total_minutes:-0}m ${TIMING_total_seconds:-0}s |"
+            echo "| **Start Time** | ${{ env.INPUT_start-time }} |"
+            echo "| **End Time** | $(date -u +"%Y-%m-%dT%H:%M:%SZ") |"
+            echo "| **Workflow** | ${{ github.workflow }} |"
+            echo "| **Run Number** | ${{ github.run_number }} |"
+            echo "| **Trigger** | ${{ github.event_name }} |"
+            echo "| **Source** | ${{ github.event.pull_request.head.repo.full_name == github.repository && 'Internal' || 'Fork' }} |"
+            echo ""
+            echo "<br><br>"
+          } > final-report.md
+
+      # ————————————————————————————————————————————————————————————————
+      # Append report sections from sub-workflows
+      # ————————————————————————————————————————————————————————————————
+      - name: 📄 Append Statistics Section
+        if: always()
+        run: |
+          if [ -f "./sections/statistics-section.md" ]; then
+            echo "📊 Adding statistics section..."
+            cat "./sections/statistics-section.md" >> final-report.md
+          else
+            echo "⚠️ Statistics section not found, using input content..."
+            cat << 'EOF' >> final-report.md
+          ${{ inputs.statistics-report }}
+          EOF
+          fi
+
+      - name: 📄 Append Tests Section
+        if: always()
+        run: |
+          if [ -f "./sections/tests-section.md" ]; then
+            echo "🧪 Adding tests section..."
+            cat "./sections/tests-section.md" >> final-report.md
+          else
+            echo "⚠️ Tests section not found, using input content..."
+            cat << 'EOF' >> final-report.md
+          ${{ inputs.tests-report }}
+          EOF
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Generate job results summary
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Generate Job Results Summary
+        id: job-results
+        run: |
+          {
+            echo ""
+            echo "<br><br>"
+            echo ""
+            echo "### ✅ Workflow Status Overview"
+            echo "| Job | Status | Result |"
+            echo "|-----|--------|--------|"
+            echo "| 🎯 Setup Configuration | ${{ env.INPUT_setup-result }} | $([ "${{ env.INPUT_setup-result }}" = "success" ] && echo "✅" || echo "❌") |"
+            echo "| 🪄 Test MAGE-X | ${{ env.INPUT_test-magex-result }} | $([ "${{ env.INPUT_test-magex-result }}" = "success" ] && echo "✅" || echo "❌") |"
+            echo "| 🪝 Pre-commit Checks | ${{ env.INPUT_pre-commit-result }} | $([ "${{ env.INPUT_pre-commit-result }}" = "success" ] && echo "✅" || echo "❌") |"
+            echo "| 🔒 Security Scans | ${{ env.INPUT_security-result }} | $([ "${{ env.INPUT_security-result }}" = "success" ] && echo "✅" || echo "❌") |"
+            echo "| 📊 Code Quality | ${{ env.INPUT_code-quality-result }} | $([ "${{ env.INPUT_code-quality-result }}" = "success" ] && echo "✅" || echo "❌") |"
+            echo "| 🧪 Test Suite | ${{ env.INPUT_test-suite-result }} | $([ "${{ env.INPUT_test-suite-result }}" = "success" ] && echo "✅" || echo "❌") |"
+          } >> final-report.md
+
+          # Only show benchmarks row if it was attempted
+          if [[ "${{ env.INPUT_benchmarks-result }}" != "skipped" ]]; then
+            echo "| 🏃 Benchmarks | ${{ env.INPUT_benchmarks-result }} | $([ "${{ env.INPUT_benchmarks-result }}" = "success" ] && echo "✅" || echo "❌") |" >> final-report.md
+          fi
+
+          # Always show status-check result
+          echo "| 🎯 All Tests Passed | ${{ env.INPUT_status-check-result }} | $([ "${{ env.INPUT_status-check-result }}" = "success" ] && echo "✅" || echo "❌") |" >> final-report.md
+
+          # Only show release row if it was attempted
+          if [[ "${{ env.INPUT_release-result }}" != "skipped" ]]; then
+            echo "| 🚀 Release | ${{ env.INPUT_release-result }} | $([ "${{ env.INPUT_release-result }}" = "success" ] && echo "✅" || echo "❌") |" >> final-report.md
+          fi
+
+          echo "" >> final-report.md
+
+          # Add release-specific information if this was a tag push
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            {
+              echo ""
+              echo "## 📦 Release Information"
+            } >> final-report.md
+
+            if [[ "${{ env.INPUT_release-result }}" == "success" ]]; then
+              {
+                echo "✅ Release ${{ github.ref_name }} created successfully!"
+                echo "[View Release](https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }})"
+              } >> final-report.md
+            elif [[ "${{ env.INPUT_release-result }}" == "skipped" ]]; then
+              echo "⏭️ Release was skipped (likely due to test failures)" >> final-report.md
+            elif [[ "${{ env.INPUT_release-result }}" == "failure" ]]; then
+              echo "❌ Release creation failed - check logs for details" >> final-report.md
+            fi
+            echo "" >> final-report.md
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Generate performance insights
+      # ————————————————————————————————————————————————————————————————
+      - name: 🚀 Generate Performance Insights
+        id: performance-insights
+        run: |
+          TOTAL_DURATION=${TIMING_total_duration:-0}
+          TOTAL_MINUTES=${TIMING_total_minutes:-0}
+          TOTAL_SECONDS=${TIMING_total_seconds:-0}
+
+          {
+            echo "<br><br>"
+            echo ""
+            echo "### 📊 Workflow Analytics & Insights"
+          } >> final-report.md
+
+          # Overall timing insights
+          if [[ $TOTAL_DURATION -gt 600 ]]; then
+            echo "- ⚠️  **Warning**: Workflow took longer than 10 minutes (${TOTAL_MINUTES}m ${TOTAL_SECONDS}s)" >> final-report.md
+          elif [[ $TOTAL_DURATION -gt 300 && $TOTAL_DURATION -le 600 ]]; then
+            echo "- ℹ️  Workflow completed in ${TOTAL_MINUTES}m ${TOTAL_SECONDS}s." >> final-report.md
+          elif [[ $TOTAL_DURATION -gt 180 && $TOTAL_DURATION -le 300 ]]; then
+            echo "- 🎉  **Great Performance**: Workflow completed in under 5 minutes (${TOTAL_MINUTES}m ${TOTAL_SECONDS}s)!" >> final-report.md
+          elif [[ $TOTAL_DURATION -le 180 ]]; then
+            echo "- 🚀  **Excellent Performance**: Workflow completed in under 3 minutes!" >> final-report.md
+          fi
+
+          # Standard insights
+          {
+            echo "- **Parallel Jobs**: Multiple jobs ran in parallel to optimize execution time"
+            echo "- **Matrix Strategy**: Tests ran across $(echo '${{ env.INPUT_test-matrix }}' | jq '.include | length') configurations"
+          } >> final-report.md
+
+          if [ "${{ env.ENABLE_VERBOSE_TEST_OUTPUT }}" != "true" ]; then
+            echo "- **Verbose Output**: Disabled to speed up test execution" >> final-report.md
+          else
+            echo "- **Verbose Output**: Enabled for detailed test logs" >> final-report.md
+          fi
+
+          # Add failure analysis if any job failed
+          FAILED_JOBS=""
+          [ "${{ env.INPUT_setup-result }}" != "success" ] && [ "${{ env.INPUT_setup-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Setup Configuration, "
+          [ "${{ env.INPUT_test-magex-result }}" != "success" ] && [ "${{ env.INPUT_test-magex-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Test MAGE-X, "
+          [ "${{ env.INPUT_pre-commit-result }}" != "success" ] && [ "${{ env.INPUT_pre-commit-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Pre-commit Checks, "
+          [ "${{ env.INPUT_security-result }}" != "success" ] && [ "${{ env.INPUT_security-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Security Scans, "
+          [ "${{ env.INPUT_code-quality-result }}" != "success" ] && [ "${{ env.INPUT_code-quality-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Code Quality, "
+          [ "${{ env.INPUT_test-suite-result }}" != "success" ] && [ "${{ env.INPUT_test-suite-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Test Suite, "
+          [ "${{ env.INPUT_benchmarks-result }}" != "success" ] && [ "${{ env.INPUT_benchmarks-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Benchmarks, "
+          [ "${{ env.INPUT_status-check-result }}" != "success" ] && [ "${{ env.INPUT_status-check-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Status Check, "
+          [ "${{ env.INPUT_release-result }}" != "success" ] && [ "${{ env.INPUT_release-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Release, "
+
+          if [ -n "$FAILED_JOBS" ]; then
+            FAILED_JOBS=${FAILED_JOBS%, }  # Remove trailing comma
+            {
+              echo "<br><br>"
+              echo ""
+              echo "### ⚠️ Failed Components"
+              echo "The following jobs did not complete successfully:"
+              echo "- ${FAILED_JOBS}"
+            } >> final-report.md
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Add professional footer
+      # ————————————————————————————————————————————————————————————————
+      - name: ✅ Add Report Footer
+        run: |
+          # Add professional footer before finalizing
+          {
+            echo "<br><br>"
+            echo ""
+            echo "---"
+            echo "🎯 **Workflow completed** at $(date -u +"%H:%M:%S UTC")"
+            echo ""
+            echo "_GoFortress CI/CD Pipeline - Built Strong. Tested Harder._"
+          } >> final-report.md
+
+      # ————————————————————————————————————————————————————————————————
+      # Publish final report to GitHub Step Summary
+      # ————————————————————————————————————————————————————————————————
+      - name: 📋 Publish to GitHub Step Summary
+        run: |
+          # Write the final report to GitHub Step Summary
+          cat final-report.md >> $GITHUB_STEP_SUMMARY
+          echo "✅ Completion report generated and published successfully"
+
+      # ————————————————————————————————————————————————————————————————
+      # Upload final report artifact
+      # ————————————————————————————————————————————————————————————————
+      - name: 📤 Upload Final Report
+        id: upload-final
+        uses: ./.github/actions/upload-statistics
+        with:
+          artifact-name: "final-completion-report"
+          artifact-path: "final-report.md"
+          retention-days: "7"
+
+      - name: 📋 Set Output Content
+        id: set-output
+        run: |
+          echo "content<<EOF" >> $GITHUB_OUTPUT
+          cat final-report.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT

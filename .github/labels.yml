@@ -1,54 +1,99 @@
-- color: 0075ca
-  description: "Improvements or additions to documentation"
-  name: "documentation"
-- color: b23128
-  description: "Highest rated bug or issue, affects all"
-  name: "bug-P1"
-- color: de3d32
-  description: "Medium rated bug, affects a few"
-  name: "bug-P2"
-- color: f44336
-  description: "Lowest rated bug, affects nearly none or low-impact"
-  name: "bug-P3"
-- color: 0e8a16
-  description: "Any new significant addition"
-  name: "feature"
-- color: b60205
-  description: "Urgent or important fix/patch"
-  name: "hot-fix"
-- color: cccccc
-  description: "Any idea, suggestion"
-  name: "idea"
-- color: d4c5f9
-  description: "Experimental - can break!"
-  name: "prototype"
-- color: cc317c
-  description: "Any question or concern"
-  name: "question"
-- color: c2e0c6
-  description: "Unit tests, mocking, integration testing"
-  name: "test"
-- color: fbca04
-  description: "Anything GUI related"
-  name: "ui-ux"
-- color: 006b75
-  description: "Simple updates or version bumps"
-  name: "chore"
-- color: 006b75
-  description: "Dependency updates"
-  name: "dependencies"
-- color: 006b75
-  description: "General updates"
-  name: "update"
-- color: FFA500
-  description: "Any significant refactoring"
-  name: "refactor"
-- color: FEF2C0
+- name: "automerge"
   description: "Used for automatic merging"
-  name: "automerge"
-- color: FBCA04
+  color: FEF2C0
+- name: "bug-P1"
+  description: "Highest rated bug or issue, affects all"
+  color: b23128
+- name: "bug-P2"
+  description: "Medium rated bug, affects a few"
+  color: de3d32
+- name: "bug-P3"
+  description: "Lowest rated bug, affects nearly none or low-impact"
+  color: f44336
+- name: "chore"
+  description: "Simple dependency updates or version bumps"
+  color: 006b75
+- name: "coverage-override"
+  description: "Override coverage requirements for this PR"
+  color: ff8c00
+- name: "dependencies"
+  description: "Dependency updates, version bumps, etc."
+  color: 006b75
+- name: "dependabot"
+  description: "PR or issue created by or related to Dependabot"
+  color: 1a70c7
+- name: "devcontainer"
+  description: "Used for referencing DevContainers"
+  color: 006b75
+- name: "docker"
+  description: "Used for referencing Docker related issues"
+  color: 006b75
+- name: "documentation"
+  description: "Improvements or additions to documentation"
+  color: 0075ca
+- name: "feature"
+  description: "Any new significant addition"
+  color: 0e8a16
+- name: "github-actions"
+  description: "Used for referencing GitHub Actions"
+  color: 006b75
+- name: "gomod"
+  description: "Used for referencing Go Modules"
+  color: 006b75
+- name: "hot-fix"
+  description: "Urgent or important fix/patch"
+  color: b60205
+- name: "idea"
+  description: "Any idea, suggestion"
+  color: cccccc
+- name: "npm"
+  description: "Used for referencing npm packages and dependencies"
+  color: 006b75
+- name: "performance"
+  description: "Performance improvements or optimizations"
+  color: 8bc34a
+- name: "prototype"
+  description: "Experimental - can break!"
+  color: d4c5f9
+- name: "question"
+  description: "Any question or concern"
+  color: cc317c
+- name: "refactor"
+  description: "Any significant refactoring"
+  color: FFA500
+- name: "requires-manual-review"
+  description: "PR or issue requires manual review by a maintainer or security team"
+  color: ffd700
+- name: "security"
+  description: "Security-related issue, vulnerability, or fix"
+  color: d73a4a
+- name: "size/L"
+  description: "Large change (201–500 lines)"
+  color: 01579b
+- name: "size/M"
+  description: "Medium change (51–200 lines)"
+  color: 0288d1
+- name: "size/S"
+  description: "Small change (11–50 lines)"
+  color: 4fc3f7
+- name: "size/XL"
+  description: "Very large change (>500 lines)"
+  color: 002f6c
+- name: "size/XS"
+  description: "Very small change (≤10 lines)"
+  color: b3e5fc
+- name: "stale"
+  description: "Old, unused, stale"
+  color: c2e0c6
+- name: "test"
+  description: "Unit tests, mocking, integration testing"
+  color: c2e0c6
+- name: "ui-ux"
+  description: "Anything GUI related"
+  color: fbca04
+- name: "update"
+  description: "General updates"
+  color: 006b75
+- name: "work-in-progress"
   description: "Used for denoting a WIP, stops auto-merge"
-  name: "work-in-progress"
-- color: c2e0c6
-  description: "Old, stale, unused"
-  name: "stale"
+  color: FBCA04

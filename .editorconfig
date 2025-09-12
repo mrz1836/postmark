@@ -1,20 +1,39 @@
+# EditorConfig helps maintain consistent coding styles
 root = true
 
-; Unix-style newlines with a newline ending every file
 [*]
-end_of_line = lf
-indent_size = 4
+charset                 = utf-8
+end_of_line             = lf
+indent_style            = tab
+indent_size             = 4
+insert_final_newline    = true
+trim_trailing_whitespace = true
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.{yml,yaml}]
 indent_style = space
-insert_final_newline = true
-trim_trailing_whitespace  = true
-insert_final_newline = true
-charset = utf-8
+indent_size  = 2
 
-; Golang
-[*.go]
+[*.{json,prettierrc}]
+indent_style = space
+indent_size  = 4
+
+[*.{js,mjs,cjs,ts}]
+indent_style = space
+indent_size  = 4
+
+[*.py]
+indent_style = space
+indent_size  = 4
+
+[{Makefile,*.mk}]
 indent_style = tab
-indent_size = 4
 
-; YAML
-[*.{yaml,yml}]
-indent_size = 2
+[*.{xml,cff}]
+indent_style = space
+indent_size  = 2
+
+[{LICENSE,Dockerfile,.gitignore,.dockerignore,.prettierignore}]
+insert_final_newline = true

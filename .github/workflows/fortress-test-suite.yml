@@ -1,0 +1,185 @@
+# ------------------------------------------------------------------------------------
+#  Test Suite (Orchestrator Workflow) (GoFortress)
+#
+#  Purpose: Orchestrate the complete Go test suite across multiple workflows,
+#  including matrix testing, fuzz testing, validation, and coverage processing.
+#
+#  This workflow coordinates sub-workflows for improved maintainability:
+#    - fortress-test-matrix.yml: Multi-platform test execution
+#    - fortress-test-fuzz.yml: Fuzz testing execution
+#    - fortress-test-validation.yml: Test result validation
+#    - fortress-coverage.yml: Coverage processing (existing)
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: GoFortress (Go Test Suite)
+
+on:
+  workflow_call:
+    inputs:
+      env-json:
+        description: "JSON string of environment variables"
+        required: true
+        type: string
+      test-matrix:
+        description: "Test matrix JSON"
+        required: true
+        type: string
+      primary-runner:
+        description: "Primary runner OS"
+        required: true
+        type: string
+      go-primary-version:
+        description: "Primary Go version"
+        required: true
+        type: string
+      go-secondary-version:
+        description: "Secondary Go version"
+        required: true
+        type: string
+      code-coverage-enabled:
+        description: "Whether code coverage is enabled"
+        required: true
+        type: string
+      coverage-provider:
+        description: "Coverage service provider (internal or codecov)"
+        required: false
+        type: string
+        default: "internal"
+      race-detection-enabled:
+        description: "Whether race detection is enabled"
+        required: true
+        type: string
+      fuzz-testing-enabled:
+        description: "Whether fuzz testing is enabled"
+        required: true
+        type: string
+      redis-enabled:
+        description: "Whether Redis service is enabled"
+        required: false
+        type: string
+        default: "false"
+      redis-version:
+        description: "Redis Docker image version"
+        required: false
+        type: string
+        default: "7-alpine"
+      redis-host:
+        description: "Redis host for tests"
+        required: false
+        type: string
+        default: "localhost"
+      redis-port:
+        description: "Redis port for tests"
+        required: false
+        type: string
+        default: "6379"
+      redis-health-retries:
+        description: "Redis health check retry count"
+        required: false
+        type: string
+        default: "10"
+      redis-health-interval:
+        description: "Redis health check interval in seconds"
+        required: false
+        type: string
+        default: "10"
+      redis-health-timeout:
+        description: "Redis health check timeout in seconds"
+        required: false
+        type: string
+        default: "5"
+      redis-trust-service-health:
+        description: "Trust GitHub Actions service container health checks"
+        required: false
+        type: string
+        default: "true"
+    secrets:
+      github-token:
+        description: "GitHub token for API access"
+        required: true
+      CODECOV_TOKEN:
+        description: "Codecov token for uploading coverage (required when coverage-provider is codecov)"
+        required: false
+
+# Security: Restrictive default permissions with job-level overrides for least privilege access
+permissions:
+  contents: read # Default read-only access to repository contents
+
+jobs:
+  # ----------------------------------------------------------------------------------
+  # Test Matrix Execution (Multi-platform, Multi-version)
+  # ----------------------------------------------------------------------------------
+  execute-test-matrix:
+    name: 🧪 Execute Test Matrix
+    uses: ./.github/workflows/fortress-test-matrix.yml
+    with:
+      env-json: ${{ inputs.env-json }}
+      test-matrix: ${{ inputs.test-matrix }}
+      primary-runner: ${{ inputs.primary-runner }}
+      go-primary-version: ${{ inputs.go-primary-version }}
+      go-secondary-version: ${{ inputs.go-secondary-version }}
+      code-coverage-enabled: ${{ inputs.code-coverage-enabled }}
+      race-detection-enabled: ${{ inputs.race-detection-enabled }}
+      redis-enabled: ${{ inputs.redis-enabled }}
+      redis-version: ${{ inputs.redis-version }}
+      redis-host: ${{ inputs.redis-host }}
+      redis-port: ${{ inputs.redis-port }}
+      redis-health-retries: ${{ inputs.redis-health-retries }}
+      redis-health-interval: ${{ inputs.redis-health-interval }}
+      redis-health-timeout: ${{ inputs.redis-health-timeout }}
+      redis-trust-service-health: ${{ inputs.redis-trust-service-health }}
+
+  # ----------------------------------------------------------------------------------
+  # Fuzz Testing Execution (Primary platform only)
+  # ----------------------------------------------------------------------------------
+  execute-fuzz-tests:
+    name: 🎯 Execute Fuzz Tests
+    uses: ./.github/workflows/fortress-test-fuzz.yml
+    with:
+      env-json: ${{ inputs.env-json }}
+      primary-runner: ${{ inputs.primary-runner }}
+      go-primary-version: ${{ inputs.go-primary-version }}
+      go-secondary-version: ${{ inputs.go-secondary-version }}
+      fuzz-testing-enabled: ${{ inputs.fuzz-testing-enabled }}
+
+  # ----------------------------------------------------------------------------------
+  # Test Results Validation (Aggregate all test results)
+  # ----------------------------------------------------------------------------------
+  validate-test-results:
+    name: 🔍 Validate Test Results
+    needs: [execute-test-matrix, execute-fuzz-tests]
+    if: always() # Always run to validate results even if tests failed
+    uses: ./.github/workflows/fortress-test-validation.yml
+    with:
+      env-json: ${{ inputs.env-json }}
+      primary-runner: ${{ inputs.primary-runner }}
+      fuzz-testing-enabled: ${{ inputs.fuzz-testing-enabled }}
+
+  # ----------------------------------------------------------------------------------
+  # Coverage Processing (Existing workflow integration)
+  # ----------------------------------------------------------------------------------
+  process-coverage:
+    name: 📊 Process Coverage
+    needs: [execute-test-matrix, validate-test-results]
+    if: inputs.code-coverage-enabled == 'true' && !startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write # Write repository content and push to gh-pages branch for coverage processing
+      pull-requests: write # Required: Coverage workflow needs to create PR comments
+      pages: write # Required: Coverage workflow needs to deploy to GitHub Pages
+      id-token: write # Required: Coverage workflow needs GitHub Pages authentication
+      statuses: write # Required: Coverage workflow needs to create commit status checks
+    uses: ./.github/workflows/fortress-coverage.yml
+    with:
+      coverage-file: coverage.txt
+      branch-name: ${{ github.head_ref || github.ref_name }}
+      commit-sha: ${{ github.sha }}
+      env-json: ${{ inputs.env-json }}
+      primary-runner: ${{ inputs.primary-runner }}
+      event-name: ${{ github.event_name }}
+      pr-number: ${{ github.event.pull_request.number }}
+    secrets:
+      github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

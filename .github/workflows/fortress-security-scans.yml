@@ -1,0 +1,380 @@
+# ------------------------------------------------------------------------------------
+#  Security Scans (Reusable Workflow) (GoFortress)
+#
+#  Purpose: Run all security scanning tools including Nancy (dependency checks),
+#  Govulncheck (Go vulnerability scanning), and Gitleaks (secret scanning).
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: GoFortress (Security Scans)
+
+on:
+  workflow_call:
+    inputs:
+      env-json:
+        description: "JSON string of environment variables"
+        required: true
+        type: string
+      enable-nancy:
+        description: "Enable Nancy security scan"
+        required: false
+        type: boolean
+        default: true
+      enable-govulncheck:
+        description: "Enable govulncheck security scan"
+        required: false
+        type: boolean
+        default: true
+      enable-gitleaks:
+        description: "Enable Gitleaks security scan"
+        required: false
+        type: boolean
+        default: true
+      primary-runner:
+        description: "Primary runner OS"
+        required: true
+        type: string
+      go-primary-version:
+        description: "Primary Go version"
+        required: true
+        type: string
+    secrets:
+      github-token:
+        description: "GitHub token for API access"
+        required: true
+      gitleaks-license:
+        description: "Gitleaks license key"
+        required: false
+
+# Security: Restrictive default permissions with job-level overrides for least privilege access
+permissions:
+  contents: read
+
+jobs:
+  # ----------------------------------------------------------------------------------
+  # Ask Nancy (Dependency Checks)
+  # ----------------------------------------------------------------------------------
+  ask-nancy:
+    name: 🛡️ Ask Nancy (Dependency Checks)
+    runs-on: ${{ inputs.primary-runner }}
+    if: ${{ inputs.enable-nancy }}
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Checkout code (required for local actions)
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      # ————————————————————————————————————————————————————————————————
+      # Parse environment variables
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Parse environment variables
+        uses: ./.github/actions/parse-env
+        with:
+          env-json: ${{ inputs.env-json }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Setup Go with caching and version management
+      # ————————————————————————————————————————————————————————————————
+      - name: 🏗️ Setup Go with Cache
+        id: setup-ask-nancy
+        uses: ./.github/actions/setup-go-with-cache
+        with:
+          go-version: ${{ inputs.go-primary-version }}
+          matrix-os: ${{ inputs.primary-runner }}
+          go-primary-version: ${{ inputs.go-primary-version }}
+          go-secondary-version: ${{ inputs.go-primary-version }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Write the "go" list to file for Nancy
+      # ————————————————————————————————————————————————————————————————
+      - name: 📝 Write go list
+        run: |
+          echo "📋 Generating module list for security scanning..."
+          go list -json -m all > go.list
+          echo "✅ Module list generated successfully"
+
+      # ————————————————————————————————————————————————————————————————
+      # Run Nancy to check for vulnerabilities
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔍 Ask Nancy
+        uses: sonatype-nexus-community/nancy-github-action@726e338312e68ecdd4b4195765f174d3b3ce1533 # v1.0.3
+        continue-on-error: false
+        with:
+          githubToken: ${{ secrets.github-token }} # ← prevents rate-limit 403
+          nancyVersion: ${{ env.NANCY_VERSION }}
+          nancyCommand: sleuth --loud --exclude-vulnerability ${{ env.NANCY_EXCLUDES }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Summary of Nancy results
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Job Summary
+        run: |
+          echo "## 🛡️ Nancy Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Scan Details | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tool** | Nancy Sleuth |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Mode** | Loud mode with exclusions |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Scope** | All Go modules |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | ${{ env.NANCY_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Result** | ✅ No vulnerabilities found |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚫 Excluded Vulnerabilities" >> $GITHUB_STEP_SUMMARY
+          echo "The following vulnerabilities were excluded from the scan:" >> $GITHUB_STEP_SUMMARY
+          echo "${{ env.NANCY_EXCLUDES }}" >> $GITHUB_STEP_SUMMARY
+
+      # ————————————————————————————————————————————————————————————————
+      # Collect cache statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Collect cache statistics
+        uses: ./.github/actions/collect-cache-stats
+        with:
+          workflow-name: nancy-security
+          job-name: nancy-security
+          os: ${{ inputs.primary-runner }}
+          go-version: ${{ inputs.go-primary-version }}
+          cache-prefix: cache-stats
+          gomod-cache-hit: ${{ steps.setup-ask-nancy.outputs.module-cache-hit }}
+          gobuild-cache-hit: ${{ steps.setup-ask-nancy.outputs.build-cache-hit }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Upload infrastructure cache statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 📤 Upload infrastructure cache statistics
+        uses: ./.github/actions/upload-statistics
+        with:
+          artifact-name: cache-stats-security-nancy
+          artifact-path: cache-stats-nancy-security.json
+
+  # ----------------------------------------------------------------------------------
+  # Govulncheck (Vulnerability Checks)
+  # ----------------------------------------------------------------------------------
+  govulncheck:
+    name: 🔐 Run govulncheck (Vulnerability Scan)
+    runs-on: ${{ inputs.primary-runner }}
+    if: ${{ inputs.enable-govulncheck }}
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Checkout code (required for local actions)
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      # ————————————————————————————————————————————————————————————————
+      # Parse environment variables
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Parse environment variables
+        uses: ./.github/actions/parse-env
+        with:
+          env-json: ${{ inputs.env-json }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Setup Go with caching and version management
+      # ————————————————————————————————————————————————————————————————
+      - name: 🏗️ Setup Go with Cache
+        id: setup-govulncheck
+        uses: ./.github/actions/setup-go-with-cache
+        with:
+          go-version: ${{ inputs.go-primary-version }}
+          matrix-os: ${{ inputs.primary-runner }}
+          go-primary-version: ${{ inputs.go-primary-version }}
+          go-secondary-version: ${{ inputs.go-primary-version }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Setup MAGE-X (required for magex deps:audit command)
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Setup MAGE-X
+        uses: ./.github/actions/setup-magex
+        with:
+          magex-version: ${{ env.MAGE_X_VERSION }}
+          runner-os: ${{ inputs.primary-runner }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Restore (and later save) a compact cache for the govulncheck binary
+      # and its vulnerability DB files.
+      # ————————————————————————————————————————————————————————————————
+      - name: 💾 Restore govulncheck binary cache
+        id: govuln-cache
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cache/govulncheck-bin
+          key: ${{ inputs.primary-runner }}-govulncheck-${{ env.GOVULNCHECK_VERSION }}
+
+      - name: 🛠️ Make cached govulncheck usable
+        run: |
+          set -euo pipefail
+          BIN_DIR="$HOME/.cache/govulncheck-bin"
+          GOVULN_BIN="$BIN_DIR/govulncheck"
+          # If we restored a cache, copy/link it into GOPATH/bin so the binary works.
+          if [[ -f "$GOVULN_BIN" ]]; then
+            echo "✅ Using cached govulncheck binary"
+            mkdir -p "$(go env GOPATH)/bin"
+            cp "$GOVULN_BIN" "$(go env GOPATH)/bin/"
+          fi
+          # Make sure the binary location is on PATH for *all* subsequent steps.
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      # ————————————————————————————————————————————————————————————————
+      # Install govulncheck *only* when the cache was empty.
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Install govulncheck (cache miss)
+        if: steps.govuln-cache.outputs.cache-hit != 'true'
+        run: |
+          echo "⬇️ Cache miss – installing govulncheck..."
+          echo "🔧 Installing govulncheck version ${{ env.GOVULNCHECK_VERSION }}..."
+          go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+          # Copy the freshly built binary back into the cache directory
+          mkdir -p ~/.cache/govulncheck-bin
+          cp "$(go env GOPATH)/bin/govulncheck" ~/.cache/govulncheck-bin/
+          echo "✅ govulncheck installed and stored in cache"
+
+      # ————————————————————————————————————————————————————————————————
+      # Run govulncheck
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔐 Run govulncheck
+        run: |
+          echo "🔍 Running vulnerability analysis..."
+          magex deps:audit
+          echo "✅ Vulnerability scan completed"
+
+      # ————————————————————————————————————————————————————————————————
+      # Summary of govulncheck results
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Job Summary
+        run: |
+          echo "## 🔐 govulncheck Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Analysis Details | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tool** | govulncheck (Official Go Security Tool) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Installation** | $( [[ '${{ steps.govuln-cache.outputs.cache-hit }}' == 'true' ]] && echo '💾 From cache' || echo '📥 Fresh install' ) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Scope** | All packages in module |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Result** | ✅ No vulnerabilities detected |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | ${{ env.GOVULNCHECK_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🎯 **Analysis completed successfully with no security issues found.**" >> $GITHUB_STEP_SUMMARY
+
+      # ————————————————————————————————————————————————————————————————
+      # Collect cache statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Collect cache statistics
+        uses: ./.github/actions/collect-cache-stats
+        with:
+          workflow-name: govulncheck-security
+          job-name: govulncheck-security
+          os: ${{ inputs.primary-runner }}
+          go-version: ${{ inputs.go-primary-version }}
+          cache-prefix: cache-stats
+          gomod-cache-hit: ${{ steps.setup-govulncheck.outputs.module-cache-hit }}
+          gobuild-cache-hit: ${{ steps.setup-govulncheck.outputs.build-cache-hit }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Upload infrastructure cache statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 📤 Upload infrastructure cache statistics
+        uses: ./.github/actions/upload-statistics
+        with:
+          artifact-name: cache-stats-security-govulncheck
+          artifact-path: cache-stats-govulncheck-security.json
+
+  # ----------------------------------------------------------------------------------
+  # Gitleaks (Secret Scanning)
+  # ----------------------------------------------------------------------------------
+  gitleaks:
+    name: 🕵️ Run Gitleaks (Secret Scan)
+    runs-on: ${{ inputs.primary-runner }}
+    if: ${{ inputs.enable-gitleaks }}
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Checkout code (required for local actions)
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0 # Fetch all history so Gitleaks can scan commits
+
+      # ————————————————————————————————————————————————————————————————
+      # Parse environment variables
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Parse environment variables
+        uses: ./.github/actions/parse-env
+        with:
+          env-json: ${{ inputs.env-json }}
+
+      # ————————————————————————————————————————————————————————————————
+      # Check repository security conditions
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔍 Check repository security conditions
+        id: repo-check
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_HEAD_REF: ${{ github.head_ref }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          echo "🔍 Checking repository security conditions..."
+          echo "Event Name: $GITHUB_EVENT_NAME"
+          echo "Actor: $GITHUB_ACTOR"
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Head Ref: $GITHUB_HEAD_REF"
+
+          # For workflow_call, we typically trust the calling workflow from the same repo
+          # For pull_request events, check if head repo matches base repo
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_call" ]]; then
+            echo "✅ Workflow call from same repository - security scans allowed"
+            echo "is_same_repo=true" >> $GITHUB_OUTPUT
+          elif [[ "$PR_HEAD_REPO" == "$GITHUB_REPOSITORY" ]] || [[ -z "$PR_HEAD_REPO" ]]; then
+            echo "✅ Same repository or push event - security scans allowed"
+            echo "is_same_repo=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️  Fork detected - skipping secret-sensitive scans for security"
+            echo "PR Head Repo: $PR_HEAD_REPO"
+            echo "is_same_repo=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🔍 Run gitleaks scan
+        if: steps.repo-check.outputs.is_same_repo == 'true'
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v8.27.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.github-token }}
+          GITLEAKS_LICENSE: ${{ secrets.gitleaks-license }}
+          GITLEAKS_NOTIFY_USER_LIST: ${{ env.GITLEAKS_NOTIFY_USER_LIST }}
+          GITLEAKS_ENABLE_COMMENTS: "true"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
+          GITLEAKS_ENABLE_SUMMARY: "true"
+          GITLEAKS_VERSION: ${{ env.GITLEAKS_VERSION }}
+          GITLEAKS_CONFIG: ${{ env.GITLEAKS_CONFIG_FILE }}
+
+      - name: 📊 Job Summary
+        if: steps.repo-check.outputs.is_same_repo == 'true'
+        run: |
+          echo "## 🕵️ Gitleaks Secret Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Scan Details | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tool** | Gitleaks |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | ${{ env.GITLEAKS_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Scope** | All commits and files |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Config** | $([ -n "${{ env.GITLEAKS_CONFIG_FILE }}" ] && echo "Custom: \`${{ env.GITLEAKS_CONFIG_FILE }}\`" || echo "Default (built-in rules)") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Result** | ✅ No secrets detected (see logs for details) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🎯 **Secret scan completed successfully.**" >> $GITHUB_STEP_SUMMARY
+
+      - name: 📊 Fork Security Notice
+        if: steps.repo-check.outputs.is_same_repo == 'false'
+        run: |
+          echo "## 🕵️ Gitleaks Secret Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔒 Security Details | ⚠️  Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tool** | Gitleaks |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Fork Detected** | ${{ github.event.pull_request.head.repo.full_name || 'N/A (not a PR event)' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Base Repository** | ${{ github.repository }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Result** | ⚠️  Skipped for security (fork cannot access secrets) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🔒 **Secret scanning was skipped because this PR comes from a fork. This is a security feature to prevent secret exposure.**" >> $GITHUB_STEP_SUMMARY

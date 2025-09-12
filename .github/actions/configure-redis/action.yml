@@ -1,0 +1,223 @@
+# ------------------------------------------------------------------------------------
+#  Configure Redis Composite Action (GoFortress)
+#
+#  Purpose: Extract and validate Redis configuration from environment variables.
+#  Handles auto-detection of Redis usage in codebase and provides configuration
+#  outputs for other workflows.
+#
+#  Features:
+#    - Parse Redis settings from environment JSON
+#    - Auto-detect Redis usage in Go codebase (when mode=auto)
+#    - Validate configuration values and provide defaults
+#    - Support for always/never/auto modes
+#    - Comprehensive logging and status reporting
+#
+#  Usage:
+#    - uses: ./.github/actions/configure-redis
+#      with:
+#        env-json: ${{ inputs.env-json }}
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: "Configure Redis"
+description: "Extract and validate Redis configuration from environment variables with auto-detection"
+
+inputs:
+  env-json:
+    description: "JSON string of environment variables containing Redis configuration"
+    required: true
+
+outputs:
+  redis-enabled:
+    description: "Final Redis enabled state (true/false)"
+    value: ${{ steps.redis-config.outputs.redis-enabled }}
+  redis-version:
+    description: "Redis Docker image version"
+    value: ${{ steps.redis-config.outputs.redis-version }}
+  redis-host:
+    description: "Redis host for connections"
+    value: ${{ steps.redis-config.outputs.redis-host }}
+  redis-port:
+    description: "Redis port for connections"
+    value: ${{ steps.redis-config.outputs.redis-port }}
+  auto-detected:
+    description: "Whether Redis was auto-detected in codebase (true/false)"
+    value: ${{ steps.redis-config.outputs.auto-detected }}
+  detection-method:
+    description: "How Redis enablement was determined: config, auto-detected, forced"
+    value: ${{ steps.redis-config.outputs.detection-method }}
+  redis-health-retries:
+    description: "Redis health check retry count"
+    value: ${{ steps.redis-config.outputs.redis-health-retries }}
+  redis-health-interval:
+    description: "Redis health check interval in seconds"
+    value: ${{ steps.redis-config.outputs.redis-health-interval }}
+  redis-health-timeout:
+    description: "Redis health check timeout in seconds"
+    value: ${{ steps.redis-config.outputs.redis-health-timeout }}
+  redis-cache-force-pull:
+    description: "Whether to force pull Redis images even when cached (true/false)"
+    value: ${{ steps.redis-config.outputs.redis-cache-force-pull }}
+  redis-trust-service-health:
+    description: "Trust GitHub Actions service container health checks (skip redis-cli verification)"
+    value: ${{ steps.redis-config.outputs.redis-trust-service-health }}
+  redis-service-mode:
+    description: "Redis service mode (auto, always, never)"
+    value: ${{ steps.redis-config.outputs.redis-service-mode }}
+
+runs:
+  using: "composite"
+  steps:
+    # ————————————————————————————————————————————————————————————————
+    # Extract and configure Redis settings
+    # ————————————————————————————————————————————————————————————————
+    - name: 🗄️ Configure Redis Settings
+      id: redis-config
+      shell: bash
+      run: |
+        echo "🗄️ Configuring Redis service settings..."
+
+        # Parse environment JSON for Redis settings
+        ENV_JSON='${{ inputs.env-json }}'
+
+        # Validate JSON format
+        if ! echo "$ENV_JSON" | jq empty 2>/dev/null; then
+          echo "❌ ERROR: Invalid JSON format in env-json input!" >&2
+          exit 1
+        fi
+
+        # Extract Redis settings from environment with defaults
+        REDIS_ENABLED=$(echo "$ENV_JSON" | jq -r '.ENABLE_REDIS_SERVICE // "false"')
+        REDIS_MODE=$(echo "$ENV_JSON" | jq -r '.REDIS_SERVICE_MODE // "auto"')
+        REDIS_VERSION=$(echo "$ENV_JSON" | jq -r '.REDIS_VERSION // "7-alpine"')
+        REDIS_HOST=$(echo "$ENV_JSON" | jq -r '.REDIS_HOST // "localhost"')
+        REDIS_PORT=$(echo "$ENV_JSON" | jq -r '.REDIS_PORT // "6379"')
+        REDIS_HEALTH_RETRIES=$(echo "$ENV_JSON" | jq -r '.REDIS_HEALTH_CHECK_RETRIES // "10"')
+        REDIS_HEALTH_INTERVAL=$(echo "$ENV_JSON" | jq -r '.REDIS_HEALTH_CHECK_INTERVAL // "10"')
+        REDIS_HEALTH_TIMEOUT=$(echo "$ENV_JSON" | jq -r '.REDIS_HEALTH_CHECK_TIMEOUT // "5"')
+        REDIS_CACHE_FORCE_PULL=$(echo "$ENV_JSON" | jq -r '.REDIS_CACHE_FORCE_PULL // "false"')
+        REDIS_TRUST_SERVICE_HEALTH=$(echo "$ENV_JSON" | jq -r '.REDIS_TRUST_SERVICE_HEALTH // "true"')
+
+        echo "📋 Initial Redis Configuration:"
+        echo "   • ENABLE_REDIS_SERVICE: $REDIS_ENABLED"
+        echo "   • REDIS_SERVICE_MODE: $REDIS_MODE"
+        echo "   • REDIS_VERSION: $REDIS_VERSION"
+        echo "   • REDIS_HOST: $REDIS_HOST"
+        echo "   • REDIS_PORT: $REDIS_PORT"
+        echo "   • REDIS_HEALTH_CHECK_RETRIES: $REDIS_HEALTH_RETRIES"
+        echo "   • REDIS_HEALTH_CHECK_INTERVAL: $REDIS_HEALTH_INTERVAL"
+        echo "   • REDIS_HEALTH_CHECK_TIMEOUT: $REDIS_HEALTH_TIMEOUT"
+        echo "   • REDIS_CACHE_FORCE_PULL: $REDIS_CACHE_FORCE_PULL"
+        echo "   • REDIS_TRUST_SERVICE_HEALTH: $REDIS_TRUST_SERVICE_HEALTH"
+        echo ""
+
+        # Initialize detection tracking
+        AUTO_DETECTED="false"
+        DETECTION_METHOD="config"
+
+        # Process Redis mode logic
+        if [[ "$REDIS_MODE" == "auto" ]]; then
+          echo "🔍 Auto-detecting Redis usage in codebase..."
+
+          # Check for Redis imports in Go files
+          REDIS_PATTERNS=(
+            "github.com/redis"
+            "github.com/go-redis"
+            "github.com/garyburd/redigo"
+            "github.com/gomodule/redigo"
+          )
+
+          REDIS_DETECTED="false"
+          for pattern in "${REDIS_PATTERNS[@]}"; do
+            if find . -name "*.go" -not -path "./vendor/*" -not -path "./third_party/*" -exec grep -l "$pattern" {} + 2>/dev/null | head -1 | grep -q .; then
+              echo "   ✅ Found Redis usage: $pattern"
+              REDIS_DETECTED="true"
+              break
+            fi
+          done
+
+          if [[ "$REDIS_DETECTED" == "true" ]]; then
+            echo "✅ Redis usage detected in Go files - enabling Redis service"
+            REDIS_ENABLED="true"
+            AUTO_DETECTED="true"
+            DETECTION_METHOD="auto-detected"
+          else
+            echo "ℹ️ No Redis usage detected in codebase - Redis service remains $REDIS_ENABLED"
+            DETECTION_METHOD="auto-not-found"
+          fi
+
+        elif [[ "$REDIS_MODE" == "always" ]]; then
+          echo "🔧 Redis mode set to 'always' - forcing Redis service enabled"
+          REDIS_ENABLED="true"
+          DETECTION_METHOD="forced"
+
+        elif [[ "$REDIS_MODE" == "never" ]]; then
+          echo "🚫 Redis mode set to 'never' - forcing Redis service disabled"
+          REDIS_ENABLED="false"
+          DETECTION_METHOD="forced"
+
+        else
+          echo "⚠️ Unknown Redis mode '$REDIS_MODE' - using configured value ($REDIS_ENABLED)"
+          DETECTION_METHOD="config"
+        fi
+
+        # Validate configuration values
+        if [[ "$REDIS_ENABLED" != "true" && "$REDIS_ENABLED" != "false" ]]; then
+          echo "❌ ERROR: Invalid REDIS_ENABLED value: $REDIS_ENABLED" >&2
+          echo "   Must be 'true' or 'false'" >&2
+          exit 1
+        fi
+
+        # Validate port number
+        if ! [[ "$REDIS_PORT" =~ ^[0-9]+$ ]] || [ "$REDIS_PORT" -lt 1 ] || [ "$REDIS_PORT" -gt 65535 ]; then
+          echo "❌ ERROR: Invalid Redis port: $REDIS_PORT" >&2
+          echo "   Must be a number between 1 and 65535" >&2
+          exit 1
+        fi
+
+        # Validate Redis version format (basic check)
+        if [[ -z "$REDIS_VERSION" ]]; then
+          echo "❌ ERROR: Redis version cannot be empty" >&2
+          exit 1
+        fi
+
+        # Set outputs
+        echo "redis-enabled=$REDIS_ENABLED" >> $GITHUB_OUTPUT
+        echo "redis-version=$REDIS_VERSION" >> $GITHUB_OUTPUT
+        echo "redis-host=$REDIS_HOST" >> $GITHUB_OUTPUT
+        echo "redis-port=$REDIS_PORT" >> $GITHUB_OUTPUT
+        echo "auto-detected=$AUTO_DETECTED" >> $GITHUB_OUTPUT
+        echo "detection-method=$DETECTION_METHOD" >> $GITHUB_OUTPUT
+        echo "redis-health-retries=$REDIS_HEALTH_RETRIES" >> $GITHUB_OUTPUT
+        echo "redis-health-interval=$REDIS_HEALTH_INTERVAL" >> $GITHUB_OUTPUT
+        echo "redis-health-timeout=$REDIS_HEALTH_TIMEOUT" >> $GITHUB_OUTPUT
+        echo "redis-cache-force-pull=$REDIS_CACHE_FORCE_PULL" >> $GITHUB_OUTPUT
+        echo "redis-trust-service-health=$REDIS_TRUST_SERVICE_HEALTH" >> $GITHUB_OUTPUT
+        echo "redis-service-mode=$REDIS_MODE" >> $GITHUB_OUTPUT
+
+        # Final configuration summary
+        echo ""
+        echo "🎯 Final Redis Configuration:"
+        if [[ "$REDIS_ENABLED" == "true" ]]; then
+          echo "✅ Redis service enabled:"
+          echo "   • Service Mode: $REDIS_MODE"
+          echo "   • Detection Method: $DETECTION_METHOD"
+          echo "   • Auto-detected: $AUTO_DETECTED"
+          echo "   • Version: $REDIS_VERSION"
+          echo "   • Host: $REDIS_HOST"
+          echo "   • Port: $REDIS_PORT"
+          echo "   • Health Check Retries: $REDIS_HEALTH_RETRIES"
+          echo "   • Health Check Interval: ${REDIS_HEALTH_INTERVAL}s"
+          echo "   • Health Check Timeout: ${REDIS_HEALTH_TIMEOUT}s"
+          echo "   • Cache Force Pull: $REDIS_CACHE_FORCE_PULL"
+          echo "   • Trust Service Health: $REDIS_TRUST_SERVICE_HEALTH"
+        else
+          echo "❌ Redis service disabled:"
+          echo "   • Service Mode: $REDIS_MODE"
+          echo "   • Detection Method: $DETECTION_METHOD"
+          echo "   • Auto-detected: $AUTO_DETECTED"
+        fi
+
+        echo "✅ Redis configuration completed successfully"

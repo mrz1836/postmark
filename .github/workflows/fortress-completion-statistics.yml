@@ -1,0 +1,616 @@
+# ------------------------------------------------------------------------------------
+#  Completion Report Statistics Processing (Reusable Workflow) (GoFortress)
+#
+#  Purpose: Process all statistics artifacts for the completion report including
+#  cache statistics, benchmark results, coverage data, and lines of code summary.
+#
+#  This workflow handles:
+#    - Cache statistics processing and hit rate analysis
+#    - Benchmark results and performance metrics
+#    - Code coverage reporting and badge generation
+#    - Lines of code calculations and summary
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: GoFortress (Completion Statistics)
+
+on:
+  workflow_call:
+    inputs:
+      timing-metrics:
+        description: "JSON string of timing data"
+        required: true
+        type: string
+      env-json:
+        description: "JSON string of environment variables"
+        required: true
+        type: string
+    outputs:
+      report-section:
+        description: "Generated statistics markdown section"
+        value: ${{ jobs.process-statistics.outputs.statistics-markdown }}
+      cache-metrics:
+        description: "Cache performance metrics"
+        value: ${{ jobs.process-statistics.outputs.cache-data }}
+      benchmark-metrics:
+        description: "Benchmark performance metrics"
+        value: ${{ jobs.process-statistics.outputs.benchmark-data }}
+      coverage-metrics:
+        description: "Coverage metrics"
+        value: ${{ jobs.process-statistics.outputs.coverage-data }}
+
+# Security: Restrictive default permissions with job-level overrides for least privilege access
+permissions:
+  contents: read
+
+jobs:
+  # ----------------------------------------------------------------------------------
+  # Statistics Processing
+  # ----------------------------------------------------------------------------------
+  process-statistics:
+    name: 📊 Process Statistics
+    runs-on: ubuntu-latest
+    if: always()
+    outputs:
+      statistics-markdown: ${{ steps.set-output.outputs.content }}
+      cache-data: ${{ steps.process-cache.outputs.cache-metrics }}
+      benchmark-data: ${{ steps.process-benchmarks.outputs.benchmark-metrics }}
+      coverage-data: ${{ steps.process-coverage.outputs.coverage-metrics }}
+    steps:
+      # ————————————————————————————————————————————————————————————————
+      # Checkout repository for local actions
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      # ————————————————————————————————————————————————————————————————
+      # Parse environment variables
+      # ————————————————————————————————————————————————————————————————
+      - name: 🔧 Parse environment variables
+        env:
+          ENV_JSON: ${{ inputs.env-json }}
+        run: |
+          echo "📋 Setting environment variables..."
+          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
+            echo "$key=$value" >> $GITHUB_ENV
+          done
+
+      # ————————————————————————————————————————————————————————————————
+      # Detect if this is a release build (tag)
+      # ————————————————————————————————————————————————————————————————
+      - name: 🏷️ Detect Release Build
+        run: |
+          # Detect if this is a release build
+          IS_RELEASE_BUILD=false
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            IS_RELEASE_BUILD=true
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+            echo "📦 Detected release build (tag: $TAG_NAME)"
+            echo "IS_RELEASE_BUILD=true" >> $GITHUB_ENV
+            echo "RELEASE_TAG=$TAG_NAME" >> $GITHUB_ENV
+          else
+            echo "🔄 Regular build (non-release)"
+            echo "IS_RELEASE_BUILD=false" >> $GITHUB_ENV
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Download specific artifacts needed for statistics processing
+      # ————————————————————————————————————————————————————————————————
+      - name: 📥 Download test statistics
+        if: always()
+        uses: ./.github/actions/download-artifact-resilient
+        with:
+          pattern: "test-stats-*"
+          path: ./artifacts/
+          merge-multiple: true
+          max-retries: ${{ env.ARTIFACT_DOWNLOAD_RETRIES }}
+          retry-delay: ${{ env.ARTIFACT_DOWNLOAD_RETRY_DELAY }}
+          timeout: ${{ env.ARTIFACT_DOWNLOAD_TIMEOUT }}
+          continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
+
+      - name: 📥 Download benchmark statistics
+        if: always()
+        uses: ./.github/actions/download-artifact-resilient
+        with:
+          pattern: "bench-stats-*"
+          path: ./artifacts/
+          merge-multiple: true
+          max-retries: ${{ env.ARTIFACT_DOWNLOAD_RETRIES }}
+          retry-delay: ${{ env.ARTIFACT_DOWNLOAD_RETRY_DELAY }}
+          timeout: ${{ env.ARTIFACT_DOWNLOAD_TIMEOUT }}
+          continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
+
+      - name: 📥 Download cache statistics
+        if: always()
+        uses: ./.github/actions/download-artifact-resilient
+        with:
+          pattern: "cache-stats-*"
+          path: ./artifacts/
+          merge-multiple: true
+          max-retries: ${{ env.ARTIFACT_DOWNLOAD_RETRIES }}
+          retry-delay: ${{ env.ARTIFACT_DOWNLOAD_RETRY_DELAY }}
+          timeout: ${{ env.ARTIFACT_DOWNLOAD_TIMEOUT }}
+          continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
+
+      - name: 📥 Download internal coverage statistics
+        if: always() && env.GO_COVERAGE_PROVIDER == 'internal'
+        uses: ./.github/actions/download-artifact-resilient
+        with:
+          pattern: "coverage-stats-internal"
+          path: ./artifacts/
+          merge-multiple: false
+          max-retries: ${{ env.ARTIFACT_DOWNLOAD_RETRIES }}
+          retry-delay: ${{ env.ARTIFACT_DOWNLOAD_RETRY_DELAY }}
+          timeout: ${{ env.ARTIFACT_DOWNLOAD_TIMEOUT }}
+          continue-on-error: true
+
+      - name: 📥 Download codecov coverage statistics
+        if: always() && env.GO_COVERAGE_PROVIDER == 'codecov'
+        uses: ./.github/actions/download-artifact-resilient
+        with:
+          pattern: "coverage-stats-codecov"
+          path: ./artifacts/
+          merge-multiple: false
+          max-retries: ${{ env.ARTIFACT_DOWNLOAD_RETRIES }}
+          retry-delay: ${{ env.ARTIFACT_DOWNLOAD_RETRY_DELAY }}
+          timeout: ${{ env.ARTIFACT_DOWNLOAD_TIMEOUT }}
+          continue-on-error: true
+
+      - name: 🗂️ Flatten artifacts
+        if: always()
+        run: |
+          echo "🗂️ Flattening downloaded artifacts..."
+          if [ -d "./artifacts/" ]; then
+            find ./artifacts/ -name "*.json" -type f | while read -r file; do
+              filename=$(basename "$file")
+              echo "Moving $file to ./$filename"
+              cp "$file" "./$filename"
+            done
+            echo "📋 Available stats files:"
+            ls -la *-stats-*.json 2>/dev/null || echo "No stats files found"
+          else
+            echo "⚠️ No artifacts directory found"
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Initialize statistics report section
+      # ————————————————————————————————————————————————————————————————
+      - name: 📝 Initialize Statistics Section
+        run: |
+          touch statistics-section.md
+
+      # ————————————————————————————————————————————————————————————————
+      # Process cache statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 💾 Process Cache Statistics
+        id: process-cache
+        run: |
+          # Process cache statistics if available
+          if compgen -G "cache-stats-*.json" >/dev/null 2>&1; then
+            {
+              echo ""
+              echo "### 💾 Cache Statistics"
+              echo "| Workflow/Job | OS | Go Version | Module Cache | Build Cache | Module Size | Build Size | Redis Cache | Redis Size |"
+              echo "|--------------|----|-----------|--------------|-----------|-----------|------------|-------------|------------|"
+            } >> statistics-section.md
+
+            TOTAL_CACHE_HITS=0
+            TOTAL_CACHE_ATTEMPTS=0
+            WORKFLOWS_WITH_CACHE=""
+
+            for stats_file in cache-stats-*.json; do
+              if [ -f "$stats_file" ]; then
+                OS=$(jq -r '.os' "$stats_file")
+                GO_VER=$(jq -r '.go_version' "$stats_file")
+                WORKFLOW=$(jq -r '.workflow // "unknown"' "$stats_file")
+                JOB_NAME=$(jq -r '.job_name // ""' "$stats_file")
+                GOMOD_HIT=$(jq -r '.gomod_cache_hit' "$stats_file")
+                GOBUILD_HIT=$(jq -r '.gobuild_cache_hit' "$stats_file")
+                GOMOD_SIZE=$(jq -r '.cache_size_gomod' "$stats_file")
+                GOBUILD_SIZE=$(jq -r '.cache_size_gobuild' "$stats_file")
+
+                # Redis cache statistics
+                REDIS_ENABLED=$(jq -r '.redis_enabled // "false"' "$stats_file")
+                REDIS_HIT=$(jq -r '.redis_cache_hit // "false"' "$stats_file")
+                REDIS_SIZE=$(jq -r '.redis_image_size_mb // "0"' "$stats_file")
+
+                GOMOD_ICON=$([[ "$GOMOD_HIT" == "true" ]] && echo "✅ Hit" || echo "❌ Miss")
+                GOBUILD_ICON=$([[ "$GOBUILD_HIT" == "true" ]] && echo "✅ Hit" || echo "❌ Miss")
+
+                # Redis cache display
+                if [[ "$REDIS_ENABLED" == "true" ]]; then
+                  REDIS_ICON=$([[ "$REDIS_HIT" == "true" ]] && echo "✅ Hit" || echo "❌ Miss")
+                  REDIS_SIZE_DISPLAY="${REDIS_SIZE}MB"
+                else
+                  REDIS_ICON="➖ N/A"
+                  REDIS_SIZE_DISPLAY="➖"
+                fi
+
+                # Create workflow/job identifier
+                if [[ -n "$JOB_NAME" && "$JOB_NAME" != "null" ]]; then
+                  WORKFLOW_JOB="${WORKFLOW}/${JOB_NAME}"
+                else
+                  WORKFLOW_JOB="${WORKFLOW}"
+                fi
+
+                echo "| $WORKFLOW_JOB | $OS | $GO_VER | $GOMOD_ICON | $GOBUILD_ICON | $GOMOD_SIZE | $GOBUILD_SIZE | $REDIS_ICON | $REDIS_SIZE_DISPLAY |" >> statistics-section.md
+
+                [[ "$GOMOD_HIT" == "true" ]] && TOTAL_CACHE_HITS=$((TOTAL_CACHE_HITS + 1))
+                [[ "$GOBUILD_HIT" == "true" ]] && TOTAL_CACHE_HITS=$((TOTAL_CACHE_HITS + 1))
+                [[ "$REDIS_ENABLED" == "true" && "$REDIS_HIT" == "true" ]] && TOTAL_CACHE_HITS=$((TOTAL_CACHE_HITS + 1))
+
+                TOTAL_CACHE_ATTEMPTS=$((TOTAL_CACHE_ATTEMPTS + 2))
+                [[ "$REDIS_ENABLED" == "true" ]] && TOTAL_CACHE_ATTEMPTS=$((TOTAL_CACHE_ATTEMPTS + 1))
+
+                # Track workflows that used cache
+                if [[ "$WORKFLOWS_WITH_CACHE" != *"$WORKFLOW"* ]]; then
+                  if [[ -z "$WORKFLOWS_WITH_CACHE" ]]; then
+                    WORKFLOWS_WITH_CACHE="$WORKFLOW"
+                  else
+                    WORKFLOWS_WITH_CACHE="${WORKFLOWS_WITH_CACHE}, $WORKFLOW"
+                  fi
+                fi
+              fi
+            done
+
+            # Add cache efficiency summary
+            if [[ $TOTAL_CACHE_ATTEMPTS -gt 0 ]]; then
+              CACHE_HIT_RATE=$((TOTAL_CACHE_HITS * 100 / TOTAL_CACHE_ATTEMPTS))
+              {
+                echo ""
+                echo "**Cache Performance Summary:**"
+                echo "- **Overall Hit Rate**: ${CACHE_HIT_RATE}% (${TOTAL_CACHE_HITS}/${TOTAL_CACHE_ATTEMPTS} cache operations)"
+                echo "- **Workflows Using Cache**: $WORKFLOWS_WITH_CACHE"
+              } >> statistics-section.md
+
+              if [[ $CACHE_HIT_RATE -ge 80 ]]; then
+                echo "- **Cache Efficiency**: 🚀 Excellent (${CACHE_HIT_RATE}% hit rate)" >> statistics-section.md
+              elif [[ $CACHE_HIT_RATE -ge 60 ]]; then
+                echo "- **Cache Efficiency**: ✅ Good (${CACHE_HIT_RATE}% hit rate)" >> statistics-section.md
+              elif [[ $CACHE_HIT_RATE -ge 40 ]]; then
+                echo "- **Cache Efficiency**: ⚠️ Fair (${CACHE_HIT_RATE}% hit rate)" >> statistics-section.md
+              else
+                echo "- **Cache Efficiency**: ❌ Poor (${CACHE_HIT_RATE}% hit rate - consider optimizing cache strategy)" >> statistics-section.md
+              fi
+
+              # Store metrics for output
+              echo "cache-metrics={\"hit_rate\":$CACHE_HIT_RATE,\"total_hits\":$TOTAL_CACHE_HITS,\"total_attempts\":$TOTAL_CACHE_ATTEMPTS}" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+          # Add spacing after cache section
+          if compgen -G "cache-stats-*.json" >/dev/null 2>&1; then
+            echo "" >> statistics-section.md
+            echo "<br><br>" >> statistics-section.md
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Process benchmark statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 🏃 Process Benchmark Statistics
+        id: process-benchmarks
+        run: |
+          # Process benchmark statistics if available
+          if compgen -G "bench-stats-*.json" >/dev/null 2>&1; then
+            {
+              echo ""
+              echo ""
+              echo "### ⚡ Benchmark Results"
+            } >> statistics-section.md
+
+            # Get benchmark mode from the first stats file
+            BENCH_MODE="normal"
+            for stats_file in bench-stats-*.json; do
+              if [ -f "$stats_file" ]; then
+                BENCH_MODE=$(jq -r '.benchmark_mode // "normal"' "$stats_file")
+                break
+              fi
+            done
+
+            {
+              echo ""
+              echo "**Mode**: \`$BENCH_MODE\` $(case "$BENCH_MODE" in quick) echo "(Quick 50ms runs)" ;; full) echo "(Comprehensive 10s runs)" ;; *) echo "(Normal 100ms runs)" ;; esac)"
+              echo ""
+              echo "| Benchmark Suite | Duration | Benchmarks | Status |"
+              echo "|-----------------|----------|------------|--------|"
+            } >> statistics-section.md
+
+            TOTAL_BENCHMARKS=0
+            TOTAL_DURATION=0
+
+            for stats_file in bench-stats-*.json; do
+              if [ -f "$stats_file" ]; then
+                NAME=$(jq -r '.name' "$stats_file")
+                DURATION=$(jq -r '.duration_seconds' "$stats_file")
+                BENCHMARK_COUNT=$(jq -r '.benchmark_count' "$stats_file")
+                STATUS=$(jq -r '.status' "$stats_file")
+
+                DURATION_MIN=$((DURATION / 60))
+                DURATION_SEC=$((DURATION % 60))
+                STATUS_ICON=$([[ "$STATUS" == "success" ]] && echo "✅" || echo "❌")
+
+                echo "| $NAME | ${DURATION_MIN}m ${DURATION_SEC}s | $BENCHMARK_COUNT | $STATUS_ICON |" >> statistics-section.md
+
+                TOTAL_BENCHMARKS=$((TOTAL_BENCHMARKS + BENCHMARK_COUNT))
+                TOTAL_DURATION=$((TOTAL_DURATION + DURATION))
+              fi
+            done
+
+            # Display detailed benchmark results
+            {
+              echo ""
+              echo "<details>"
+              echo "<summary>Detailed Benchmark Results</summary>"
+              echo ""
+            } >> statistics-section.md
+
+            for stats_file in bench-stats-*.json; do
+              if [ -f "$stats_file" ]; then
+                NAME=$(jq -r '.name' "$stats_file")
+                BENCHMARK_SUMMARY=$(jq -r '.benchmark_summary' "$stats_file")
+                if [ -n "$BENCHMARK_SUMMARY" ] && [ "$BENCHMARK_SUMMARY" != "null" ]; then
+                  {
+                    echo "#### $NAME"
+                    echo "$BENCHMARK_SUMMARY"
+                    echo ""
+                  } >> statistics-section.md
+                fi
+              fi
+            done
+
+            echo "</details><br><br>" >> statistics-section.md
+
+            # Store metrics for output
+            echo "benchmark-metrics={\"total_benchmarks\":$TOTAL_BENCHMARKS,\"total_duration\":$TOTAL_DURATION,\"mode\":\"$BENCH_MODE\"}" >> $GITHUB_OUTPUT
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Process coverage statistics
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Process Coverage Statistics
+        id: process-coverage
+        run: |
+          # Process coverage statistics if available
+          echo "🔍 Looking for coverage statistics files..."
+
+          # Check for both coverage-stats-*.json and coverage-stats-internal-*.json patterns
+          COVERAGE_FILES_FOUND=false
+          if compgen -G "coverage-stats-*.json" >/dev/null 2>&1; then
+            echo "📋 Found coverage-stats-*.json files:"
+            ls -la coverage-stats-*.json || echo "None"
+            COVERAGE_FILES_FOUND=true
+          fi
+
+          if compgen -G "coverage-stats-internal-*.json" >/dev/null 2>&1; then
+            echo "📋 Found coverage-stats-internal-*.json files:"
+            ls -la coverage-stats-internal-*.json || echo "None"
+            COVERAGE_FILES_FOUND=true
+          fi
+
+          if [[ "$COVERAGE_FILES_FOUND" == "true" ]]; then
+            # Check if we have valid coverage data before creating section
+            HAS_COVERAGE_DATA=false
+            VALID_COVERAGE_FILE=""
+
+            # Check both patterns for valid coverage data, prioritizing updated files
+            UPDATED_FILE_FOUND=false
+            for pattern in "coverage-stats-*.json" "coverage-stats-internal-*.json"; do
+              if compgen -G "$pattern" >/dev/null 2>&1; then
+                # First, prioritize any "updated" statistics files
+                for stats_file in $pattern; do
+                  if [ -f "$stats_file" ] && [[ "$stats_file" == *"updated"* ]]; then
+                    echo "🔍 Checking UPDATED statistics file: $stats_file"
+                    COVERAGE_PERCENT=$(jq -r '.coverage_percent // .coverage_percentage // "null"' "$stats_file")
+                    echo "  - Coverage value found: '$COVERAGE_PERCENT'"
+
+                    if [[ "$COVERAGE_PERCENT" != "null" ]] && [[ "$COVERAGE_PERCENT" != "N/A" ]] && [[ -n "$COVERAGE_PERCENT" ]]; then
+                      echo "✅ Valid coverage data found in UPDATED file: $stats_file"
+                      HAS_COVERAGE_DATA=true
+                      VALID_COVERAGE_FILE="$stats_file"
+                      UPDATED_FILE_FOUND=true
+                      break 2
+                    fi
+                  fi
+                done
+
+                # If no updated file found, check regular files
+                if [[ "$UPDATED_FILE_FOUND" == "false" ]]; then
+                  for stats_file in $pattern; do
+                    if [ -f "$stats_file" ] && [[ "$stats_file" != *"updated"* ]]; then
+                      echo "🔍 Checking $stats_file for valid coverage data..."
+                      # Try both field names: coverage_percent and coverage_percentage
+                      COVERAGE_PERCENT=$(jq -r '.coverage_percent // .coverage_percentage // "null"' "$stats_file")
+                      echo "  - Coverage value found: '$COVERAGE_PERCENT'"
+
+                      if [[ "$COVERAGE_PERCENT" != "null" ]] && [[ "$COVERAGE_PERCENT" != "N/A" ]] && [[ -n "$COVERAGE_PERCENT" ]]; then
+                        echo "✅ Valid coverage data found in $stats_file"
+                        HAS_COVERAGE_DATA=true
+                        VALID_COVERAGE_FILE="$stats_file"
+                        break 2  # Break out of both loops
+                      else
+                        echo "⚠️ No valid coverage data in $stats_file"
+                      fi
+                    fi
+                  done
+                fi
+              fi
+            done
+
+            if [[ "$HAS_COVERAGE_DATA" == "true" ]] && [[ -n "$VALID_COVERAGE_FILE" ]]; then
+              {
+                echo ""
+                echo "<br><br>"
+                echo ""
+                echo "### 📈 Code Coverage Report"
+              } >> statistics-section.md
+
+              # Process the valid coverage file
+              echo "📊 Processing coverage data from: $VALID_COVERAGE_FILE"
+
+              # Extract coverage percentage (try both field names)
+              COVERAGE_PERCENT=$(jq -r '.coverage_percent // .coverage_percentage // "N/A"' "$VALID_COVERAGE_FILE")
+              PROCESSING_TIME=$(jq -r '.processing_time_seconds // "N/A"' "$VALID_COVERAGE_FILE")
+              FILES_PROCESSED=$(jq -r '.files_processed // "N/A"' "$VALID_COVERAGE_FILE")
+              BADGE_GENERATED=$(jq -r '.badge_generated // "false"' "$VALID_COVERAGE_FILE")
+              PAGES_DEPLOYED=$(jq -r '.pages_deployed // "false"' "$VALID_COVERAGE_FILE")
+              COVERAGE_PROVIDER=$(jq -r '.provider // "N/A"' "$VALID_COVERAGE_FILE")
+
+              echo "📋 Coverage metrics: ${COVERAGE_PERCENT}%, ${FILES_PROCESSED} files, ${PROCESSING_TIME}s processing"
+
+              {
+                echo "| Metric | Value |"
+                echo "|--------|-------|"
+                echo "| **Coverage Percentage** | $COVERAGE_PERCENT% |"
+                echo "| **Processing Time** | ${PROCESSING_TIME}s |"
+                echo "| **Files Processed** | $FILES_PROCESSED |"
+                echo "| **Coverage Provider** | $([ "$COVERAGE_PROVIDER" == "internal" ] && echo "go-coverage" || ([ "$COVERAGE_PROVIDER" == "codecov" ] && echo "Codecov" || echo "$COVERAGE_PROVIDER")) |"
+                echo "| **Badge Generated** | $([ "$BADGE_GENERATED" == "true" ] && echo "✅ Yes" || echo "❌ No") |"
+                echo "| **Pages Deployed** | $([ "$PAGES_DEPLOYED" == "true" ] && echo "✅ Yes" || echo "❌ No") |"
+              } >> statistics-section.md
+
+              # Store metrics for output
+              echo "coverage-metrics={\"percentage\":\"$COVERAGE_PERCENT\",\"files_processed\":\"$FILES_PROCESSED\",\"processing_time\":\"$PROCESSING_TIME\",\"provider\":\"$COVERAGE_PROVIDER\"}" >> $GITHUB_OUTPUT
+            fi
+          elif [[ "${{ env.ENABLE_CODE_COVERAGE }}" == "true" ]]; then
+            # Coverage is enabled but no coverage data found - show status
+            {
+              echo ""
+              echo "<br><br>"
+              echo ""
+              echo "### 📈 Code Coverage Status"
+              echo "| Status | Details |"
+              echo "|--------|---------|"
+
+              # Show different message for release builds vs regular builds
+              if [[ "${IS_RELEASE_BUILD:-false}" == "true" ]]; then
+                echo "| **Coverage** | 📦 Coverage analysis skipped for release builds |"
+                echo "| **Reason** | Coverage processing is disabled during releases to optimize build time |"
+                if [[ -n "${RELEASE_TAG:-}" ]]; then
+                  echo "| **Release Tag** | \`${RELEASE_TAG}\` |"
+                fi
+              else
+                echo "| **Coverage** | ⚠️ No coverage data available - check job logs |"
+              fi
+
+              echo "| **Threshold** | ${{ env.GO_COVERAGE_THRESHOLD }}% minimum |"
+              echo "| **Badge Style** | ${{ env.GO_COVERAGE_BADGE_STYLE }} |"
+              echo "| **PR Comments** | $([ "${{ env.GO_COVERAGE_POST_COMMENTS }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") |"
+              echo "| **Theme** | ${{ env.GO_COVERAGE_REPORT_THEME }} |"
+            } >> statistics-section.md
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Generate Lines of Code Summary
+      # ————————————————————————————————————————————————————————————————
+      - name: 📊 Generate Lines of Code Summary
+        id: process-loc
+        run: |
+          # Try to get LOC from stats files first
+          LOC_FOUND=false
+          TEST_FILES_COUNT=""
+          GO_FILES_COUNT=""
+          TOTAL_LOC=""
+          LOC_DATE=""
+
+          if compgen -G "*-stats-*.json" >/dev/null 2>&1; then
+            echo "🔍 Looking for LOC data in stats files..."
+            for stats_file in *-stats-*.json; do
+              if [ -f "$stats_file" ]; then
+                echo "📋 Checking $stats_file for LOC data..."
+                TEST_FILES_COUNT=$(jq -r '.loc_test_files // "null"' "$stats_file")
+                GO_FILES_COUNT=$(jq -r '.loc_go_files // "null"' "$stats_file")
+                TOTAL_LOC=$(jq -r '.loc_total // "null"' "$stats_file")
+
+                echo "  - Test Files: '$TEST_FILES_COUNT'"
+                echo "  - Go Files: '$GO_FILES_COUNT'"
+                echo "  - Total: '$TOTAL_LOC'"
+
+                # Check if we have valid LOC data (not null and not empty string)
+                if [[ "$TEST_FILES_COUNT" != "null" ]] && [[ "$TEST_FILES_COUNT" != "" ]] && \
+                   [[ "$GO_FILES_COUNT" != "null" ]] && [[ "$GO_FILES_COUNT" != "" ]] && \
+                   [[ "$TOTAL_LOC" != "null" ]] && [[ "$TOTAL_LOC" != "" ]]; then
+                  LOC_DATE=$(jq -r '.loc_date // "unknown"' "$stats_file")
+                  LOC_FOUND=true
+                  echo "✅ Found valid LOC data in $stats_file: $TOTAL_LOC total lines"
+                  break
+                fi
+              fi
+            done
+          fi
+
+          # Display LOC section if we have data
+          if [[ "$LOC_FOUND" == "true" ]] && [[ -n "$TOTAL_LOC" ]]; then
+            # Ensure no empty values in table
+            DISPLAY_TEST_FILES="${TEST_FILES_COUNT:-N/A}"
+            DISPLAY_GO_FILES="${GO_FILES_COUNT:-N/A}"
+            DISPLAY_LOC_DATE="${LOC_DATE:-N/A}"
+            DISPLAY_TOTAL="${TOTAL_LOC:-N/A}"
+
+            # Double-check for empty strings and replace with N/A
+            [[ -z "$DISPLAY_TEST_FILES" ]] && DISPLAY_TEST_FILES="N/A"
+            [[ -z "$DISPLAY_GO_FILES" ]] && DISPLAY_GO_FILES="N/A"
+            [[ -z "$DISPLAY_LOC_DATE" ]] && DISPLAY_LOC_DATE="N/A"
+            [[ -z "$DISPLAY_TOTAL" ]] && DISPLAY_TOTAL="N/A"
+
+            {
+              echo ""
+              echo "<br><br>"
+              echo ""
+              echo "### 📊 Lines of Code Summary"
+              echo "| Type | Total Lines | Date |"
+              echo "|------|-------------|------|"
+              echo "| Test Files | $DISPLAY_TEST_FILES | $DISPLAY_LOC_DATE |"
+              echo "| Go Files | $DISPLAY_GO_FILES | $DISPLAY_LOC_DATE |"
+              echo ""
+              echo "**Total lines of code: $DISPLAY_TOTAL**"
+            } >> statistics-section.md
+
+            echo "✅ LOC section added to report with values: Test=$DISPLAY_TEST_FILES, Go=$DISPLAY_GO_FILES, Total=$DISPLAY_TOTAL"
+          else
+            echo "⚠️ No valid LOC data available to display"
+            {
+              echo ""
+              echo "<br><br>"
+              echo ""
+              echo "### 📊 Lines of Code Summary"
+              echo "| Status | Details |"
+              echo "|--------|---------|"
+              echo "| **Lines of Code** | ❌ Data not available |"
+              echo "| **Reason** | magex metrics:loc not executed or parsing failed |"
+            } >> statistics-section.md
+          fi
+
+      # ————————————————————————————————————————————————————————————————
+      # Upload statistics section
+      # ————————————————————————————————————————————————————————————————
+      - name: 📤 Upload Statistics Section
+        id: upload-section
+        if: always()
+        run: |
+          if [ -f "statistics-section.md" ] && [ -s "statistics-section.md" ]; then
+            echo "📊 Statistics section found, uploading..."
+            ls -la statistics-section.md
+            echo "📋 Content preview:"
+            head -5 statistics-section.md
+          else
+            echo "⚠️ Statistics section file missing or empty, creating minimal section..."
+            echo "### 📊 Statistics Section" > statistics-section.md
+            echo "No statistics data available for this run." >> statistics-section.md
+          fi
+
+      - name: 📤 Upload Statistics Artifact
+        uses: ./.github/actions/upload-statistics
+        with:
+          artifact-name: "statistics-section"
+          artifact-path: "statistics-section.md"
+          retention-days: "1"
+          if-no-files-found: "warn"
+
+      - name: 📋 Set Output Content
+        id: set-output
+        run: |
+          echo "content<<EOF" >> $GITHUB_OUTPUT
+          cat statistics-section.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT

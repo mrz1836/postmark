@@ -1,0 +1,210 @@
+# ------------------------------------------------------------------------------------
+#  Setup Go with Cache Composite Action (GoFortress)
+#
+#  Purpose: Complete Go environment setup with intelligent caching, version validation,
+#  and toolchain management. Consolidates the common Go setup pattern used across
+#  multiple GoFortress workflows.
+#
+#  Features:
+#    - Smart cache restoration (module + build caches)
+#    - Go version requirement validation against go.mod
+#    - GOTOOLCHAIN environment management
+#    - Cross-platform cache path setup
+#    - Performance tracking outputs
+#
+#  Usage:
+#    - uses: ./.github/actions/setup-go-with-cache
+#      with:
+#        go-version: ${{ matrix.go-version }}
+#        matrix-os: ${{ matrix.os }}
+#        go-primary-version: ${{ inputs.go-primary-version }}
+#        go-secondary-version: ${{ inputs.go-secondary-version }}
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: "Setup Go with Cache"
+description: "Complete Go environment setup with intelligent caching and version management"
+
+inputs:
+  go-version:
+    description: "Go version to install (e.g., 1.23.x, 1.24.0)"
+    required: true
+  matrix-os:
+    description: "Operating system for cache keys (e.g., ubuntu-latest, windows-latest)"
+    required: true
+  go-primary-version:
+    description: "Primary Go version for toolchain comparison"
+    required: true
+  go-secondary-version:
+    description: "Secondary Go version for toolchain comparison"
+    required: true
+
+outputs:
+  go-version-actual:
+    description: "Actual Go version that was installed"
+    value: ${{ steps.setup-go.outputs.go-version }}
+  version-mismatch:
+    description: "Whether requested version was older than go.mod requirement"
+    value: ${{ steps.check-go-version.outputs.version_mismatch }}
+  module-cache-hit:
+    description: "Whether Go module cache was restored from cache"
+    value: ${{ steps.restore-gomod.outputs.cache-hit }}
+  build-cache-hit:
+    description: "Whether Go build cache was restored from cache"
+    value: ${{ steps.restore-gobuild.outputs.cache-hit }}
+  toolchain-mode:
+    description: "Toolchain mode that was applied (local, auto, default)"
+    value: ${{ steps.toolchain-summary.outputs.mode }}
+
+runs:
+  using: "composite"
+  steps:
+    # ————————————————————————————————————————————————————————————————
+    # Set Go cache paths (cross-platform)
+    # ————————————————————————————————————————————————————————————————
+    - name: 🔧 Set Go cache paths (cross-platform)
+      shell: bash
+      run: |
+        echo "🔧 Setting up Go cache paths..."
+        echo "GOCACHE=$HOME/.cache/go-build"        >> $GITHUB_ENV
+        echo "GOMODCACHE=$HOME/go/pkg/mod"          >> $GITHUB_ENV
+        echo "GOLANGCI_LINT_CACHE=$HOME/.cache/golangci-lint" >> $GITHUB_ENV
+        echo "✅ Cache paths configured successfully"
+
+    # ————————————————————————————————————————————————————————————————
+    # Validate go.sum exists for cache key generation
+    # ————————————————————————————————————————————————————————————————
+    - name: 🔍 Validate go.sum exists
+      shell: bash
+      run: |
+        echo "🔍 Checking for go.sum file..."
+        if [ ! -f "go.sum" ]; then
+          echo "❌ ERROR: go.sum file not found!"
+          echo "This is required for cache key generation using hashFiles('**/go.sum')"
+          echo "Ensure that:"
+          echo "  1. The repository has been checked out properly"
+          echo "  2. go.sum exists in the repository root"
+          echo "  3. 'go mod tidy' or 'go mod download' has been run"
+          exit 1
+        fi
+        echo "✅ go.sum found - cache keys will work correctly"
+
+    # ————————————————————————————————————————————————————————————————
+    # Restore Go module cache (shared across versions)
+    # ————————————————————————————————————————————————————————————————
+    - name: 💾 Restore Go module cache
+      id: restore-gomod
+      uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ inputs.matrix-os }}-gomod-${{ hashFiles('**/go.sum') }}
+
+    # ————————————————————————————————————————————————————————————————
+    # Restore Go build cache (per-version)
+    # ————————————————————————————————————————————————————————————————
+    - name: 💾 Restore Go build cache
+      id: restore-gobuild
+      uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/.cache/go-build/test
+        key: ${{ inputs.matrix-os }}-gobuild-${{ inputs.go-version }}-${{ hashFiles('**/go.sum') }}
+
+    # ————————————————————————————————————————————————————————————————
+    # Check go.mod required version before setting up Go
+    # ————————————————————————————————————————————————————————————————
+    - name: 🔍 Check Go version requirement
+      id: check-go-version
+      shell: bash
+      run: |
+        echo "🔍 Checking Go version requirements..."
+
+        if [ -f go.mod ]; then
+          REQUIRED_VERSION=$(grep -E '^go\s+[0-9]+\.[0-9]+' go.mod | awk '{print $2}')
+          if [ -n "$REQUIRED_VERSION" ]; then
+            echo "📋 go.mod requires Go version: $REQUIRED_VERSION"
+            echo "required_version=$REQUIRED_VERSION" >> $GITHUB_OUTPUT
+
+            # Extract major.minor from requested version (handle formats like 1.23.x, 1.23, 1.23.4)
+            REQUESTED_VERSION="${{ inputs.go-version }}"
+            REQUESTED_MAJOR_MINOR=$(echo "$REQUESTED_VERSION" | grep -oE '^[0-9]+\.[0-9]+')
+
+            # Compare versions
+            if [ -n "$REQUESTED_MAJOR_MINOR" ]; then
+              # Convert to comparable format (e.g., 1.23 -> 123, 1.9 -> 109)
+              REQ_COMPARABLE=$(echo "$REQUIRED_VERSION" | awk -F. '{printf "%d%02d", $1, $2}')
+              REQUESTED_COMPARABLE=$(echo "$REQUESTED_MAJOR_MINOR" | awk -F. '{printf "%d%02d", $1, $2}')
+
+              if [ "$REQUESTED_COMPARABLE" -lt "$REQ_COMPARABLE" ]; then
+                echo "⚠️ WARNING: Requested Go version (${{ inputs.go-version }}) is older than required ($REQUIRED_VERSION)"
+                echo "version_mismatch=true" >> $GITHUB_OUTPUT
+              else
+                echo "✅ Requested Go version (${{ inputs.go-version }}) meets requirement ($REQUIRED_VERSION)"
+                echo "version_mismatch=false" >> $GITHUB_OUTPUT
+              fi
+            else
+              echo "version_mismatch=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "ℹ️ No Go version requirement found in go.mod"
+            echo "version_mismatch=false" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "ℹ️ No go.mod file found"
+          echo "version_mismatch=false" >> $GITHUB_OUTPUT
+        fi
+
+    # ————————————————————————————————————————————————————————————————
+    # Determine Go Toolchain Mode
+    # ————————————————————————————————————————————————————————————————
+    - name: 🧮 Determine Go Toolchain Mode
+      id: toolchain-mode
+      shell: bash
+      run: |
+        echo "🧮 Determining Go toolchain mode..."
+
+        # If there's a version mismatch, allow toolchain to auto-upgrade
+        if [[ "${{ steps.check-go-version.outputs.version_mismatch }}" == "true" ]]; then
+          echo "⚠️ Version mismatch detected - allowing Go toolchain to auto-upgrade"
+          echo "Not setting GOTOOLCHAIN (using default auto behavior)"
+          echo "mode=auto" >> $GITHUB_OUTPUT
+        elif [[ "${{ inputs.go-version }}" == "${{ inputs.go-secondary-version }}" && \
+              "${{ inputs.go-version }}" != "${{ inputs.go-primary-version }}" ]]; then
+          echo "🔒 Setting GOTOOLCHAIN=local for secondary version"
+          echo "GOTOOLCHAIN=local" >> $GITHUB_ENV
+          echo "mode=local" >> $GITHUB_OUTPUT
+        else
+          echo "✅ Not setting GOTOOLCHAIN (using default)"
+          echo "mode=default" >> $GITHUB_OUTPUT
+        fi
+
+    # ————————————————————————————————————————————————————————————————
+    # Set up Go
+    # ————————————————————————————————————————————————————————————————
+    - name: 🏗️ Set up Go
+      id: setup-go
+      uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: false # we handle caches ourselves
+
+    # ————————————————————————————————————————————————————————————————
+    # Summary and validation
+    # ————————————————————————————————————————————————————————————————
+    - name: ✅ Go setup summary
+      id: toolchain-summary
+      shell: bash
+      run: |
+        ACTUAL_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
+        echo "✅ Go setup completed successfully"
+        echo "📋 Requested version: ${{ inputs.go-version }}"
+        echo "📋 Actual version: $ACTUAL_VERSION"
+        echo "📋 Module cache hit: ${{ steps.restore-gomod.outputs.cache-hit }}"
+        echo "📋 Build cache hit: ${{ steps.restore-gobuild.outputs.cache-hit }}"
+        echo "📋 Toolchain mode: ${{ steps.toolchain-mode.outputs.mode }}"
+
+        # Pass toolchain mode to outputs
+        echo "mode=${{ steps.toolchain-mode.outputs.mode }}" >> $GITHUB_OUTPUT
