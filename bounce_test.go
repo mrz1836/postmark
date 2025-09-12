@@ -3,6 +3,7 @@ package postmark
 import (
 	"context"
 	"net/http"
+	"testing"
 )
 
 func (s *PostmarkTestSuite) TestGetDeliveryStats() {
@@ -59,12 +60,14 @@ func (s *PostmarkTestSuite) TestGetBounces() {
 	  "TotalCount": 253,
 	  "Bounces": [
 		{
+		  "RecordType": "Bounce",
 		  "ID": 692560173,
 		  "Type": "HardBounce",
 		  "TypeCode": 1,
 		  "Name": "Hard bounce",
 		  "Tag": "Invitation",
 		  "MessageID": "2c1b63fe-43f2-4db5-91b0-8bdfa44a9316",
+		  "MessageStream": "outbound",
 		  "Description": "The server was unable to deliver your message (ex: unknown user, mailbox not found).",
 		  "Details": "action: failed\r\n",
 		  "Email": "anything@blackhole.postmarkap.com",
@@ -72,15 +75,18 @@ func (s *PostmarkTestSuite) TestGetBounces() {
 		  "DumpAvailable": false,
 		  "Inactive": false,
 		  "CanActivate": true,
-		  "Subject": "SC API5 Test"
+		  "Subject": "SC API5 Test",
+		  "Content": "Return-Path: <>\r\nReceived: ..."
 		},
 		{
+		  "RecordType": "Bounce",
 		  "ID": 676862817,
 		  "Type": "HardBounce",
 		  "TypeCode": 1,
 		  "Name": "Hard bounce",
 		  "Tag": "Invitation",
 		  "MessageID": "623b2e90-82d0-4050-ae9e-2c3a734ba091",
+		  "MessageStream": "outbound",
 		  "Description": "The server was unable to deliver your message (ex: unknown user, mailbox not found).",
 		  "Details": "smtp;554 delivery error: dd This user doesn't have a yahoo.com account (vicelcown@yahoo.com) [0] - mta1543.mail.ne1.yahoo.com",
 		  "Email": "vicelcown@yahoo.com",
@@ -88,7 +94,8 @@ func (s *PostmarkTestSuite) TestGetBounces() {
 		  "DumpAvailable": false,
 		  "Inactive": true,
 		  "CanActivate": true,
-		  "Subject": "Production API Test"
+		  "Subject": "Production API Test",
+		  "Content": "Return-Path: <>\r\nReceived: ..."
 		}
 		  ]
 	}`
@@ -97,21 +104,27 @@ func (s *PostmarkTestSuite) TestGetBounces() {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	_, total, err := s.client.GetBounces(context.Background(), 100, 0, map[string]interface{}{
+	bounces, total, err := s.client.GetBounces(context.Background(), 100, 0, map[string]interface{}{
 		"tag": "Invitation",
 	})
 	s.Require().NoError(err, "GetBounces should not fail")
 	s.Equal(int64(253), total, "GetBounces should return correct total count")
+	s.Require().Len(bounces, 2, "GetBounces should return 2 bounces")
+	s.Equal("Bounce", bounces[0].RecordType, "GetBounces should return correct record type")
+	s.Equal("outbound", bounces[0].MessageStream, "GetBounces should return correct message stream")
+	s.Equal("Return-Path: <>\r\nReceived: ...", bounces[0].Content, "GetBounces should return correct content")
 }
 
 func (s *PostmarkTestSuite) TestGetBounce() {
 	responseJSON := `{
+	  "RecordType": "Bounce",
 	  "ID": 692560173,
 	  "Type": "HardBounce",
 	  "TypeCode": 1,
 	  "Name": "Hard bounce",
 	  "Tag": "Invitation",
 	  "MessageID": "2c1b63fe-43f2-4db5-91b0-8bdfa44a9316",
+	  "MessageStream": "outbound",
 	  "Description": "The server was unable to deliver your message (ex: unknown user, mailbox not found).",
 	  "Details": "action: failed\r\n",
 	  "Email": "anything@blackhole.postmarkap.com",
@@ -130,6 +143,9 @@ func (s *PostmarkTestSuite) TestGetBounce() {
 	res, err := s.client.GetBounce(context.Background(), 692560173)
 	s.Require().NoError(err, "GetBounce should not fail")
 	s.Equal(int64(692560173), res.ID, "GetBounce should return correct bounce ID")
+	s.Equal("Bounce", res.RecordType, "GetBounce should return correct record type")
+	s.Equal("outbound", res.MessageStream, "GetBounce should return correct message stream")
+	s.Equal("Return-Path: <>\r\nReceived: …", res.Content, "GetBounce should return correct content")
 }
 
 func (s *PostmarkTestSuite) TestGetBounceDump() {
@@ -150,12 +166,14 @@ func (s *PostmarkTestSuite) TestActivateBounce() {
 	responseJSON := `{
 		"Message": "OK",
 		"Bounce": {
+		  "RecordType": "Bounce",
 		  "ID": 692560173,
 		  "Type": "HardBounce",
 		  "TypeCode": 1,
 		  "Name": "Hard bounce",
 		  "Tag": "Invitation",
 		  "MessageID": "2c1b63fe-43f2-4db5-91b0-8bdfa44a9316",
+		  "MessageStream": "outbound",
 		  "Description": "The server was unable to deliver your message (ex: unknown user, mailbox not found).",
 		  "Details": "action: failed\r\n",
 		  "Email": "anything@blackhole.postmarkap.com",
@@ -175,6 +193,9 @@ func (s *PostmarkTestSuite) TestActivateBounce() {
 	res, mess, err := s.client.ActivateBounce(context.Background(), 692560173)
 	s.Require().NoError(err, "ActivateBounce should not fail")
 	s.Equal(int64(692560173), res.ID, "ActivateBounce should return correct bounce ID")
+	s.Equal("Bounce", res.RecordType, "ActivateBounce should return correct record type")
+	s.Equal("outbound", res.MessageStream, "ActivateBounce should return correct message stream")
+	s.Equal("Return-Path: <>\r\nReceived: …", res.Content, "ActivateBounce should return correct content")
 	s.Equal("OK", mess, "ActivateBounce should return correct message")
 }
 
@@ -223,5 +244,73 @@ func (s *PostmarkTestSuite) TestGetBouncedTags() {
 				s.Equal(tt.expectedTags, res, "GetBouncedTags should return expected tags")
 			}
 		})
+	}
+}
+
+// Benchmark for GetDeliveryStats
+func BenchmarkGetDeliveryStats(b *testing.B) {
+	ctx := context.Background()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+	}
+}
+
+// Benchmark for GetBounces
+func BenchmarkGetBounces(b *testing.B) {
+	ctx := context.Background()
+	count := int64(100)
+	offset := int64(0)
+	options := map[string]interface{}{
+		"tag": "Invitation",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = count
+		_ = offset
+		_ = options
+	}
+}
+
+// Benchmark for GetBounce
+func BenchmarkGetBounce(b *testing.B) {
+	ctx := context.Background()
+	bounceID := int64(692560173)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = bounceID
+	}
+}
+
+// Benchmark for GetBounceDump
+func BenchmarkGetBounceDump(b *testing.B) {
+	ctx := context.Background()
+	bounceID := int64(692560173)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = bounceID
+	}
+}
+
+// Benchmark for ActivateBounce
+func BenchmarkActivateBounce(b *testing.B) {
+	ctx := context.Background()
+	bounceID := int64(692560173)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = bounceID
+	}
+}
+
+// Benchmark for GetBouncedTags
+func BenchmarkGetBouncedTags(b *testing.B) {
+	ctx := context.Background()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
 	}
 }

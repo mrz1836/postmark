@@ -41,6 +41,8 @@ func (client *Client) GetDeliveryStats(ctx context.Context) (DeliveryStats, erro
 
 // Bounce represents a specific delivery failure
 type Bounce struct {
+	// RecordType: Type of record (bounce)
+	RecordType string
 	// ID: ID of bounce
 	ID int64
 	// Type: Bounce type
@@ -53,6 +55,8 @@ type Bounce struct {
 	Tag string
 	// MessageID: ID of message
 	MessageID string
+	// MessageStream: Message stream ID
+	MessageStream string
 	// Description: Description of bounce
 	Description string
 	// Details: Details on the bounce
@@ -69,6 +73,8 @@ type Bounce struct {
 	CanActivate bool
 	// Subject: Email subject
 	Subject string
+	// Content: Raw email content
+	Content string
 }
 
 type bouncesResponse struct {
