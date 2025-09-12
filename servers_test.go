@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 
+	"goji.io"
 	"goji.io/pat"
 )
 
@@ -76,6 +78,26 @@ func (s *PostmarkTestSuite) TestGetServers() {
 
 	s.NotEmpty(res.Servers, "GetServers: servers should not be empty")
 	s.Equal(int(2), res.TotalCount, "GetServers: wrong total count")
+}
+
+func (s *PostmarkTestSuite) TestGetServersError() {
+	// Create a new mux for this specific test to avoid conflicts
+	errorMux := goji.NewMux()
+	errorServer := httptest.NewServer(errorMux)
+	defer errorServer.Close()
+
+	// Create a new client for this test
+	errorClient := NewClient("server-token", "account-token")
+	errorClient.BaseURL = errorServer.URL
+
+	errorMux.HandleFunc(pat.Get("/servers"), func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"ErrorCode": 500, "Message": "Internal Server Error"}`))
+	})
+
+	res, err := errorClient.GetServers(context.Background(), 100, 10, "")
+	s.Require().Error(err, "GetServers should fail")
+	s.Equal(0, res.TotalCount, "GetServers should return empty result on error")
 }
 
 func (s *PostmarkTestSuite) TestGetServer() {

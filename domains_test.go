@@ -147,3 +147,144 @@ func (s *PostmarkTestSuite) TestDeleteDomain() {
 		})
 	}
 }
+
+func (s *PostmarkTestSuite) TestGetDomains() {
+	responseJSON := `{
+  "TotalCount": 1,
+  "Domains": [
+    {
+      "Name": "postmarkapp.com",
+      "SPFVerified": true,
+      "SPFHost": "postmarkapp.com",
+      "SPFTextValue": "v=spf1 a mx include:spf.mtasv.net ~all",
+      "DKIMVerified": false,
+      "WeakDKIM": false,
+      "DKIMHost": "jan2013pm._domainkey.postmarkapp.com",
+      "DKIMTextValue": "k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDJ...",
+      "DKIMPendingHost": "20131031155228pm._domainkey.postmarkapp.com",
+      "DKIMPendingTextValue": "k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCFn...",
+      "DKIMRevokedHost": "",
+      "DKIMRevokedTextValue": "",
+      "SafeToRemoveRevokedKeyFromDNS": false,
+      "DKIMUpdateStatus": "Pending",
+      "ReturnPathDomain": "pm-bounces.postmarkapp.com",
+      "ReturnPathDomainVerified": false,
+      "ReturnPathDomainCNAMEValue": "pm.mtasv.net",
+      "ID": 1234
+    }
+  ]
+}`
+
+	s.mux.HandleFunc(pat.Get("/domains"), func(w http.ResponseWriter, req *http.Request) {
+		count := req.URL.Query().Get("count")
+		offset := req.URL.Query().Get("offset")
+		s.Equal("10", count, "GetDomains should send correct count parameter")
+		s.Equal("5", offset, "GetDomains should send correct offset parameter")
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
+	res, err := s.client.GetDomains(context.Background(), 10, 5)
+	s.Require().NoError(err, "GetDomains should not fail")
+	s.Equal(1, res.TotalCount, "GetDomains should return correct total count")
+	s.Require().Len(res.Domains, 1, "GetDomains should return correct number of domains")
+	s.Equal("postmarkapp.com", res.Domains[0].Name, "GetDomains should return correct domain name")
+}
+
+func (s *PostmarkTestSuite) TestVerifyDKIMStatus() {
+	responseJSON := `{
+  "Name": "postmarkapp.com",
+  "SPFVerified": true,
+  "SPFHost": "postmarkapp.com",
+  "SPFTextValue": "v=spf1 a mx include:spf.mtasv.net ~all",
+  "DKIMVerified": true,
+  "WeakDKIM": false,
+  "DKIMHost": "jan2013pm._domainkey.postmarkapp.com",
+  "DKIMTextValue": "k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDJ...",
+  "DKIMPendingHost": "",
+  "DKIMPendingTextValue": "",
+  "DKIMRevokedHost": "",
+  "DKIMRevokedTextValue": "",
+  "SafeToRemoveRevokedKeyFromDNS": false,
+  "DKIMUpdateStatus": "Verified",
+  "ReturnPathDomain": "pm-bounces.postmarkapp.com",
+  "ReturnPathDomainVerified": false,
+  "ReturnPathDomainCNAMEValue": "pm.mtasv.net",
+  "ID": 1234
+}`
+
+	s.mux.HandleFunc(pat.Put("/domains/:domainID/verifyDkim"), func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
+	res, err := s.client.VerifyDKIMStatus(context.Background(), 1234)
+	s.Require().NoError(err, "VerifyDKIMStatus should not fail")
+	s.Equal("postmarkapp.com", res.Name, "VerifyDKIMStatus should return correct domain name")
+	s.True(res.DKIMVerified, "VerifyDKIMStatus should verify DKIM")
+	s.Equal("Verified", res.DKIMUpdateStatus, "VerifyDKIMStatus should update DKIM status")
+}
+
+func (s *PostmarkTestSuite) TestVerifyReturnPath() {
+	responseJSON := `{
+  "Name": "postmarkapp.com",
+  "SPFVerified": true,
+  "SPFHost": "postmarkapp.com",
+  "SPFTextValue": "v=spf1 a mx include:spf.mtasv.net ~all",
+  "DKIMVerified": false,
+  "WeakDKIM": false,
+  "DKIMHost": "jan2013pm._domainkey.postmarkapp.com",
+  "DKIMTextValue": "k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDJ...",
+  "DKIMPendingHost": "",
+  "DKIMPendingTextValue": "",
+  "DKIMRevokedHost": "",
+  "DKIMRevokedTextValue": "",
+  "SafeToRemoveRevokedKeyFromDNS": false,
+  "DKIMUpdateStatus": "Pending",
+  "ReturnPathDomain": "pm-bounces.postmarkapp.com",
+  "ReturnPathDomainVerified": true,
+  "ReturnPathDomainCNAMEValue": "pm.mtasv.net",
+  "ID": 1234
+}`
+
+	s.mux.HandleFunc(pat.Put("/domains/:domainID/verifyReturnPath"), func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
+	res, err := s.client.VerifyReturnPath(context.Background(), 1234)
+	s.Require().NoError(err, "VerifyReturnPath should not fail")
+	s.Equal("postmarkapp.com", res.Name, "VerifyReturnPath should return correct domain name")
+	s.True(res.ReturnPathDomainVerified, "VerifyReturnPath should verify return path")
+}
+
+func (s *PostmarkTestSuite) TestRotateDKIM() {
+	responseJSON := `{
+  "Name": "postmarkapp.com",
+  "SPFVerified": true,
+  "SPFHost": "postmarkapp.com",
+  "SPFTextValue": "v=spf1 a mx include:spf.mtasv.net ~all",
+  "DKIMVerified": false,
+  "WeakDKIM": false,
+  "DKIMHost": "jan2013pm._domainkey.postmarkapp.com",
+  "DKIMTextValue": "k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDJ...",
+  "DKIMPendingHost": "20131031155228pm._domainkey.postmarkapp.com",
+  "DKIMPendingTextValue": "k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCFn...",
+  "DKIMRevokedHost": "",
+  "DKIMRevokedTextValue": "",
+  "SafeToRemoveRevokedKeyFromDNS": false,
+  "DKIMUpdateStatus": "Pending",
+  "ReturnPathDomain": "pm-bounces.postmarkapp.com",
+  "ReturnPathDomainVerified": false,
+  "ReturnPathDomainCNAMEValue": "pm.mtasv.net",
+  "ID": 1234
+}`
+
+	s.mux.HandleFunc(pat.Post("/domains/:domainID/rotatedkim"), func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
+	res, err := s.client.RotateDKIM(context.Background(), 1234)
+	s.Require().NoError(err, "RotateDKIM should not fail")
+	s.Equal("postmarkapp.com", res.Name, "RotateDKIM should return correct domain name")
+	s.NotEmpty(res.DKIMPendingHost, "RotateDKIM should set pending DKIM host")
+	s.NotEmpty(res.DKIMPendingTextValue, "RotateDKIM should set pending DKIM text value")
+	s.Equal("Pending", res.DKIMUpdateStatus, "RotateDKIM should set status to pending")
+}

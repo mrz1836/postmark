@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 
+	"goji.io"
 	"goji.io/pat"
 )
 
@@ -79,6 +81,26 @@ func (s *PostmarkTestSuite) TestListMessageStreams() {
 	s.Equal("outbound", res[0].ID, "MessageStreams: wrong ID for first stream")
 	s.Equal("inbound", res[1].ID, "MessageStreams: wrong ID for second stream")
 	s.Equal(transactionalDev, res[2].ID, "MessageStreams: wrong ID for third stream")
+}
+
+func (s *PostmarkTestSuite) TestListMessageStreamsError() {
+	// Create a new mux for this specific test to avoid conflicts
+	errorMux := goji.NewMux()
+	errorServer := httptest.NewServer(errorMux)
+	defer errorServer.Close()
+
+	// Create a new client for this test
+	errorClient := NewClient("server-token", "account-token")
+	errorClient.BaseURL = errorServer.URL
+
+	errorMux.HandleFunc(pat.Get("/message-streams"), func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"ErrorCode": 500, "Message": "Internal Server Error"}`))
+	})
+
+	res, err := errorClient.ListMessageStreams(context.Background(), "All", false)
+	s.Require().Error(err, "ListMessageStreams should fail")
+	s.Nil(res, "ListMessageStreams should return nil on error")
 }
 
 func (s *PostmarkTestSuite) TestGetUnknownMessageStream() {

@@ -181,17 +181,49 @@ func (s *PostmarkTestSuite) TestActivateBounce() {
 }
 
 func (s *PostmarkTestSuite) TestGetBouncedTags() {
-	responseJSON := `[
-		"tag1",
-		"tag2",
-		"tag3"]
-	`
+	tests := []struct {
+		name         string
+		responseJSON string
+		wantErr      bool
+		expectedTags []string
+	}{
+		{
+			name: "successful tags retrieval",
+			responseJSON: `[
+				"tag1",
+				"tag2",
+				"tag3"]`,
+			wantErr:      false,
+			expectedTags: []string{"tag1", "tag2", "tag3"},
+		},
+		{
+			name:         "empty tags list",
+			responseJSON: `[]`,
+			wantErr:      false,
+			expectedTags: []string{},
+		},
+		{
+			name:         "invalid JSON response",
+			responseJSON: `invalid json`,
+			wantErr:      true,
+			expectedTags: []string{},
+		},
+	}
 
-	s.mux.HandleFunc(pat.Get("/bounces/tags"), func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(responseJSON))
-	})
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			s.mux.HandleFunc(pat.Get("/bounces/tags"), func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tt.responseJSON))
+			})
 
-	res, err := s.client.GetBouncedTags(context.Background())
-	s.Require().NoError(err, "GetBouncedTags should not fail")
-	s.Len(res, 3, "GetBouncedTags should return 3 tags")
+			res, err := s.client.GetBouncedTags(context.Background())
+
+			if tt.wantErr {
+				s.Require().Error(err, "GetBouncedTags should fail")
+			} else {
+				s.Require().NoError(err, "GetBouncedTags should not fail")
+				s.Equal(tt.expectedTags, res, "GetBouncedTags should return expected tags")
+			}
+		})
+	}
 }

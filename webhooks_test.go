@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 
+	"goji.io"
 	"goji.io/pat"
 )
 
@@ -104,6 +106,26 @@ func (s *PostmarkTestSuite) TestGetWebhooks() {
 	s.Len(res, 2, "Webhook: wrong number of webhooks listed")
 	s.Equal(int(1234567), res[0].ID, "Webhook: wrong first webhook ID")
 	s.Equal(int(1234568), res[1].ID, "Webhook: wrong second webhook ID")
+}
+
+func (s *PostmarkTestSuite) TestListWebhooksError() {
+	// Create a new mux for this specific test to avoid conflicts
+	errorMux := goji.NewMux()
+	errorServer := httptest.NewServer(errorMux)
+	defer errorServer.Close()
+
+	// Create a new client for this test
+	errorClient := NewClient("server-token", "account-token")
+	errorClient.BaseURL = errorServer.URL
+
+	errorMux.HandleFunc(pat.Get("/webhooks"), func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"ErrorCode": 500, "Message": "Internal Server Error"}`))
+	})
+
+	res, err := errorClient.ListWebhooks(context.Background(), "")
+	s.Require().Error(err, "ListWebhooks should fail")
+	s.Nil(res, "ListWebhooks should return nil on error")
 }
 
 func (s *PostmarkTestSuite) TestGetWebhook() {

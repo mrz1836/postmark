@@ -185,3 +185,49 @@ func (s *PostmarkTestSuite) TestDeleteSenderSignature() {
 	err = s.client.DeleteSenderSignature(context.Background(), 1234)
 	s.Require().Error(err, "DeleteSenderSignature should have failed")
 }
+
+func (s *PostmarkTestSuite) TestResendSenderSignatureConfirmation() {
+	tests := []struct {
+		name         string
+		responseJSON string
+		wantErr      bool
+		errContains  string
+	}{
+		{
+			name: "successful resend confirmation",
+			responseJSON: `{
+				"ErrorCode": 0,
+				"Message": "Confirmation resent to 'test@example.com'"
+			}`,
+			wantErr: false,
+		},
+		{
+			name: "resend confirmation failure",
+			responseJSON: `{
+				"ErrorCode": 406,
+				"Message": "You already have a confirmed signature with this email address."
+			}`,
+			wantErr:     true,
+			errContains: "confirmed signature",
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			s.mux.HandleFunc(pat.Post("/senders/:signatureID/resend"), func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tt.responseJSON))
+			})
+
+			err := s.client.ResendSenderSignatureConfirmation(context.Background(), 1234)
+
+			if tt.wantErr {
+				s.Require().Error(err, "ResendSenderSignatureConfirmation should fail")
+				if tt.errContains != "" {
+					s.Contains(err.Error(), tt.errContains, "Error should contain expected message")
+				}
+			} else {
+				s.Require().NoError(err, "ResendSenderSignatureConfirmation should not fail")
+			}
+		})
+	}
+}
