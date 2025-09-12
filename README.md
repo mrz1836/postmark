@@ -139,31 +139,7 @@ external package it uses is the excellent `testify` suite—and that's just for
 our tests. You can drop this library into your projects without dragging along
 extra baggage.
 
-<br/
-
-<details>
-<summary><strong><code>Swap out HTTPClient for use on Google App Engine</code></strong></summary>
 <br/>
-
-```go
-package main
-
-import (
-    "github.com/mrz1836/postmark"
-    "google.golang.org/appengine"
-    "google.golang.org/appengine/urlfetch"
-)
-
-// ....
-
-client := postmark.NewClient("[SERVER-TOKEN]", "[ACCOUNT-TOKEN]")
-
-ctx := appengine.NewContext(req)
-client.HTTPClient = urlfetch.Client(ctx)
-
-// ...
-```
-</details>
 
 <details>
 <summary><strong><code>Supported API Coverage</code></strong></summary>
@@ -274,6 +250,30 @@ client.HTTPClient = urlfetch.Client(ctx)
 	* [ ] [`POST /data-removals`](https://postmarkapp.com/developer/api/data-removals-api#create-data-removal-request) - Create a data removal request
 	* [ ] [`GET /data-removals/{id}`](https://postmarkapp.com/developer/api/data-removals-api#check-data-removal-status) - Check a data removal request status
 
+</details>
+
+<details>
+<summary><strong><code>Custom HTTPClient Support</code></strong></summary>
+<br/>
+
+```go
+package main
+
+import (
+    "github.com/mrz1836/postmark"
+    "google.golang.org/appengine"
+    "google.golang.org/appengine/urlfetch"
+)
+
+// ....
+
+client := postmark.NewClient("[SERVER-TOKEN]", "[ACCOUNT-TOKEN]")
+
+ctx := appengine.NewContext(req)
+client.HTTPClient = urlfetch.Client(ctx)
+
+// ...
+```
 </details>
 
 <details>
