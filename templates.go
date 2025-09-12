@@ -22,6 +22,12 @@ type Template struct {
 	AssociatedServerID int64 `json:"AssociatedServerId"`
 	// Active: Indicates that this template may be used for sending email.
 	Active bool
+	// Alias: Optional alias for the template.
+	Alias string `json:",omitempty"`
+	// TemplateType: Type of template (Standard or Layout)
+	TemplateType string `json:",omitempty"`
+	// LayoutTemplate: Layout template alias if using a layout
+	LayoutTemplate string `json:",omitempty"`
 }
 
 // TemplateInfo is a limited set of template info returned via Index/Editing endpoints
@@ -32,6 +38,12 @@ type TemplateInfo struct {
 	Name string
 	// Active: Indicates that this template may be used for sending email.
 	Active bool
+	// Alias: Optional alias for the template.
+	Alias string `json:",omitempty"`
+	// TemplateType: Type of template (Standard or Layout)
+	TemplateType string `json:",omitempty"`
+	// LayoutTemplate: Layout template alias if using a layout
+	LayoutTemplate string `json:",omitempty"`
 }
 
 // GetTemplate fetches a specific template via TemplateID
@@ -55,11 +67,25 @@ type templatesResponse struct {
 // TemplateInfo only returns a subset of template attributes, use GetTemplate(id) to
 // retrieve all template info.
 func (client *Client) GetTemplates(ctx context.Context, count, offset int64) ([]TemplateInfo, int64, error) {
+	return client.GetTemplatesFiltered(ctx, count, offset, "", "")
+}
+
+// GetTemplatesFiltered fetches a filtered list of templates on the server
+// templateType: filter by template type ("Standard", "Layout", or "" for all)
+// layoutTemplate: filter by layout template alias (or "" for all)
+func (client *Client) GetTemplatesFiltered(ctx context.Context, count, offset int64, templateType, layoutTemplate string) ([]TemplateInfo, int64, error) {
 	res := templatesResponse{}
 
 	values := &url.Values{}
 	values.Add("count", fmt.Sprintf("%d", count))
 	values.Add("offset", fmt.Sprintf("%d", offset))
+
+	if templateType != "" {
+		values.Add("TemplateType", templateType)
+	}
+	if layoutTemplate != "" {
+		values.Add("LayoutTemplate", layoutTemplate)
+	}
 
 	err := client.doRequest(ctx, parameters{
 		Method:    "GET",
@@ -212,6 +238,48 @@ func (client *Client) SendTemplatedEmailBatch(ctx context.Context, emails []Temp
 		Path:      "email/batchWithTemplates",
 		Payload:   formatEmails,
 		TokenType: serverToken,
+	}, &res)
+	return res, err
+}
+
+// PushTemplatesRequest contains the request data for pushing templates between servers
+type PushTemplatesRequest struct {
+	// SourceServerID: ID of the server to push templates from
+	SourceServerID int64 `json:"SourceServerId"`
+	// DestinationServerID: ID of the server to push templates to
+	DestinationServerID int64 `json:"DestinationServerId"`
+	// PerformChanges: Whether to actually perform the push (true) or just simulate it (false)
+	PerformChanges bool
+}
+
+// PushedTemplate represents a template that was pushed between servers
+type PushedTemplate struct {
+	// TemplateID: ID of the template
+	TemplateID int64 `json:"TemplateId"`
+	// Name: Name of the template
+	Name string
+	// Alias: Alias of the template (if any)
+	Alias string
+	// Action: Action performed (Created, Updated, Skipped, etc.)
+	Action string
+}
+
+// PushTemplatesResponse contains the results of pushing templates between servers
+type PushTemplatesResponse struct {
+	// TotalCount: Total number of templates processed
+	TotalCount int64
+	// Templates: Details of each template that was processed
+	Templates []PushedTemplate
+}
+
+// PushTemplates pushes templates from one server to another
+func (client *Client) PushTemplates(ctx context.Context, request PushTemplatesRequest) (PushTemplatesResponse, error) {
+	res := PushTemplatesResponse{}
+	err := client.doRequest(ctx, parameters{
+		Method:    "PUT",
+		Path:      "templates/push",
+		Payload:   request,
+		TokenType: accountToken,
 	}, &res)
 	return res, err
 }

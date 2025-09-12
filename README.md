@@ -152,7 +152,7 @@ extra baggage.
 * [x] **[Templates API](https://postmarkapp.com/developer/api/templates-api)**
 	* [x] [`POST /email/withTemplate`](https://postmarkapp.com/developer/api/templates-api#email-with-template) - Send email with template ([templates.go](templates.go))
 	* [x] [`POST /email/batchWithTemplates`](https://postmarkapp.com/developer/api/templates-api#send-batch-with-templates) - Send batch with templates ([templates.go](templates.go))
-	* [ ] [`PUT /templates/push`](https://postmarkapp.com/developer/api/templates-api#push-templates) - Push templates to another server
+	* [x] [`PUT /templates/push`](https://postmarkapp.com/developer/api/templates-api#push-templates) - Push templates to another server ([templates.go](templates.go))
 	* [x] [`GET /templates/{templateIdOrAlias}`](https://postmarkapp.com/developer/api/templates-api#get-template) - Get a template ([templates.go](templates.go))
 	* [x] [`POST /templates`](https://postmarkapp.com/developer/api/templates-api#create-template) - Create a template ([templates.go](templates.go))
 	* [x] [`PUT /templates/{templateIdOrAlias}`](https://postmarkapp.com/developer/api/templates-api#edit-template) - Edit a template ([templates.go](templates.go))
