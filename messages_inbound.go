@@ -76,7 +76,7 @@ type inboundMessagesResponse struct {
 // GetInboundMessages fetches a list of inbound message on the server
 // It returns a InboundMessage slice, the total message count, and any error that occurred
 // http://developer.postmarkapp.com/developer-api-messages.html#inbound-message-search
-func (client *Client) GetInboundMessages(ctx context.Context, count int64, offset int64, options map[string]interface{}) ([]InboundMessage, int64, error) {
+func (client *Client) GetInboundMessages(ctx context.Context, count, offset int64, options map[string]interface{}) ([]InboundMessage, int64, error) {
 	res := inboundMessagesResponse{}
 
 	values := &url.Values{}

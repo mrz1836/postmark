@@ -93,7 +93,7 @@ type outboundMessagesResponse struct {
 // It returns a OutboundMessage slice, the total message count, and any error that occurred
 // Note: that a single open is bound to a single recipient, so if the same message was sent to two recipients and both of them opened it, that will be represented by two entries in this array.
 // Available options: http://developer.postmarkapp.com/developer-api-messages.html#outbound-message-search
-func (client *Client) GetOutboundMessages(ctx context.Context, count int64, offset int64, options map[string]interface{}) ([]OutboundMessage, int64, error) {
+func (client *Client) GetOutboundMessages(ctx context.Context, count, offset int64, options map[string]interface{}) ([]OutboundMessage, int64, error) {
 	res := outboundMessagesResponse{}
 
 	values := &url.Values{}
@@ -141,7 +141,7 @@ type outboundMessageOpensResponse struct {
 // It returns an Open slice, the total opens count, and any error that occurred
 // To get opens for a specific message, use GetOutboundMessageOpens()
 // Available options: http://developer.postmarkapp.com/developer-api-messages.html#message-opens
-func (client *Client) GetOutboundMessagesOpens(ctx context.Context, count int64, offset int64, options map[string]interface{}) ([]Open, int64, error) {
+func (client *Client) GetOutboundMessagesOpens(ctx context.Context, count, offset int64, options map[string]interface{}) ([]Open, int64, error) {
 	res := outboundMessageOpensResponse{}
 
 	values := &url.Values{}
@@ -162,7 +162,7 @@ func (client *Client) GetOutboundMessagesOpens(ctx context.Context, count int64,
 
 // GetOutboundMessageOpens fetches a list of opens for a specific message
 // It returns an Open slice, the total opens count, and any error that occurred
-func (client *Client) GetOutboundMessageOpens(ctx context.Context, messageID string, count int64, offset int64) ([]Open, int64, error) {
+func (client *Client) GetOutboundMessageOpens(ctx context.Context, messageID string, count, offset int64) ([]Open, int64, error) {
 	res := outboundMessageOpensResponse{}
 
 	values := &url.Values{}

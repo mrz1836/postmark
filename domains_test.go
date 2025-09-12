@@ -74,7 +74,6 @@ func TestCreateDomain(t *testing.T) {
 		Name:             "example.com",
 		ReturnPathDomain: "pm-bounces.example.com",
 	})
-
 	if err != nil {
 		t.Fatalf("CreateDomain: %s", err.Error())
 	}

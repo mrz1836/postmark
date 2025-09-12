@@ -99,7 +99,6 @@ func TestGetInboundMessage(t *testing.T) {
 	}
 
 	_, err = res.Time()
-
 	if err != nil {
 		t.Fatalf("GetInboundMessage: date couldn't be parsed: %s", res.Date)
 	}

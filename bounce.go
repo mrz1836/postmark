@@ -79,7 +79,7 @@ type bouncesResponse struct {
 // GetBounces returns bounces for the server
 // It returns a Bounce slice, the total bounce count, and any error that occurred
 // Available options: http://developer.postmarkapp.com/developer-api-bounce.html#bounces
-func (client *Client) GetBounces(ctx context.Context, count int64, offset int64, options map[string]interface{}) ([]Bounce, int64, error) {
+func (client *Client) GetBounces(ctx context.Context, count, offset int64, options map[string]interface{}) ([]Bounce, int64, error) {
 	res := bouncesResponse{}
 
 	values := &url.Values{}
