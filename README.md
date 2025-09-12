@@ -174,8 +174,8 @@ extra baggage.
 	* [x] [`GET /messages/outbound/{messageid}/dump`](https://postmarkapp.com/developer/api/messages-api#outbound-message-dump) - Get outbound message dump ([messages_outbound.go](messages_outbound.go))
 	* [x] [`GET /messages/outbound/opens`](https://postmarkapp.com/developer/api/messages-api#message-opens) - Get message opens ([messages_outbound.go](messages_outbound.go))
 	* [x] [`GET /messages/outbound/opens/{messageid}`](https://postmarkapp.com/developer/api/messages-api#opens-for-single-message) - Get opens for single message ([messages_outbound.go](messages_outbound.go))
-	* [ ] [`GET /messages/outbound/clicks`](https://postmarkapp.com/developer/api/messages-api#message-clicks) - Get message clicks
-	* [ ] [`GET /messages/outbound/clicks/{messageid}`](https://postmarkapp.com/developer/api/messages-api#clicks-for-single-message) - Get clicks for single message
+	* [x] [`GET /messages/outbound/clicks`](https://postmarkapp.com/developer/api/messages-api#message-clicks) - Get message clicks ([messages_outbound.go](messages_outbound.go))
+	* [x] [`GET /messages/outbound/clicks/{messageid}`](https://postmarkapp.com/developer/api/messages-api#clicks-for-single-message) - Get clicks for single message ([messages_outbound.go](messages_outbound.go))
 	* [x] [`GET /messages/inbound`](https://postmarkapp.com/developer/api/messages-api#inbound-message-search) - Search inbound messages ([messages_inbound.go](messages_inbound.go))
 	* [x] [`GET /messages/inbound/{messageid}/details`](https://postmarkapp.com/developer/api/messages-api#inbound-message-details) - Get inbound message details ([messages_inbound.go](messages_inbound.go))
 	* [x] [`PUT /messages/inbound/{messageid}/bypass`](https://postmarkapp.com/developer/api/messages-api#bypass-inbound-message-rules) - Bypass inbound message rules ([messages_inbound.go](messages_inbound.go))

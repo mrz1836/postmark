@@ -81,14 +81,40 @@ func main() {
 	}
 	log.Printf("Templated email sent with ID: %s", emailResponse.MessageID)
 
-	// Example 6: Get filtered templates (only Layout templates)
+	// Example 6: Get message clicks with filtering
+	clicks, clickCount, err := client.GetOutboundMessagesClicks(context.Background(), 100, 0, map[string]interface{}{
+		"tag":           "welcome-template",
+		"recipient":     "john.doe@example.com",
+		"client_name":   "Chrome",
+		"platform":      "Desktop",
+		"messagestream": "outbound",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Found %d clicks out of %d total", len(clicks), clickCount)
+	for _, click := range clicks {
+		log.Printf("Click: %s clicked %s using %s", click.Recipient, click.OriginalLink, click.Client["Name"])
+	}
+
+	// Example 7: Get clicks for a specific message
+	messageClicks, messageClickCount, err := client.GetOutboundMessageClicks(context.Background(), emailResponse.MessageID, 50, 0)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Message %s has %d clicks", emailResponse.MessageID, messageClickCount)
+	for _, click := range messageClicks {
+		log.Printf("Click at %s: %s from %s", click.ReceivedAt.Format("2006-01-02 15:04:05"), click.OriginalLink, click.Geo["City"])
+	}
+
+	// Example 8: Get filtered templates (only Layout templates)
 	templates, count, err := client.GetTemplatesFiltered(context.Background(), 50, 0, "Layout", "")
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Printf("Found %d layout templates out of %d total", len(templates), count)
 
-	// Example 7: Push templates between servers (requires account token)
+	// Example 9: Push templates between servers (requires account token)
 	pushRequest := postmark.PushTemplatesRequest{
 		SourceServerID:      1001, // Replace with actual server IDs
 		DestinationServerID: 1002,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"testing"
 )
 
 func (s *PostmarkTestSuite) TestGetOutboundMessage() {
@@ -219,4 +220,194 @@ func (s *PostmarkTestSuite) TestGetOutboundMessageOpens() {
 	s.Require().NoError(err)
 
 	s.Equal(int64(1), total, "GetOutboundMessageOpens: wrong total")
+}
+
+func (s *PostmarkTestSuite) TestGetOutboundMessagesClicks() {
+	responseJSON := `{
+	  "TotalCount": 1,
+	  "Clicks": [
+		{
+		  "RecordType": "Click",
+		  "ClickLocation": "HTML",
+		  "Client": {
+			"Name": "Chrome 34.0.1847.131",
+			"Company": "Google Inc.",
+			"Family": "Chrome"
+		  },
+		  "OS": {
+			"Name": "OS X 10.7 Lion",
+			"Company": "Apple Computer, Inc.",
+			"Family": "OS X"
+		  },
+		  "Platform": "Desktop",
+		  "UserAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/34.0.1847.131 Safari/537.36",
+		  "OriginalLink": "http://example.com/click-me",
+		  "Geo": {
+			"CountryISOCode": "RS",
+			"Country": "Serbia",
+			"RegionISOCode": "VO",
+			"Region": "Vojvodina",
+			"City": "Novi Sad",
+			"Zip": "21000",
+			"Coords": "45.2517,19.8369",
+			"IP": "188.2.95.4"
+		  },
+		  "MessageID": "927e56d4-dc66-4c01-a0be-645b4b6f5fd7",
+		  "MessageStream": "outbound",
+		  "ReceivedAt": "2014-02-14T11:13:10.8054242-05:00",
+		  "Tag": "Invitation",
+		  "Recipient": "john.doe@yahoo.com"
+		}
+	  ]
+	}`
+
+	s.mux.Get("/messages/outbound/clicks", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
+	clicks, count, err := s.client.GetOutboundMessagesClicks(context.Background(), 100, 0, map[string]interface{}{
+		"tag":       "Invitation",
+		"recipient": "john.doe@yahoo.com",
+	})
+	s.Require().NoError(err)
+
+	s.EqualValues(1, count)
+	s.Len(clicks, 1)
+
+	click := clicks[0]
+	s.Equal("927e56d4-dc66-4c01-a0be-645b4b6f5fd7", click.MessageID, "GetOutboundMessagesClicks: wrong MessageID")
+	s.Equal("HTML", click.ClickLocation, "GetOutboundMessagesClicks: wrong ClickLocation")
+	s.Equal("Chrome 34.0.1847.131", click.Client["Name"], "GetOutboundMessagesClicks: wrong Client Name")
+	s.Equal("Google Inc.", click.Client["Company"], "GetOutboundMessagesClicks: wrong Client Company")
+	s.Equal("Chrome", click.Client["Family"], "GetOutboundMessagesClicks: wrong Client Family")
+	s.Equal("OS X 10.7 Lion", click.OS["Name"], "GetOutboundMessagesClicks: wrong OS Name")
+	s.Equal("http://example.com/click-me", click.OriginalLink, "GetOutboundMessagesClicks: wrong OriginalLink")
+	s.Equal("john.doe@yahoo.com", click.Recipient, "GetOutboundMessagesClicks: wrong Recipient")
+	s.Equal("Invitation", click.Tag, "GetOutboundMessagesClicks: wrong Tag")
+}
+
+func (s *PostmarkTestSuite) TestGetOutboundMessageClicks() {
+	responseJSON := `{
+	  "TotalCount": 2,
+	  "Clicks": [
+		{
+		  "RecordType": "Click",
+		  "ClickLocation": "HTML",
+		  "Client": {
+			"Name": "Chrome 34.0.1847.131",
+			"Company": "Google Inc.",
+			"Family": "Chrome"
+		  },
+		  "OS": {
+			"Name": "OS X 10.7 Lion",
+			"Company": "Apple Computer, Inc.",
+			"Family": "OS X"
+		  },
+		  "Platform": "Desktop",
+		  "UserAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/34.0.1847.131 Safari/537.36",
+		  "OriginalLink": "http://example.com/click-me",
+		  "Geo": {
+			"CountryISOCode": "RS",
+			"Country": "Serbia",
+			"RegionISOCode": "VO",
+			"Region": "Vojvodina",
+			"City": "Novi Sad",
+			"Zip": "21000",
+			"Coords": "45.2517,19.8369",
+			"IP": "188.2.95.4"
+		  },
+		  "MessageID": "927e56d4-dc66-4c01-a0be-645b4b6f5fd7",
+		  "MessageStream": "outbound",
+		  "ReceivedAt": "2014-02-14T11:13:10.8054242-05:00",
+		  "Tag": "Invitation",
+		  "Recipient": "john.doe@yahoo.com"
+		},
+		{
+		  "RecordType": "Click",
+		  "ClickLocation": "Text",
+		  "Client": {
+			"Name": "Safari 7.0.3",
+			"Company": "Apple Computer, Inc.",
+			"Family": "Safari"
+		  },
+		  "OS": {
+			"Name": "OS X 10.9 Mavericks",
+			"Company": "Apple Computer, Inc.",
+			"Family": "OS X"
+		  },
+		  "Platform": "Desktop",
+		  "UserAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_3) AppleWebKit/537.75.14 (KHTML, like Gecko) Version/7.0.3 Safari/537.75.14",
+		  "OriginalLink": "http://example.com/another-link",
+		  "Geo": {
+			"CountryISOCode": "US",
+			"Country": "United States",
+			"RegionISOCode": "CA",
+			"Region": "California",
+			"City": "San Francisco",
+			"Zip": "94102",
+			"Coords": "37.7749,-122.4194",
+			"IP": "192.168.1.1"
+		  },
+		  "MessageID": "927e56d4-dc66-4c01-a0be-645b4b6f5fd7",
+		  "MessageStream": "outbound",
+		  "ReceivedAt": "2014-02-14T11:15:10.8054242-05:00",
+		  "Tag": "Invitation",
+		  "Recipient": "jane.doe@gmail.com"
+		}
+	  ]
+	}`
+
+	s.mux.Get("/messages/outbound/clicks/927e56d4-dc66-4c01-a0be-645b4b6f5fd7", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
+	clicks, count, err := s.client.GetOutboundMessageClicks(context.Background(), "927e56d4-dc66-4c01-a0be-645b4b6f5fd7", 10, 0)
+	s.Require().NoError(err)
+
+	s.EqualValues(2, count)
+	s.Len(clicks, 2)
+
+	htmlClick := clicks[0]
+	s.Equal("927e56d4-dc66-4c01-a0be-645b4b6f5fd7", htmlClick.MessageID, "GetOutboundMessageClicks: wrong MessageID for HTML click")
+	s.Equal("HTML", htmlClick.ClickLocation, "GetOutboundMessageClicks: wrong ClickLocation for HTML click")
+	s.Equal("http://example.com/click-me", htmlClick.OriginalLink, "GetOutboundMessageClicks: wrong OriginalLink for HTML click")
+
+	textClick := clicks[1]
+	s.Equal("Text", textClick.ClickLocation, "GetOutboundMessageClicks: wrong ClickLocation for Text click")
+	s.Equal("http://example.com/another-link", textClick.OriginalLink, "GetOutboundMessageClicks: wrong OriginalLink for Text click")
+	s.Equal("jane.doe@gmail.com", textClick.Recipient, "GetOutboundMessageClicks: wrong Recipient for Text click")
+}
+
+// Benchmark for GetOutboundMessagesClicks
+func BenchmarkGetOutboundMessagesClicks(b *testing.B) {
+	ctx := context.Background()
+	count := int64(100)
+	offset := int64(0)
+	options := map[string]interface{}{
+		"tag":       "Invitation",
+		"recipient": "john.doe@example.com",
+		"platform":  "Desktop",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = count
+		_ = offset
+		_ = options
+	}
+}
+
+// Benchmark for GetOutboundMessageClicks
+func BenchmarkGetOutboundMessageClicks(b *testing.B) {
+	ctx := context.Background()
+	messageID := "927e56d4-dc66-4c01-a0be-645b4b6f5fd7"
+	count := int64(50)
+	offset := int64(0)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = messageID
+		_ = count
+		_ = offset
+	}
 }

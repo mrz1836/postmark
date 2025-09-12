@@ -128,13 +128,48 @@ type Open struct {
 	Platform string
 	// ReadSeconds - Shows the reading time in seconds
 	ReadSeconds int64
-	// Geo - Contains IP of the recipient’s machine where the email was opened and the information based on that IP - geo coordinates (Coordinates) and country, region, city and zip.
+	// Geo - Contains IP of the recipient's machine where the email was opened and the information based on that IP - geo coordinates (Coordinates) and country, region, city and zip.
 	Geo map[string]string
+}
+
+// Click represents a single email click.
+type Click struct {
+	// RecordType - Record type
+	RecordType string
+	// ClickLocation - Where link was clicked (e.g., "HTML")
+	ClickLocation string
+	// Client - Shows the email client (or browser) used to click the link.
+	Client map[string]string
+	// OS - Shows the operating system used to click the link.
+	OS map[string]string
+	// Platform - Shows what platform was used to click the link.
+	Platform string
+	// UserAgent - Full user-agent header passed by the client software to Postmark.
+	UserAgent string
+	// OriginalLink - The original link that was clicked.
+	OriginalLink string
+	// Geo - Contains IP of the recipient's machine where the link was clicked and the information based on that IP - geo coordinates and country, region, city and zip.
+	Geo map[string]string
+	// MessageID - Unique ID of the message.
+	MessageID string
+	// MessageStream - Message stream the click originated from.
+	MessageStream string
+	// ReceivedAt - Timestamp when the click occurred.
+	ReceivedAt time.Time
+	// Tag - Tag associated with the message.
+	Tag string
+	// Recipient - Email address of the recipient who clicked.
+	Recipient string
 }
 
 type outboundMessageOpensResponse struct {
 	TotalCount int64
 	Opens      []Open
+}
+
+type outboundMessageClicksResponse struct {
+	TotalCount int64
+	Clicks     []Click
 }
 
 // GetOutboundMessagesOpens fetches a list of opens on the server
@@ -175,4 +210,44 @@ func (client *Client) GetOutboundMessageOpens(ctx context.Context, messageID str
 		TokenType: serverToken,
 	}, &res)
 	return res.Opens, res.TotalCount, err
+}
+
+// GetOutboundMessagesClicks fetches a list of clicks on the server
+// It returns a Click slice, the total clicks count, and any error that occurred
+// To get clicks for a specific message, use GetOutboundMessageClicks()
+// Available options: http://developer.postmarkapp.com/developer-api-messages.html#message-clicks
+func (client *Client) GetOutboundMessagesClicks(ctx context.Context, count, offset int64, options map[string]interface{}) ([]Click, int64, error) {
+	res := outboundMessageClicksResponse{}
+
+	values := &url.Values{}
+	values.Add("count", fmt.Sprintf("%d", count))
+	values.Add("offset", fmt.Sprintf("%d", offset))
+
+	for k, v := range options {
+		values.Add(k, fmt.Sprintf("%v", v))
+	}
+
+	err := client.doRequest(ctx, parameters{
+		Method:    "GET",
+		Path:      fmt.Sprintf("messages/outbound/clicks?%s", values.Encode()),
+		TokenType: serverToken,
+	}, &res)
+	return res.Clicks, res.TotalCount, err
+}
+
+// GetOutboundMessageClicks fetches a list of clicks for a specific message
+// It returns a Click slice, the total clicks count, and any error that occurred
+func (client *Client) GetOutboundMessageClicks(ctx context.Context, messageID string, count, offset int64) ([]Click, int64, error) {
+	res := outboundMessageClicksResponse{}
+
+	values := &url.Values{}
+	values.Add("count", fmt.Sprintf("%d", count))
+	values.Add("offset", fmt.Sprintf("%d", offset))
+
+	err := client.doRequest(ctx, parameters{
+		Method:    "GET",
+		Path:      fmt.Sprintf("messages/outbound/clicks/%s?%s", messageID, values.Encode()),
+		TokenType: serverToken,
+	}, &res)
+	return res.Clicks, res.TotalCount, err
 }
