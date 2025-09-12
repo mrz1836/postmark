@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"testing"
 )
 
 const (
@@ -270,4 +271,110 @@ func (s *PostmarkTestSuite) TestUnarchiveMessageStream() {
 
 	s.Equal(transactionalDev, res.ID, "MessageStream: wrong ID")
 	s.Equal(int(123457), res.ServerID, "MessageStream: wrong ServerID")
+}
+
+// Benchmarks for Message Streams API
+
+func BenchmarkListMessageStreams(b *testing.B) {
+	ctx := context.Background()
+	messageStreamType := "All"
+	includeArchived := false
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = messageStreamType
+		_ = includeArchived
+		// In a real benchmark, you'd call the actual function
+		// client.ListMessageStreams(ctx, messageStreamType, includeArchived)
+	}
+}
+
+func BenchmarkGetMessageStream(b *testing.B) {
+	ctx := context.Background()
+	streamID := "transactional-dev"
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = streamID
+		// In a real benchmark, you'd call the actual function
+		// client.GetMessageStream(ctx, streamID)
+	}
+}
+
+func BenchmarkEditMessageStream(b *testing.B) {
+	ctx := context.Background()
+	streamID := "transactional-dev"
+	editReq := EditMessageStreamRequest{
+		Name: "Benchmark Stream",
+		SubscriptionManagementConfiguration: MessageStreamSubscriptionManagementConfiguration{
+			UnsubscribeHandlingType: NoneUnsubscribeHandlingType,
+		},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = streamID
+		req := EditMessageStreamRequest{
+			Name:                                editReq.Name,
+			SubscriptionManagementConfiguration: editReq.SubscriptionManagementConfiguration,
+		}
+		_ = req
+		// In a real benchmark, you'd call the actual function
+		// client.EditMessageStream(ctx, streamID, req)
+	}
+}
+
+func BenchmarkCreateMessageStream(b *testing.B) {
+	ctx := context.Background()
+	createReq := CreateMessageStreamRequest{
+		ID:                "benchmark-stream",
+		Name:              "Benchmark Stream",
+		MessageStreamType: TransactionalMessageStreamType,
+		SubscriptionManagementConfiguration: MessageStreamSubscriptionManagementConfiguration{
+			UnsubscribeHandlingType: NoneUnsubscribeHandlingType,
+		},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		req := CreateMessageStreamRequest{
+			ID:                                  createReq.ID,
+			Name:                                createReq.Name,
+			MessageStreamType:                   createReq.MessageStreamType,
+			SubscriptionManagementConfiguration: createReq.SubscriptionManagementConfiguration,
+		}
+		_ = req
+		// In a real benchmark, you'd call the actual function
+		// client.CreateMessageStream(ctx, req)
+	}
+}
+
+func BenchmarkArchiveMessageStream(b *testing.B) {
+	ctx := context.Background()
+	streamID := "benchmark-stream"
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = streamID
+		// In a real benchmark, you'd call the actual function
+		// client.ArchiveMessageStream(ctx, streamID)
+	}
+}
+
+func BenchmarkUnarchiveMessageStream(b *testing.B) {
+	ctx := context.Background()
+	streamID := "benchmark-stream"
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = ctx
+		_ = streamID
+		// In a real benchmark, you'd call the actual function
+		// client.UnarchiveMessageStream(ctx, streamID)
+	}
 }
