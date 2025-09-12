@@ -246,9 +246,9 @@ extra baggage.
 	* [ ] [`POST /triggers/inboundrules`](https://postmarkapp.com/developer/api/inbound-rules-triggers-api#create-inbound-rule-trigger) - Create an inbound rule trigger
 	* [ ] [`DELETE /triggers/inboundrules/{triggerid}`](https://postmarkapp.com/developer/api/inbound-rules-triggers-api#delete-trigger) - Delete a single trigger
 
-* [ ] **[Data Removal API](https://postmarkapp.com/developer/api/data-removals-api)**
-	* [ ] [`POST /data-removals`](https://postmarkapp.com/developer/api/data-removals-api#create-data-removal-request) - Create a data removal request
-	* [ ] [`GET /data-removals/{id}`](https://postmarkapp.com/developer/api/data-removals-api#check-data-removal-status) - Check a data removal request status
+* [x] **[Data Removal API](https://postmarkapp.com/developer/api/data-removals-api)**
+	* [x] [`POST /data-removals`](https://postmarkapp.com/developer/api/data-removals-api#create-data-removal-request) - Create a data removal request ([data_removals.go](data_removals.go))
+	* [x] [`GET /data-removals/{id}`](https://postmarkapp.com/developer/api/data-removals-api#check-data-removal-status) - Check a data removal request status ([data_removals.go](data_removals.go))
 
 </details>
 
