@@ -1,0 +1,55 @@
+# Gitpod workspace configuration for postmark
+# Uses magex for build automation and development tasks
+# This creates a one-click development environment for contributors
+
+image:
+  name: gitpod/workspace-go:latest
+
+tasks:
+  - name: setup-and-test
+    init: |
+      echo "🚀 Setting up postmark development environment..."
+      echo "📦 Installing MAGE-X build tool..."
+      go install github.com/mrz1836/mage-x/cmd/magex@latest
+
+      echo "📥 Downloading dependencies..."
+      magex deps:download
+
+      echo "🔧 Initial build..."
+      magex build
+
+      echo "✅ Running initial tests..."
+      magex test
+
+    command: |
+      echo "==============================================="
+      echo "🎯 Welcome to postmark development!"
+      echo "==============================================="
+      echo ""
+      echo "🛠️  Available magex commands:"
+      echo "  magex test       - Run all tests"
+      echo "  magex lint       - Run linters"
+      echo "  magex format:fix - Format code"
+      echo "  magex build      - Build the project"
+      echo "  magex help       - List all available commands"
+      echo ""
+      echo "📖 Quick start:"
+      echo "  1. Try: magex test"
+      echo "  2. Make your changes"
+      echo "  3. Run: magex format:fix && magex lint && magex test"
+      echo "  4. Commit and push your changes"
+      echo ""
+      echo "💡 For more help: magex help"
+      echo "==============================================="
+
+ports:
+  - port: 8080
+    onOpen: ignore
+    description: Application (if needed)
+
+vscode:
+  extensions:
+    - golang.go
+    - github.vscode-pull-request-github
+    - streetsidesoftware.code-spell-checker
+    - eamodio.gitlens
