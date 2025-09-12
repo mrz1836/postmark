@@ -1,0 +1,13 @@
+# Enforce Unix-style line endings for all files
+* text=auto eol=lf
+
+# Go source files
+*.go text
+*.mod text
+*.sum text
+
+# Treat binary files appropriately
+*.png binary
+*.jpg binary
+*.gif binary
+*.svg text

@@ -8,17 +8,29 @@ codecov:
 coverage:
   status:
     patch: false
-  range: 70..90 # The first number represents red, and the second represents green
+  range: 70..90 # The First number represents red, and the second represents green
   # (default is 70..100)
   round: down # up, down, or nearest
   precision: 2 # Number of decimal places, between 0 and 5
+
+# Flag Management - Simple carryforward for everything
+# ----------------------
+flag_management:
+  default_rules:
+    carryforward: true # This keeps coverage from previous uploads
+    statuses:
+      - type: project
+        target: auto
+        threshold: 2%
 
 # Ignoring Paths
 # --------------
 # which folders/files to ignore
 ignore:
-  - "*/.make/.*"
-  - "*/.github/.*"
+  - ".github/**"
+  - ".mage-cache/**"
+  - ".vscode/**"
+  - "bin/**"
   - "examples/**"
 
 # Parsers

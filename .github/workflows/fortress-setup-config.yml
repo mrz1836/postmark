@@ -432,10 +432,6 @@ jobs:
 
             # Check for codecov token requirement
             if [ "$PROVIDER" == "codecov" ]; then
-              if [ "${{ env.CODECOV_TOKEN_REQUIRED }}" == "true" ] && [ -z "${{ secrets.CODECOV_TOKEN }}" ]; then
-                echo "⚠️ WARNING: CODECOV_TOKEN_REQUIRED is true but CODECOV_TOKEN secret may not be set"
-                echo "   Codecov upload may fail without a token for private repositories"
-              fi
               echo "✅ Coverage provider: Codecov"
             else
               echo "✅ Coverage provider: Internal (go-coverage with GitHub Pages)"

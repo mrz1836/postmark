@@ -259,8 +259,4 @@ func TestComplexWorkflow(t *testing.T) {
 
     // ... test implementation
 }
-```ired method is skipped
-
-    // ... test implementation
-}
 ```

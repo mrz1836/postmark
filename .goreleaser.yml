@@ -6,23 +6,13 @@ version: 2
 
 before:
   hooks:
-    - make all
-snapshot:
-  name_template: "{{ .Tag }}"
+    - sh -c 'if [ "$SKIP_GORELEASER_TESTS" = "true" ]; then echo "Skipping tests (SKIP_GORELEASER_TESTS=true)"; else magex test; fi'
 changelog:
   sort: asc
   filters:
     exclude:
-      - '^.github:'
-      - '^.vscode:'
-      - '^test:'
-
-# ---------------------------
-# Publishers
-# ---------------------------
-# publishers:
-#  - name: "Publish GoDocs"
-#    cmd: make godocs
+      - "^.vscode:"
+      - "^test:"
 
 # ---------------------------
 # Builder
@@ -37,22 +27,39 @@ builds:
     skip: true
 
 # ---------------------------
-# GitHub Release
+# Archives
+# ---------------------------
+archives:
+  - id: postmark
+    name_template: >-
+      {{- .ProjectName }}_{{- .Version }}_{{- .Os }}_{{- .Arch }}
+    files:
+      - LICENSE
+      - README.md
+
+# ---------------------------
+# Checksum
+# ---------------------------
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+# ---------------------------
+# Github Release
 # ---------------------------
 release:
-  prerelease: false
+  prerelease: "false"
   name_template: "Release v{{.Version}}"
 
 # ---------------------------
 # Announce
 # ---------------------------
 announce:
-
   # See more at: https://goreleaser.com/customization/announce/#slack
   slack:
     enabled: false
-    message_template: '{{ .ProjectName }} {{ .Tag }} is out! Changelog: https://github.com/mrz1836/{{ .ProjectName }}/releases/tag/{{ .Tag }}'
-    channel: '#test_slack'
+    message_template: "{{ .ProjectName }} {{ .Tag }} is out! Changelog: https://github.com/{{ .GitOwner }}/{{ .ProjectName }}/releases/tag/{{ .Tag }}"
+    channel: "#test_slack"
     # username: ''
     # icon_emoji: ''
     # icon_url: ''
@@ -60,18 +67,18 @@ announce:
   # See more at: https://goreleaser.com/customization/announce/#twitter
   twitter:
     enabled: false
-    message_template: '{{ .ProjectName }} {{ .Tag }} is out!'
+    message_template: "{{ .ProjectName }} {{ .Tag }} is out!"
 
   # See more at: https://goreleaser.com/customization/announce/#discord
   discord:
     enabled: false
-    message_template: '{{ .ProjectName }} {{ .Tag }} is out!'
+    message_template: "{{ .ProjectName }} {{ .Tag }} is out!"
     # Defaults to `GoReleaser`
-    author: ''
+    author: ""
     # Defaults to `3888754` - the grey-ish from goreleaser
-    color: ''
+    color: ""
     # Defaults to `https://goreleaser.com/static/avatar.png`
-    icon_url: ''
+    icon_url: ""
 
   # See more at: https://goreleaser.com/customization/announce/#reddit
   reddit:
@@ -81,6 +88,6 @@ announce:
     # Username for your Reddit account
     username: ""
     # Defaults to `{{ .GitURL }}/releases/tag/{{ .Tag }}`
-    # url_template: 'https://github.com/mrz1836/{{ .ProjectName }}/releases/tag/{{ .Tag }}'
+    # url_template: 'https://github.com/{{ .GitOwner }}/{{ .ProjectName }}/releases/tag/{{ .Tag }}'
     # Defaults to `{{ .ProjectName }} {{ .Tag }} is out!`
-    title_template: '{{ .ProjectName }} {{ .Tag }} is out!'
+    title_template: "{{ .ProjectName }} {{ .Tag }} is out!"
