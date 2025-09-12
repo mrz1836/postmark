@@ -3,8 +3,6 @@ package postmark
 import (
 	"context"
 	"net/http"
-
-	"goji.io/pat"
 )
 
 func (s *PostmarkTestSuite) TestGetDomain() {
@@ -29,7 +27,7 @@ func (s *PostmarkTestSuite) TestGetDomain() {
   "ID": 1234
 }`
 
-	s.mux.HandleFunc(pat.Get("/domains/:domainID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/domains/:domainID", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -60,7 +58,7 @@ func (s *PostmarkTestSuite) TestCreateDomain() {
   "ID": 1234
 }`
 
-	s.mux.HandleFunc(pat.Post("/domains"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Post("/domains", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -95,7 +93,7 @@ func (s *PostmarkTestSuite) TestEditDomain() {
   "ID": 1234
 }`
 
-	s.mux.HandleFunc(pat.Put("/domains/:domainID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Put("/domains/:domainID", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -133,7 +131,7 @@ func (s *PostmarkTestSuite) TestDeleteDomain() {
 
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
-			s.mux.HandleFunc(pat.Delete("/domains/:domainID"), func(w http.ResponseWriter, _ *http.Request) {
+			s.mux.Delete("/domains/:domainID", func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write([]byte(tt.responseJSON))
 			})
 
@@ -175,7 +173,7 @@ func (s *PostmarkTestSuite) TestGetDomains() {
   ]
 }`
 
-	s.mux.HandleFunc(pat.Get("/domains"), func(w http.ResponseWriter, req *http.Request) {
+	s.mux.Get("/domains", func(w http.ResponseWriter, req *http.Request) {
 		count := req.URL.Query().Get("count")
 		offset := req.URL.Query().Get("offset")
 		s.Equal("10", count, "GetDomains should send correct count parameter")
@@ -212,7 +210,7 @@ func (s *PostmarkTestSuite) TestVerifyDKIMStatus() {
   "ID": 1234
 }`
 
-	s.mux.HandleFunc(pat.Put("/domains/:domainID/verifyDkim"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Put("/domains/:domainID/verifyDkim", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -245,7 +243,7 @@ func (s *PostmarkTestSuite) TestVerifyReturnPath() {
   "ID": 1234
 }`
 
-	s.mux.HandleFunc(pat.Put("/domains/:domainID/verifyReturnPath"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Put("/domains/:domainID/verifyReturnPath", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -277,7 +275,7 @@ func (s *PostmarkTestSuite) TestRotateDKIM() {
   "ID": 1234
 }`
 
-	s.mux.HandleFunc(pat.Post("/domains/:domainID/rotatedkim"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Post("/domains/:domainID/rotatedkim", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 

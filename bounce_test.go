@@ -3,8 +3,6 @@ package postmark
 import (
 	"context"
 	"net/http"
-
-	"goji.io/pat"
 )
 
 func (s *PostmarkTestSuite) TestGetDeliveryStats() {
@@ -47,7 +45,7 @@ func (s *PostmarkTestSuite) TestGetDeliveryStats() {
 		}
 	]}`
 
-	s.mux.HandleFunc(pat.Get("/deliverystats"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/deliverystats", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -95,7 +93,7 @@ func (s *PostmarkTestSuite) TestGetBounces() {
 		  ]
 	}`
 
-	s.mux.HandleFunc(pat.Get("/bounces"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/bounces", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -125,7 +123,7 @@ func (s *PostmarkTestSuite) TestGetBounce() {
 	  "Content": "Return-Path: <>\r\nReceived: …"
 	}`
 
-	s.mux.HandleFunc(pat.Get("/bounces/692560173"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/bounces/692560173", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -139,7 +137,7 @@ func (s *PostmarkTestSuite) TestGetBounceDump() {
 	  "Body": "..."
 	}`
 
-	s.mux.HandleFunc(pat.Get("/bounces/692560173/dump"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/bounces/692560173/dump", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -170,7 +168,7 @@ func (s *PostmarkTestSuite) TestActivateBounce() {
 		}
 	}`
 
-	s.mux.HandleFunc(pat.Put("/bounces/692560173/activate"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Put("/bounces/692560173/activate", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -212,7 +210,7 @@ func (s *PostmarkTestSuite) TestGetBouncedTags() {
 
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
-			s.mux.HandleFunc(pat.Get("/bounces/tags"), func(w http.ResponseWriter, _ *http.Request) {
+			s.mux.Get("/bounces/tags", func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write([]byte(tt.responseJSON))
 			})
 

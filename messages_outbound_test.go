@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-
-	"goji.io/pat"
 )
 
 func (s *PostmarkTestSuite) TestGetOutboundMessage() {
@@ -62,7 +60,7 @@ func (s *PostmarkTestSuite) TestGetOutboundMessage() {
 	  ]
 	}`
 
-	s.mux.HandleFunc(pat.Get("/messages/outbound/07311c54-0687-4ab9-b034-b54b5bad88ba/details"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/messages/outbound/07311c54-0687-4ab9-b034-b54b5bad88ba/details", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -77,7 +75,7 @@ func (s *PostmarkTestSuite) TestGetOutboundMessageDump() {
 
 	responseJSON := fmt.Sprintf(`{"Body": "%s"}`, dump)
 
-	s.mux.HandleFunc(pat.Get("/messages/outbound/07311c54-0687-4ab9-b034-b54b5bad88ba/dump"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/messages/outbound/07311c54-0687-4ab9-b034-b54b5bad88ba/dump", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -112,7 +110,7 @@ func (s *PostmarkTestSuite) TestGetOutboundMessages() {
 		]
 	}`
 
-	s.mux.HandleFunc(pat.Get("/messages/outbound"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/messages/outbound", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -165,7 +163,7 @@ func (s *PostmarkTestSuite) TestGetOutboundMessagesOpens() {
 		]
 
 	}`
-	s.mux.HandleFunc(pat.Get("/messages/outbound/opens"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/messages/outbound/opens", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -213,7 +211,7 @@ func (s *PostmarkTestSuite) TestGetOutboundMessageOpens() {
 	  ]
 	}`
 
-	s.mux.HandleFunc(pat.Get("/messages/outbound/opens/927e56d4-dc66-4070-bbf0-1db76c2ae14b"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/messages/outbound/opens/927e56d4-dc66-4070-bbf0-1db76c2ae14b", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 

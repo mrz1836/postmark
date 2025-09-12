@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-
-	"goji.io"
-	"goji.io/pat"
 )
 
 const (
@@ -62,7 +59,7 @@ func (s *PostmarkTestSuite) TestListMessageStreams() {
 		"TotalCount": 3
 	}`
 
-	s.mux.HandleFunc(pat.Get("/message-streams"), func(w http.ResponseWriter, req *http.Request) {
+	s.mux.Get("/message-streams", func(w http.ResponseWriter, req *http.Request) {
 		s.Equal("false", req.URL.Query().Get("IncludeArchivedStreams"), "MessageStreams: wrong IncludeArchivedStreams value")
 		s.Equal("All", req.URL.Query().Get("MessageStreamType"), "MessageStreams: wrong messageStreamType value")
 		_, _ = w.Write([]byte(responseJSON))
@@ -85,7 +82,7 @@ func (s *PostmarkTestSuite) TestListMessageStreams() {
 
 func (s *PostmarkTestSuite) TestListMessageStreamsError() {
 	// Create a new mux for this specific test to avoid conflicts
-	errorMux := goji.NewMux()
+	errorMux := NewTestRouter()
 	errorServer := httptest.NewServer(errorMux)
 	defer errorServer.Close()
 
@@ -93,7 +90,7 @@ func (s *PostmarkTestSuite) TestListMessageStreamsError() {
 	errorClient := NewClient("server-token", "account-token")
 	errorClient.BaseURL = errorServer.URL
 
-	errorMux.HandleFunc(pat.Get("/message-streams"), func(w http.ResponseWriter, _ *http.Request) {
+	errorMux.Get("/message-streams", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"ErrorCode": 500, "Message": "Internal Server Error"}`))
 	})
@@ -106,7 +103,7 @@ func (s *PostmarkTestSuite) TestListMessageStreamsError() {
 func (s *PostmarkTestSuite) TestGetUnknownMessageStream() {
 	responseJSON := `{"ErrorCode":1226,"Message":"The message stream for the provided 'ID' was not found."}`
 
-	s.mux.HandleFunc(pat.Get("/message-streams/unknown"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/message-streams/unknown", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		_, _ = w.Write([]byte(responseJSON))
 	})
@@ -135,7 +132,7 @@ func (s *PostmarkTestSuite) TestGetMessageStream() {
 		}
 	}`
 
-	s.mux.HandleFunc(pat.Get("/message-streams/broadcasts"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/message-streams/broadcasts", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -171,7 +168,7 @@ func (s *PostmarkTestSuite) TestEditMessageStream() {
 		},
 	}
 
-	s.mux.HandleFunc(pat.Patch("/message-streams/transactional-dev"), func(w http.ResponseWriter, req *http.Request) {
+	s.mux.Patch("/message-streams/transactional-dev", func(w http.ResponseWriter, req *http.Request) {
 		var body EditMessageStreamRequest
 		err := json.NewDecoder(req.Body).Decode(&body)
 		s.Require().NoError(err, "Failed to read request body")
@@ -218,7 +215,7 @@ func (s *PostmarkTestSuite) TestCreateMessageStream() {
 		},
 	}
 
-	s.mux.HandleFunc(pat.Post("/message-streams"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Post("/message-streams", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -237,7 +234,7 @@ func (s *PostmarkTestSuite) TestArchiveMessageStream() {
 		"ExpectedPurgeDate": "2020-08-30T12:30:00.00-04:00"
 	}`
 
-	s.mux.HandleFunc(pat.Post("/message-streams/transactional-dev/archive"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Post("/message-streams/transactional-dev/archive", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -264,7 +261,7 @@ func (s *PostmarkTestSuite) TestUnarchiveMessageStream() {
 		}
 	}`
 
-	s.mux.HandleFunc(pat.Post("/message-streams/transactional-dev/unarchive"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Post("/message-streams/transactional-dev/unarchive", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 

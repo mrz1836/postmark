@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-
-	"goji.io"
-	"goji.io/pat"
 )
 
 func (s *PostmarkTestSuite) TestGetServers() {
@@ -69,7 +66,7 @@ func (s *PostmarkTestSuite) TestGetServers() {
   ]
 }`
 
-	s.mux.HandleFunc(pat.Get("/servers"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/servers", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -82,7 +79,7 @@ func (s *PostmarkTestSuite) TestGetServers() {
 
 func (s *PostmarkTestSuite) TestGetServersError() {
 	// Create a new mux for this specific test to avoid conflicts
-	errorMux := goji.NewMux()
+	errorMux := NewTestRouter()
 	errorServer := httptest.NewServer(errorMux)
 	defer errorServer.Close()
 
@@ -90,7 +87,7 @@ func (s *PostmarkTestSuite) TestGetServersError() {
 	errorClient := NewClient("server-token", "account-token")
 	errorClient.BaseURL = errorServer.URL
 
-	errorMux.HandleFunc(pat.Get("/servers"), func(w http.ResponseWriter, _ *http.Request) {
+	errorMux.Get("/servers", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"ErrorCode": 500, "Message": "Internal Server Error"}`))
 	})
@@ -122,7 +119,7 @@ func (s *PostmarkTestSuite) TestGetServer() {
 	  "InboundSpamThreshold": 0
 	}`
 
-	s.mux.HandleFunc(pat.Get("/servers/:serverID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/servers/:serverID", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -156,7 +153,7 @@ func (s *PostmarkTestSuite) TestCreateServer() {
   "EnableSmtpApiErrorHooks": false
 }`
 
-	s.mux.HandleFunc(pat.Post("/servers"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Post("/servers", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -201,7 +198,7 @@ func (s *PostmarkTestSuite) TestEditServer() {
 	  "InboundSpamThreshold": 10
 	}`
 
-	s.mux.HandleFunc(pat.Put("/servers/:serverID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Put("/servers/:serverID", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -219,7 +216,7 @@ func (s *PostmarkTestSuite) TestDeleteServer() {
 	  "Message": "Server 1234 removed."
 	}`
 
-	s.mux.HandleFunc(pat.Delete("/servers/:serverID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Delete("/servers/:serverID", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 

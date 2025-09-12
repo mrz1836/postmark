@@ -3,8 +3,6 @@ package postmark
 import (
 	"context"
 	"net/http"
-
-	"goji.io/pat"
 )
 
 func (s *PostmarkTestSuite) TestGetInboundMessage() {
@@ -84,7 +82,7 @@ func (s *PostmarkTestSuite) TestGetInboundMessage() {
 		  "Status": "Blocked"
 	}`
 
-	s.mux.HandleFunc(pat.Get("/messages/inbound/cc5727a0-ea30-4e79-baea-aa43c9628ac4/details"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/messages/inbound/cc5727a0-ea30-4e79-baea-aa43c9628ac4/details", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -130,7 +128,7 @@ func (s *PostmarkTestSuite) TestGetInboundMessages() {
 	   ]
 	}`
 
-	s.mux.HandleFunc(pat.Get("/messages/inbound"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/messages/inbound", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -151,7 +149,7 @@ func (s *PostmarkTestSuite) TestBypassInboundMessage() {
 		"Message": "Successfully bypassed message: 792a3e9d-0078-40df-a6b0-fc78f87bf277."
 	}`
 
-	s.mux.HandleFunc(pat.Put("/messages/inbound/792a3e9d-0078-40df-a6b0-fc78f87bf277/bypass"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Put("/messages/inbound/792a3e9d-0078-40df-a6b0-fc78f87bf277/bypass", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -178,7 +176,7 @@ func (s *PostmarkTestSuite) TestRetryInboundMessage() {
 	  "Message": "Successfully rescheduled failed message: 041e3d29-737d-491e-9a13-a94d3rjkjka13."
 	}`
 
-	s.mux.HandleFunc(pat.Put("/messages/inbound/041e3d29-737d-491e-9a13-a94d3rjkjka13/retry"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Put("/messages/inbound/041e3d29-737d-491e-9a13-a94d3rjkjka13/retry", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 

@@ -3,8 +3,6 @@ package postmark
 import (
 	"context"
 	"net/http"
-
-	"goji.io/pat"
 )
 
 func (s *PostmarkTestSuite) TestGetSenderSignatures() {
@@ -30,7 +28,7 @@ func (s *PostmarkTestSuite) TestGetSenderSignatures() {
 	]
   }`
 
-	s.mux.HandleFunc(pat.Get("/senders"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/senders", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -67,7 +65,7 @@ func (s *PostmarkTestSuite) TestGetSenderSignature() {
   "ConfirmationPersonalNote": "This is a note visible to the recipient to provide context of what Postmark is."
 }`
 
-	s.mux.HandleFunc(pat.Get("/senders/:signatureID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/senders/:signatureID", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -104,7 +102,7 @@ func (s *PostmarkTestSuite) TestCreateSenderSignature() {
   "ConfirmationPersonalNote": "This is a note visible to the recipient to provide context of what Postmark is."
 }`
 
-	s.mux.HandleFunc(pat.Post("/senders"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Post("/senders", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -147,7 +145,7 @@ func (s *PostmarkTestSuite) TestEditSenderSignature() {
   "ConfirmationPersonalNote": "This is a note visible to the recipient to provide context of what Postmark is."
 }`
 
-	s.mux.HandleFunc(pat.Put("/senders/:signatureID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Put("/senders/:signatureID", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -168,7 +166,7 @@ func (s *PostmarkTestSuite) TestDeleteSenderSignature() {
 	  "Message": "SenderSignature 1234 removed."
 	}`
 
-	s.mux.HandleFunc(pat.Delete("/senders/:signatureID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Delete("/senders/:signatureID", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -214,7 +212,7 @@ func (s *PostmarkTestSuite) TestResendSenderSignatureConfirmation() {
 
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
-			s.mux.HandleFunc(pat.Post("/senders/:signatureID/resend"), func(w http.ResponseWriter, _ *http.Request) {
+			s.mux.Post("/senders/:signatureID/resend", func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write([]byte(tt.responseJSON))
 			})
 

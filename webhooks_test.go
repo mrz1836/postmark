@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-
-	"goji.io"
-	"goji.io/pat"
 )
 
 const (
@@ -96,7 +93,7 @@ func (s *PostmarkTestSuite) TestGetWebhooks() {
 		]
 	}`
 
-	s.mux.HandleFunc(pat.Get("/webhooks"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/webhooks", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -110,7 +107,7 @@ func (s *PostmarkTestSuite) TestGetWebhooks() {
 
 func (s *PostmarkTestSuite) TestListWebhooksError() {
 	// Create a new mux for this specific test to avoid conflicts
-	errorMux := goji.NewMux()
+	errorMux := NewTestRouter()
 	errorServer := httptest.NewServer(errorMux)
 	defer errorServer.Close()
 
@@ -118,7 +115,7 @@ func (s *PostmarkTestSuite) TestListWebhooksError() {
 	errorClient := NewClient("server-token", "account-token")
 	errorClient.BaseURL = errorServer.URL
 
-	errorMux.HandleFunc(pat.Get("/webhooks"), func(w http.ResponseWriter, _ *http.Request) {
+	errorMux.Get("/webhooks", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"ErrorCode": 500, "Message": "Internal Server Error"}`))
 	})
@@ -168,7 +165,7 @@ func (s *PostmarkTestSuite) TestGetWebhook() {
 		}
 	}`
 
-	s.mux.HandleFunc(pat.Get("/webhooks/:webhookID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/webhooks/:webhookID", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -208,7 +205,7 @@ func (s *PostmarkTestSuite) TestCreateWebhook() {
 		},
 	}
 
-	s.mux.HandleFunc(pat.Post("/webhooks"), func(w http.ResponseWriter, req *http.Request) {
+	s.mux.Post("/webhooks", func(w http.ResponseWriter, req *http.Request) {
 		decoder := json.NewDecoder(req.Body)
 
 		var res Webhook
@@ -263,7 +260,7 @@ func (s *PostmarkTestSuite) TestEditWebhook() {
 		},
 	}
 
-	s.mux.HandleFunc(pat.Put("/webhooks/:webhookID"), func(w http.ResponseWriter, req *http.Request) {
+	s.mux.Put("/webhooks/:webhookID", func(w http.ResponseWriter, req *http.Request) {
 		decoder := json.NewDecoder(req.Body)
 
 		var res Webhook
@@ -297,7 +294,7 @@ func (s *PostmarkTestSuite) TestDeleteWebhook() {
 	  "Message": "Webhook 1234 removed."
 	}`
 
-	s.mux.HandleFunc(pat.Delete("/webhooks/:webhookID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Delete("/webhooks/:webhookID", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 

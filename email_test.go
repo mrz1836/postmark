@@ -3,8 +3,6 @@ package postmark
 import (
 	"context"
 	"net/http"
-
-	"goji.io/pat"
 )
 
 func getTestEmail() Email {
@@ -74,7 +72,7 @@ func (s *PostmarkTestSuite) TestSendEmail() {
 
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
-			s.mux.HandleFunc(pat.Post("/email"), func(w http.ResponseWriter, _ *http.Request) {
+			s.mux.Post("/email", func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write([]byte(tt.responseJSON))
 			})
 
@@ -108,7 +106,7 @@ func (s *PostmarkTestSuite) TestSendEmailBatch() {
 	  }
 	]`
 
-	s.mux.HandleFunc(pat.Post("/email/batch"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Post("/email/batch", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 

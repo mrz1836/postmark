@@ -3,8 +3,6 @@ package postmark
 import (
 	"context"
 	"net/http"
-
-	"goji.io/pat"
 )
 
 func (s *PostmarkTestSuite) TestGetOutboundStats() {
@@ -23,7 +21,7 @@ func (s *PostmarkTestSuite) TestGetOutboundStats() {
 	  "WithReadTimeRecorded": 10
 	}`
 
-	s.mux.HandleFunc(pat.Get("/stats/outbound"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/stats/outbound", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -59,7 +57,7 @@ func (s *PostmarkTestSuite) TestGetSentCounts() {
 	  "Sent": 615
 	}`
 
-	s.mux.HandleFunc(pat.Get("/stats/outbound/sends"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/stats/outbound/sends", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -101,7 +99,7 @@ func (s *PostmarkTestSuite) TestGetBounceCounts() {
 	  "Transient": 16
 	}`
 
-	s.mux.HandleFunc(pat.Get("/stats/outbound/bounces"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/stats/outbound/bounces", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -134,7 +132,7 @@ func (s *PostmarkTestSuite) TestGetSpamCounts() {
 	  "SpamComplaint": 10
 	}`
 
-	s.mux.HandleFunc(pat.Get("/stats/outbound/spam"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/stats/outbound/spam", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -175,7 +173,7 @@ func (s *PostmarkTestSuite) TestGetTrackedCounts() {
 	  "Tracked": 111
 	}`
 
-	s.mux.HandleFunc(pat.Get("/stats/outbound/tracked"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/stats/outbound/tracked", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -222,7 +220,7 @@ func (s *PostmarkTestSuite) TestGetOpenCounts() {
 	  "Unique": 26
 	}`
 
-	s.mux.HandleFunc(pat.Get("/stats/outbound/opens"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/stats/outbound/opens", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -261,7 +259,7 @@ func (s *PostmarkTestSuite) TestGetPlatformCounts() {
 		"WebMail": 2
 	}`
 
-	s.mux.HandleFunc(pat.Get("/stats/outbound/platform"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/stats/outbound/platform", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 

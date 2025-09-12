@@ -8,20 +8,18 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"goji.io"
-	"goji.io/pat"
 )
 
 type PostmarkTestSuite struct {
 	suite.Suite
 
-	mux    *goji.Mux
+	mux    *TestRouter
 	server *httptest.Server
 	client *Client
 }
 
 func (s *PostmarkTestSuite) SetupSuite() {
-	s.mux = goji.NewMux()
+	s.mux = NewTestRouter()
 	s.server = httptest.NewServer(s.mux)
 
 	transport := &http.Transport{
@@ -49,7 +47,7 @@ func (s *PostmarkTestSuite) TestDoRequestWithPayload() {
 	responseJSON := `{"message": "success"}`
 	payload := map[string]string{"test": "data"}
 
-	s.mux.HandleFunc(pat.Post("/test"), func(w http.ResponseWriter, req *http.Request) {
+	s.mux.Post("/test", func(w http.ResponseWriter, req *http.Request) {
 		s.Equal("application/json", req.Header.Get("Content-Type"))
 		s.Equal("application/json", req.Header.Get("Accept"))
 		s.Equal("server-token", req.Header.Get("X-Postmark-Server-Token"))
@@ -71,7 +69,7 @@ func (s *PostmarkTestSuite) TestDoRequestWithPayload() {
 func (s *PostmarkTestSuite) TestDoRequestWithAccountToken() {
 	responseJSON := `{"message": "success"}`
 
-	s.mux.HandleFunc(pat.Get("/account-test"), func(w http.ResponseWriter, req *http.Request) {
+	s.mux.Get("/account-test", func(w http.ResponseWriter, req *http.Request) {
 		s.Equal("account-token", req.Header.Get("X-Postmark-Account-Token"))
 		s.Empty(req.Header.Get("X-Postmark-Server-Token"))
 		_, _ = w.Write([]byte(responseJSON))
@@ -89,7 +87,7 @@ func (s *PostmarkTestSuite) TestDoRequestWithAccountToken() {
 }
 
 func (s *PostmarkTestSuite) TestDoRequestHTTPError() {
-	s.mux.HandleFunc(pat.Get("/error-test"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/error-test", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"ErrorCode": 500, "Message": "Internal Server Error"}`))
 	})
@@ -120,7 +118,7 @@ func (s *PostmarkTestSuite) TestDoRequestContextCancellation() {
 }
 
 func (s *PostmarkTestSuite) TestDoRequestInvalidJSON() {
-	s.mux.HandleFunc(pat.Get("/invalid-json"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/invalid-json", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`invalid json`))
 	})
 

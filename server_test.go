@@ -3,8 +3,6 @@ package postmark
 import (
 	"context"
 	"net/http"
-
-	"goji.io/pat"
 )
 
 func (s *PostmarkTestSuite) TestGetCurrentServer() {
@@ -33,7 +31,7 @@ func (s *PostmarkTestSuite) TestGetCurrentServer() {
 			"InboundSpamThreshold": 0
 	}`
 
-	s.mux.HandleFunc(pat.Get("/server"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/server", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -68,7 +66,7 @@ func (s *PostmarkTestSuite) TestEditCurrentServer() {
   "InboundHash": "yourhash",
   "InboundSpamThreshold": 10
 }`
-	s.mux.HandleFunc(pat.Put("/server"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Put("/server", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 

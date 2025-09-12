@@ -3,8 +3,6 @@ package postmark
 import (
 	"context"
 	"net/http"
-
-	"goji.io/pat"
 )
 
 func (s *PostmarkTestSuite) TestGetTemplate() {
@@ -18,7 +16,7 @@ func (s *PostmarkTestSuite) TestGetTemplate() {
 		"Active": false
 	}`
 
-	s.mux.HandleFunc(pat.Get("/templates/:templateID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/templates/:templateID", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -45,7 +43,7 @@ func (s *PostmarkTestSuite) TestGetTemplates() {
 		]
 	}`
 
-	s.mux.HandleFunc(pat.Get("/templates"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/templates", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -63,7 +61,7 @@ func (s *PostmarkTestSuite) TestCreateTemplate() {
 		"Active": true
 	}`
 
-	s.mux.HandleFunc(pat.Post("/templates"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Post("/templates", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -85,7 +83,7 @@ func (s *PostmarkTestSuite) TestEditTemplate() {
 		  "Active": true
 	}`
 
-	s.mux.HandleFunc(pat.Put("/templates/:templateID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Put("/templates/:templateID", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -106,7 +104,7 @@ func (s *PostmarkTestSuite) TestDeleteTemplate() {
 	  "Message": "Template 1234 removed."
 	}`
 
-	s.mux.HandleFunc(pat.Delete("/templates/:templateID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Delete("/templates/:templateID", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -162,7 +160,7 @@ func (s *PostmarkTestSuite) TestValidateTemplate() {
 		}
 	}`
 
-	s.mux.HandleFunc(pat.Post("/templates/validate"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Post("/templates/validate", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -228,7 +226,7 @@ func (s *PostmarkTestSuite) TestSendTemplatedEmail() {
 		"Message": "OK"
 	}`
 
-	s.mux.HandleFunc(pat.Post("/email/withTemplate"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Post("/email/withTemplate", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -255,7 +253,7 @@ func (s *PostmarkTestSuite) TestSendTemplatedBatch() {
 	}
 	]`
 
-	s.mux.HandleFunc(pat.Post("/email/batchWithTemplates"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Post("/email/batchWithTemplates", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 

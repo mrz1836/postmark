@@ -3,8 +3,6 @@ package postmark
 import (
 	"context"
 	"net/http"
-
-	"goji.io/pat"
 )
 
 func (s *PostmarkTestSuite) TestGetSuppressions() {
@@ -31,7 +29,7 @@ func (s *PostmarkTestSuite) TestGetSuppressions() {
 		]
 	  }`
 
-	s.mux.HandleFunc(pat.Get("/message-streams/:StreamID/suppressions/dump"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/message-streams/:StreamID/suppressions/dump", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -52,7 +50,7 @@ func (s *PostmarkTestSuite) TestGetSuppressions() {
 		]
 	  }`
 
-	s.mux.HandleFunc(pat.Get("/message-streams/:StreamID/suppressions/dump"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Get("/message-streams/:StreamID/suppressions/dump", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -90,7 +88,7 @@ func (s *PostmarkTestSuite) TestCreateSuppressions() {
 		]
 	  }`
 
-	s.mux.HandleFunc(pat.Post("/message-streams/:StreamID/suppressions"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Post("/message-streams/:StreamID/suppressions", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
@@ -116,7 +114,7 @@ func (s *PostmarkTestSuite) TestDeleteSuppressions() {
 		]
 	  }`
 
-	s.mux.HandleFunc(pat.Post("/message-streams/:StreamID/suppressions/delete"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.Post("/message-streams/:StreamID/suppressions/delete", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
