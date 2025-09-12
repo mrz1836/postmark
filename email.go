@@ -2,6 +2,7 @@ package postmark
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -60,6 +61,9 @@ type Attachment struct {
 	ContentID string `json:",omitempty"`
 }
 
+// ErrEmailFailed is returned when email sending fails
+var ErrEmailFailed = errors.New("email send failed")
+
 // EmailResponse holds info in response to a send/send-batch request
 // Even if API request comes back successful, check the ErrorCode to see if there might be a delivery problem
 type EmailResponse struct {
@@ -86,14 +90,14 @@ func (client *Client) SendEmail(ctx context.Context, email Email) (EmailResponse
 	}, &res)
 
 	if res.ErrorCode != 0 {
-		return res, fmt.Errorf(`%v %s`, res.ErrorCode, res.Message)
+		return res, fmt.Errorf("%w: %v %s", ErrEmailFailed, res.ErrorCode, res.Message)
 	}
 
 	return res, err
 }
 
 // SendEmailBatch sends multiple emails together
-// Note, individual emails in the batch can error, so it would be wise to
+// Individual emails in the batch can error, so it would be wise to
 // range over the responses and sniff for errors
 func (client *Client) SendEmailBatch(ctx context.Context, emails []Email) ([]EmailResponse, error) {
 	var res []EmailResponse

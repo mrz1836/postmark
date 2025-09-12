@@ -14,6 +14,7 @@ type BaseEvent struct {
 // DeliveryEvent represents a successful email delivery webhook event
 type DeliveryEvent struct {
 	BaseEvent
+
 	ServerID    int       `json:"ServerID"`
 	Recipient   string    `json:"Recipient"`
 	DeliveredAt time.Time `json:"DeliveredAt"`
@@ -23,6 +24,7 @@ type DeliveryEvent struct {
 // OpenEvent represents an email open webhook event
 type OpenEvent struct {
 	BaseEvent
+
 	FirstOpen   bool       `json:"FirstOpen"`
 	Recipient   string     `json:"Recipient"`
 	ReceivedAt  time.Time  `json:"ReceivedAt"`
@@ -37,6 +39,7 @@ type OpenEvent struct {
 // ClickEvent represents a link click webhook event
 type ClickEvent struct {
 	BaseEvent
+
 	Recipient     string     `json:"Recipient"`
 	ReceivedAt    time.Time  `json:"ReceivedAt"`
 	Platform      string     `json:"Platform"`
@@ -51,6 +54,7 @@ type ClickEvent struct {
 // BounceEvent represents an email bounce webhook event
 type BounceEvent struct {
 	BaseEvent
+
 	ID            int       `json:"ID"`
 	Type          string    `json:"Type"`
 	TypeCode      int       `json:"TypeCode"`
@@ -71,6 +75,7 @@ type BounceEvent struct {
 // SpamComplaintEvent represents a spam complaint webhook event
 type SpamComplaintEvent struct {
 	BaseEvent
+
 	ID            int       `json:"ID"`
 	Type          string    `json:"Type"`
 	TypeCode      int       `json:"TypeCode"`
@@ -91,6 +96,7 @@ type SpamComplaintEvent struct {
 // SubscriptionChangeEvent represents a subscription change webhook event
 type SubscriptionChangeEvent struct {
 	BaseEvent
+
 	ServerID          int       `json:"ServerID"`
 	ChangedAt         time.Time `json:"ChangedAt"`
 	Recipient         string    `json:"Recipient"`

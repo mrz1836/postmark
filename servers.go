@@ -156,6 +156,7 @@ func (s Server) MarshalJSON() ([]byte, error) {
 
 	return json.Marshal(&struct {
 		Aux
+
 		TrackLinks   string `json:"TrackLinks"`
 		DeliveryType string `json:"DeliveryType"`
 	}{

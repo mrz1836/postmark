@@ -8,35 +8,37 @@ import (
 	"goji.io/pat"
 )
 
-var testEmail = Email{
-	From:     "sender@example.com",
-	To:       "receiver@example.com",
-	Cc:       "copied@example.com",
-	Bcc:      "blank-copied@example.com",
-	Subject:  "Test",
-	Tag:      "Invitation",
-	HTMLBody: "<b>Hello</b>",
-	TextBody: "Hello",
-	ReplyTo:  "reply@example.com",
-	Headers: []Header{
-		{
-			Name:  "CUSTOM-HEADER",
-			Value: "value",
+func getTestEmail() Email {
+	return Email{
+		From:     "sender@example.com",
+		To:       "receiver@example.com",
+		Cc:       "copied@example.com",
+		Bcc:      "blank-copied@example.com",
+		Subject:  "Test",
+		Tag:      "Invitation",
+		HTMLBody: "<b>Hello</b>",
+		TextBody: "Hello",
+		ReplyTo:  "reply@example.com",
+		Headers: []Header{
+			{
+				Name:  "CUSTOM-HEADER",
+				Value: "value",
+			},
 		},
-	},
-	TrackOpens: true,
-	Attachments: []Attachment{
-		{
-			Name:        "readme.txt",
-			Content:     "dGVzdCBjb250ZW50",
-			ContentType: "text/plain",
+		TrackOpens: true,
+		Attachments: []Attachment{
+			{
+				Name:        "readme.txt",
+				Content:     "dGVzdCBjb250ZW50",
+				ContentType: "text/plain",
+			},
+			{
+				Name:        "report.pdf",
+				Content:     "dGVzdCBjb250ZW50",
+				ContentType: "application/octet-stream",
+			},
 		},
-		{
-			Name:        "report.pdf",
-			Content:     "dGVzdCBjb250ZW50",
-			ContentType: "application/octet-stream",
-		},
-	},
+	}
 }
 
 func TestSendEmail(t *testing.T) {
@@ -53,7 +55,7 @@ func TestSendEmail(t *testing.T) {
 	})
 
 	// Success
-	res, err := client.SendEmail(context.Background(), testEmail)
+	res, err := client.SendEmail(context.Background(), getTestEmail())
 	if err != nil {
 		t.Fatalf("SendEmail: %s", err.Error())
 	}
@@ -71,7 +73,7 @@ func TestSendEmail(t *testing.T) {
 		"Message": "Sender signature not confirmed"
 	}`
 
-	_, err = client.SendEmail(context.Background(), testEmail)
+	_, err = client.SendEmail(context.Background(), getTestEmail())
 
 	if err == nil {
 		t.Fatalf("SendEmail should have failed")
@@ -100,6 +102,7 @@ func TestSendEmailBatch(t *testing.T) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
+	testEmail := getTestEmail()
 	res, err := client.SendEmailBatch(context.Background(), []Email{testEmail, testEmail})
 	if err != nil {
 		t.Fatalf("SendEmailBatch: %s", err.Error())

@@ -52,7 +52,7 @@ type templatesResponse struct {
 
 // GetTemplates fetches a list of templates on the server
 // It returns a TemplateInfo slice, the total template count, and any error that occurred
-// Note: TemplateInfo only returns a subset of template attributes, use GetTemplate(id) to
+// TemplateInfo only returns a subset of template attributes, use GetTemplate(id) to
 // retrieve all template info.
 func (client *Client) GetTemplates(ctx context.Context, count, offset int64) ([]TemplateInfo, int64, error) {
 	res := templatesResponse{}

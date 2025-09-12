@@ -26,6 +26,7 @@ type WebhookTriggerEnabled struct {
 // enabled/disabled and optionally include message contents.
 type WebhookTriggerIncContent struct {
 	WebhookTriggerEnabled
+
 	// Specifies whether the full content of the email is included in webhook POST.
 	IncludeContent bool `json:"IncludeContent"`
 }
@@ -33,6 +34,7 @@ type WebhookTriggerIncContent struct {
 // WebhookTriggerOpen holds configuration for the Open webhook.
 type WebhookTriggerOpen struct {
 	WebhookTriggerEnabled
+
 	PostFirstOpenOnly bool `json:"PostFirstOpenOnly"`
 }
 

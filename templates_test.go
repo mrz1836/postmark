@@ -208,41 +208,43 @@ func TestValidateTemplate(t *testing.T) {
 	}
 }
 
-var testTemplatedEmail = TemplatedEmail{
-	TemplateID: 1234,
-	TemplateModel: map[string]interface{}{
-		"user_name": "John Smith",
-		"company": map[string]interface{}{
-			"name": "ACME",
+func getTestTemplatedEmail() TemplatedEmail {
+	return TemplatedEmail{
+		TemplateID: 1234,
+		TemplateModel: map[string]interface{}{
+			"user_name": "John Smith",
+			"company": map[string]interface{}{
+				"name": "ACME",
+			},
 		},
-	},
-	InlineCSS: true,
-	From:      "sender@example.com",
-	To:        "receiver@example.com",
-	Cc:        "copied@example.com",
-	Bcc:       "blank-copied@example.com",
-	Tag:       "Invitation",
-	ReplyTo:   "reply@example.com",
-	Headers: []Header{
-		{
-			Name:  "CUSTOM-HEADER",
-			Value: "value",
+		InlineCSS: true,
+		From:      "sender@example.com",
+		To:        "receiver@example.com",
+		Cc:        "copied@example.com",
+		Bcc:       "blank-copied@example.com",
+		Tag:       "Invitation",
+		ReplyTo:   "reply@example.com",
+		Headers: []Header{
+			{
+				Name:  "CUSTOM-HEADER",
+				Value: "value",
+			},
 		},
-	},
-	TrackOpens: true,
-	TrackLinks: "HtmlAndText",
-	Attachments: []Attachment{
-		{
-			Name:        "readme.txt",
-			Content:     "dGVzdCBjb250ZW50",
-			ContentType: "text/plain",
+		TrackOpens: true,
+		TrackLinks: "HtmlAndText",
+		Attachments: []Attachment{
+			{
+				Name:        "readme.txt",
+				Content:     "dGVzdCBjb250ZW50",
+				ContentType: "text/plain",
+			},
+			{
+				Name:        "report.pdf",
+				Content:     "dGVzdCBjb250ZW50",
+				ContentType: "application/octet-stream",
+			},
 		},
-		{
-			Name:        "report.pdf",
-			Content:     "dGVzdCBjb250ZW50",
-			ContentType: "application/octet-stream",
-		},
-	},
+	}
 }
 
 func TestSendTemplatedEmail(t *testing.T) {
@@ -258,7 +260,7 @@ func TestSendTemplatedEmail(t *testing.T) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.SendTemplatedEmail(context.Background(), testTemplatedEmail)
+	res, err := client.SendTemplatedEmail(context.Background(), getTestTemplatedEmail())
 	if err != nil {
 		t.Fatalf("SendTemplatedEmail: %s", err.Error())
 	}
@@ -289,6 +291,7 @@ func TestSendTemplatedBatch(t *testing.T) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
+	testTemplatedEmail := getTestTemplatedEmail()
 	res, err := client.SendTemplatedEmailBatch(context.Background(), []TemplatedEmail{testTemplatedEmail, testTemplatedEmail})
 	if err != nil {
 		t.Fatalf("SendTemplatedBatch: %s", err.Error())

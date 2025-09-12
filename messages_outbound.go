@@ -91,7 +91,7 @@ type outboundMessagesResponse struct {
 
 // GetOutboundMessages fetches a list of outbound message on the server
 // It returns a OutboundMessage slice, the total message count, and any error that occurred
-// Note: that a single open is bound to a single recipient, so if the same message was sent to two recipients and both of them opened it, that will be represented by two entries in this array.
+// A single open is bound to a single recipient, so if the same message was sent to two recipients and both of them opened it, that will be represented by two entries in this array.
 // Available options: http://developer.postmarkapp.com/developer-api-messages.html#outbound-message-search
 func (client *Client) GetOutboundMessages(ctx context.Context, count, offset int64, options map[string]interface{}) ([]OutboundMessage, int64, error) {
 	res := outboundMessagesResponse{}

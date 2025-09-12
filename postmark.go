@@ -61,13 +61,13 @@ func (client *Client) doRequest(ctx context.Context, opts parameters, dst interf
 	if req, err = http.NewRequestWithContext(
 		ctx, opts.Method, url, nil,
 	); err != nil {
-		return
+		return err
 	}
 
 	if opts.Payload != nil {
 		var payloadData []byte
 		if payloadData, err = json.Marshal(opts.Payload); err != nil {
-			return
+			return err
 		}
 		req.Body = io.NopCloser(bytes.NewBuffer(payloadData))
 		req.GetBody = func() (io.ReadCloser, error) {
@@ -87,7 +87,7 @@ func (client *Client) doRequest(ctx context.Context, opts parameters, dst interf
 
 	var res *http.Response
 	if res, err = client.HTTPClient.Do(req); err != nil {
-		return
+		return err
 	}
 
 	defer func() {
@@ -95,14 +95,14 @@ func (client *Client) doRequest(ctx context.Context, opts parameters, dst interf
 	}()
 	var body []byte
 	if body, err = io.ReadAll(res.Body); err != nil {
-		return
+		return err
 	}
 
 	if res.StatusCode >= http.StatusBadRequest {
 		// If the status code is not a success, attempt to unmarshall the body into the APIError struct.
 		var apiErr APIError
 		if err = json.Unmarshal(body, &apiErr); err != nil {
-			return
+			return err
 		}
 		return apiErr
 	}

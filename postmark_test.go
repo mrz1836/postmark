@@ -9,12 +9,12 @@ import (
 )
 
 var (
-	tMux    = goji.NewMux()
-	tServer *httptest.Server
-	client  *Client
+	tMux    = goji.NewMux()  //nolint:gochecknoglobals // test infrastructure
+	tServer *httptest.Server //nolint:gochecknoglobals // test infrastructure
+	client  *Client          //nolint:gochecknoglobals // test infrastructure
 )
 
-func init() { //nolint:gochecknoinits // need to refactor this in the future
+func init() { //nolint:gochecknoinits // test infrastructure
 	tServer = httptest.NewServer(tMux)
 
 	transport := &http.Transport{
