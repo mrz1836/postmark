@@ -130,7 +130,10 @@ func main() {
 		log.Printf("Template '%s' would be %s", pushedTemplate.Name, pushedTemplate.Action)
 	}
 
-	// Example 8: Bounce API examples
+	// Example 10: Message Streams API examples
+	demonstrateMessageStreamsAPI(client)
+
+	// Example 11: Bounce API examples
 	demonstrateBounceAPI(client)
 }
 
@@ -202,4 +205,82 @@ func processBounceDetails(client *postmark.Client, bounceID int64) {
 		log.Printf("Bounce activation result: %s (ID: %d, Now Active: %v)",
 			message, activatedBounce.ID, !activatedBounce.Inactive)
 	}
+}
+
+// demonstrateMessageStreamsAPI shows examples of using the Message Streams API
+func demonstrateMessageStreamsAPI(client *postmark.Client) {
+	// List all message streams
+	messageStreams, err := client.ListMessageStreams(context.Background(), "All", false)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Found %d message streams", len(messageStreams))
+	for _, stream := range messageStreams {
+		log.Printf("Stream: %s (%s) - Type: %s", stream.Name, stream.ID, stream.MessageStreamType)
+	}
+
+	// List only broadcast streams including archived ones
+	broadcastStreams, err := client.ListMessageStreams(context.Background(), "Broadcasts", true)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Found %d broadcast streams (including archived)", len(broadcastStreams))
+
+	// Create a new broadcast message stream
+	description := "Marketing and newsletter emails"
+	createRequest := postmark.CreateMessageStreamRequest{
+		ID:                "marketing-broadcasts",
+		Name:              "Marketing Broadcasts",
+		Description:       &description,
+		MessageStreamType: postmark.BroadcastMessageStreamType,
+		SubscriptionManagementConfiguration: postmark.MessageStreamSubscriptionManagementConfiguration{
+			UnsubscribeHandlingType: postmark.PostmarkUnsubscribeHandlingType,
+		},
+	}
+
+	newStream, err := client.CreateMessageStream(context.Background(), createRequest)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Created new stream: %s (ID: %s)", newStream.Name, newStream.ID)
+
+	// Get details of a specific message stream
+	streamDetails, err := client.GetMessageStream(context.Background(), newStream.ID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Stream details - Name: %s, Type: %s, Created: %s",
+		streamDetails.Name, streamDetails.MessageStreamType, streamDetails.CreatedAt)
+
+	// Edit the message stream
+	newDescription := "Updated marketing and promotional emails"
+	editRequest := postmark.EditMessageStreamRequest{
+		Name:        "Updated Marketing Broadcasts",
+		Description: &newDescription,
+		SubscriptionManagementConfiguration: postmark.MessageStreamSubscriptionManagementConfiguration{
+			UnsubscribeHandlingType: postmark.PostmarkUnsubscribeHandlingType,
+		},
+	}
+
+	updatedStream, err := client.EditMessageStream(context.Background(), newStream.ID, editRequest)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Updated stream: %s", updatedStream.Name)
+
+	// Archive the message stream
+	archiveResponse, err := client.ArchiveMessageStream(context.Background(), newStream.ID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Archived stream %s, will be purged on: %s",
+		archiveResponse.ID, archiveResponse.ExpectedPurgeDate)
+
+	// Unarchive the message stream
+	unarchivedStream, err := client.UnarchiveMessageStream(context.Background(), newStream.ID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Unarchived stream: %s (Archived: %v)",
+		unarchivedStream.Name, unarchivedStream.ArchivedAt != nil)
 }
