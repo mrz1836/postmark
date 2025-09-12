@@ -3,12 +3,11 @@ package postmark
 import (
 	"context"
 	"net/http"
-	"testing"
 
 	"goji.io/pat"
 )
 
-func TestGetCurrentServer(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetCurrentServer() {
 	responseJSON := `{
 		"ID": 1,
 			"Name": "Staging Testing",
@@ -34,21 +33,17 @@ func TestGetCurrentServer(t *testing.T) {
 			"InboundSpamThreshold": 0
 	}`
 
-	tMux.HandleFunc(pat.Get("/server"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/server"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetCurrentServer(context.Background())
-	if err != nil {
-		t.Fatalf("GetCurrentServer: %s", err.Error())
-	}
+	res, err := s.client.GetCurrentServer(context.Background())
+	s.Require().NoError(err)
 
-	if res.Name != "Staging Testing" {
-		t.Fatalf("GetCurrentServer: wrong name!: %s", res.Name)
-	}
+	s.Equal("Staging Testing", res.Name, "GetCurrentServer: wrong name")
 }
 
-func TestEditCurrentServer(t *testing.T) {
+func (s *PostmarkTestSuite) TestEditCurrentServer() {
 	responseJSON := `{
   "ID": 1,
   "Name": "Production Testing",
@@ -73,18 +68,14 @@ func TestEditCurrentServer(t *testing.T) {
   "InboundHash": "yourhash",
   "InboundSpamThreshold": 10
 }`
-	tMux.HandleFunc(pat.Put("/server"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Put("/server"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.EditCurrentServer(context.Background(), Server{
+	res, err := s.client.EditCurrentServer(context.Background(), Server{
 		Name: "Production Testing",
 	})
-	if err != nil {
-		t.Fatalf("EditCurrentServer: %s", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if res.Name != "Production Testing" {
-		t.Fatalf("EditCurrentServer: wrong name!: %s", res.Name)
-	}
+	s.Equal("Production Testing", res.Name, "EditCurrentServer: wrong name")
 }

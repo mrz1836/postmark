@@ -3,12 +3,11 @@ package postmark
 import (
 	"context"
 	"net/http"
-	"testing"
 
 	"goji.io/pat"
 )
 
-func TestGetDeliveryStats(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetDeliveryStats() {
 	responseJSON := `{
 	  "InactiveMails": 192,
 	  "Bounces": [
@@ -48,21 +47,16 @@ func TestGetDeliveryStats(t *testing.T) {
 		}
 	]}`
 
-	tMux.HandleFunc(pat.Get("/deliverystats"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/deliverystats"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetDeliveryStats(context.Background())
-	if err != nil {
-		t.Fatalf("GetDeliveryStats: %s", err.Error())
-	}
-
-	if res.InactiveMails != 192 {
-		t.Fatalf("GetDeliveryStats: wrong inactive mail count %d", res.InactiveMails)
-	}
+	res, err := s.client.GetDeliveryStats(context.Background())
+	s.Require().NoError(err, "GetDeliveryStats should not fail")
+	s.Equal(int64(192), res.InactiveMails, "GetDeliveryStats should return correct inactive mail count")
 }
 
-func TestGetBounces(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetBounces() {
 	responseJSON := `{
 	  "TotalCount": 253,
 	  "Bounces": [
@@ -101,23 +95,18 @@ func TestGetBounces(t *testing.T) {
 		  ]
 	}`
 
-	tMux.HandleFunc(pat.Get("/bounces"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/bounces"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	_, total, err := client.GetBounces(context.Background(), 100, 0, map[string]interface{}{
+	_, total, err := s.client.GetBounces(context.Background(), 100, 0, map[string]interface{}{
 		"tag": "Invitation",
 	})
-	if err != nil {
-		t.Fatalf("GetBounces: %s", err.Error())
-	}
-
-	if total != 253 {
-		t.Fatalf("GetBounces: wrong total (%d)", total)
-	}
+	s.Require().NoError(err, "GetBounces should not fail")
+	s.Equal(int64(253), total, "GetBounces should return correct total count")
 }
 
-func TestGetBounce(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetBounce() {
 	responseJSON := `{
 	  "ID": 692560173,
 	  "Type": "HardBounce",
@@ -136,40 +125,30 @@ func TestGetBounce(t *testing.T) {
 	  "Content": "Return-Path: <>\r\nReceived: …"
 	}`
 
-	tMux.HandleFunc(pat.Get("/bounces/692560173"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/bounces/692560173"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetBounce(context.Background(), 692560173)
-	if err != nil {
-		t.Fatalf("GetBounce: %s", err.Error())
-	}
-
-	if res.ID != 692560173 {
-		t.Fatalf("GetBounce: wrong ID (%v)", res.ID)
-	}
+	res, err := s.client.GetBounce(context.Background(), 692560173)
+	s.Require().NoError(err, "GetBounce should not fail")
+	s.Equal(int64(692560173), res.ID, "GetBounce should return correct bounce ID")
 }
 
-func TestGetBounceDump(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetBounceDump() {
 	responseJSON := `{
 	  "Body": "..."
 	}`
 
-	tMux.HandleFunc(pat.Get("/bounces/692560173/dump"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/bounces/692560173/dump"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetBounceDump(context.Background(), 692560173)
-	if err != nil {
-		t.Fatalf("GetBounceDump: %s", err.Error())
-	}
-
-	if res != "..." {
-		t.Fatalf("GetBounceDump: wrong dump body (%v)", res)
-	}
+	res, err := s.client.GetBounceDump(context.Background(), 692560173)
+	s.Require().NoError(err, "GetBounceDump should not fail")
+	s.Equal("...", res, "GetBounceDump should return correct dump body")
 }
 
-func TestActivateBounce(t *testing.T) {
+func (s *PostmarkTestSuite) TestActivateBounce() {
 	responseJSON := `{
 		"Message": "OK",
 		"Bounce": {
@@ -191,40 +170,28 @@ func TestActivateBounce(t *testing.T) {
 		}
 	}`
 
-	tMux.HandleFunc(pat.Put("/bounces/692560173/activate"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Put("/bounces/692560173/activate"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, mess, err := client.ActivateBounce(context.Background(), 692560173)
-	if err != nil {
-		t.Fatalf("ActivateBounce: %s", err.Error())
-	}
-
-	if res.ID != 692560173 {
-		t.Fatalf("ActivateBounce: wrong bounce ID (%v)", res.ID)
-	}
-	if mess != "OK" {
-		t.Fatalf("ActivateBounce: wrong message (%v)", mess)
-	}
+	res, mess, err := s.client.ActivateBounce(context.Background(), 692560173)
+	s.Require().NoError(err, "ActivateBounce should not fail")
+	s.Equal(int64(692560173), res.ID, "ActivateBounce should return correct bounce ID")
+	s.Equal("OK", mess, "ActivateBounce should return correct message")
 }
 
-func TestGetBouncedTags(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetBouncedTags() {
 	responseJSON := `[
 		"tag1",
 		"tag2",
 		"tag3"]
 	`
 
-	tMux.HandleFunc(pat.Get("/bounces/tags"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/bounces/tags"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetBouncedTags(context.Background())
-	if err != nil {
-		t.Fatalf("GetBouncedTags: %s", err.Error())
-	}
-
-	if len(res) != 3 {
-		t.Fatalf("GetBouncedTags: wrong tag result (%v)", res)
-	}
+	res, err := s.client.GetBouncedTags(context.Background())
+	s.Require().NoError(err, "GetBouncedTags should not fail")
+	s.Len(res, 3, "GetBouncedTags should return 3 tags")
 }

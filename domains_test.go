@@ -3,12 +3,11 @@ package postmark
 import (
 	"context"
 	"net/http"
-	"testing"
 
 	"goji.io/pat"
 )
 
-func TestGetDomain(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetDomain() {
 	responseJSON := `{
   "Name": "postmarkapp.com",
   "SPFVerified": true,
@@ -30,21 +29,16 @@ func TestGetDomain(t *testing.T) {
   "ID": 1234
 }`
 
-	tMux.HandleFunc(pat.Get("/domains/:domainID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/domains/:domainID"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetDomain(context.Background(), 1234)
-	if err != nil {
-		t.Fatalf("GetDomain: %s", err.Error())
-	}
-
-	if res.Name != "postmarkapp.com" {
-		t.Fatalf("GetDomain: wrong name!: %s", res.Name)
-	}
+	res, err := s.client.GetDomain(context.Background(), 1234)
+	s.Require().NoError(err, "GetDomain should not fail")
+	s.Equal("postmarkapp.com", res.Name, "GetDomain should return correct domain name")
 }
 
-func TestCreateDomain(t *testing.T) {
+func (s *PostmarkTestSuite) TestCreateDomain() {
 	responseJSON := `{
   "Name": "example.com",
   "SPFVerified": false,
@@ -66,28 +60,20 @@ func TestCreateDomain(t *testing.T) {
   "ID": 1234
 }`
 
-	tMux.HandleFunc(pat.Post("/domains"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Post("/domains"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.CreateDomain(context.Background(), DomainCreateRequest{
+	res, err := s.client.CreateDomain(context.Background(), DomainCreateRequest{
 		Name:             "example.com",
 		ReturnPathDomain: "pm-bounces.example.com",
 	})
-	if err != nil {
-		t.Fatalf("CreateDomain: %s", err.Error())
-	}
-
-	if res.Name != "example.com" {
-		t.Fatalf("CreateDomain: wrong name!: %s", res.Name)
-	}
-
-	if res.ReturnPathDomain != "pm-bounces.example.com" {
-		t.Fatalf("CreateDomain: wrong ReturnPathDomain!: %s", res.ReturnPathDomain)
-	}
+	s.Require().NoError(err, "CreateDomain should not fail")
+	s.Equal("example.com", res.Name, "CreateDomain should return correct domain name")
+	s.Equal("pm-bounces.example.com", res.ReturnPathDomain, "CreateDomain should return correct return path domain")
 }
 
-func TestEditDomain(t *testing.T) {
+func (s *PostmarkTestSuite) TestEditDomain() {
 	responseJSON := `{
   "Name": "example.com",
   "SPFVerified": false,
@@ -109,50 +95,55 @@ func TestEditDomain(t *testing.T) {
   "ID": 1234
 }`
 
-	tMux.HandleFunc(pat.Put("/domains/:domainID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Put("/domains/:domainID"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.EditDomain(context.Background(), 1234, DomainEditRequest{
+	res, err := s.client.EditDomain(context.Background(), 1234, DomainEditRequest{
 		ReturnPathDomain: "pm-bounces.example.com",
 	})
-	if err != nil {
-		t.Fatalf("EditDomain: %s", err.Error())
-	}
-
-	if res.Name != "example.com" {
-		t.Fatalf("EditDomain: wrong name!: %s", res.Name)
-	}
-
-	if res.ReturnPathDomain != "pm-bounces.example.com" {
-		t.Fatalf("EditDomain: wrong ReturnPathDomain!: %s", res.ReturnPathDomain)
-	}
+	s.Require().NoError(err, "EditDomain should not fail")
+	s.Equal("example.com", res.Name, "EditDomain should return correct domain name")
+	s.Equal("pm-bounces.example.com", res.ReturnPathDomain, "EditDomain should return correct return path domain")
 }
 
-func TestDeleteDomain(t *testing.T) {
-	responseJSON := `{
-	  "ErrorCode": 0,
-	  "Message": "Domain example.com removed."
-	}`
-
-	tMux.HandleFunc(pat.Delete("/domains/:domainID"), func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(responseJSON))
-	})
-
-	// Success
-	err := client.DeleteDomain(context.Background(), 1234)
-	if err != nil {
-		t.Fatalf("DeleteDomain: %s", err.Error())
+func (s *PostmarkTestSuite) TestDeleteDomain() {
+	tests := []struct {
+		name         string
+		responseJSON string
+		wantErr      bool
+	}{
+		{
+			name: "successful domain deletion",
+			responseJSON: `{
+				"ErrorCode": 0,
+				"Message": "Domain example.com removed."
+			}`,
+			wantErr: false,
+		},
+		{
+			name: "domain deletion failure",
+			responseJSON: `{
+				"ErrorCode": 402,
+				"Message": "Invalid JSON"
+			}`,
+			wantErr: true,
+		},
 	}
 
-	// Failure
-	responseJSON = `{
-	  "ErrorCode": 402,
-	  "Message": "Invalid JSON"
-	}`
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			s.mux.HandleFunc(pat.Delete("/domains/:domainID"), func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tt.responseJSON))
+			})
 
-	err = client.DeleteDomain(context.Background(), 1234)
-	if err == nil {
-		t.Fatalf("DeleteDomain: should have failed")
+			err := s.client.DeleteDomain(context.Background(), 1234)
+
+			if tt.wantErr {
+				s.Require().Error(err, "DeleteDomain should fail")
+			} else {
+				s.Require().NoError(err, "DeleteDomain should not fail")
+			}
+		})
 	}
 }

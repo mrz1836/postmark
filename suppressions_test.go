@@ -3,12 +3,11 @@ package postmark
 import (
 	"context"
 	"net/http"
-	"testing"
 
 	"goji.io/pat"
 )
 
-func TestGetSuppressions(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetSuppressions() {
 	responseJSON := `{
 		"Suppressions":[
 		  {
@@ -32,22 +31,15 @@ func TestGetSuppressions(t *testing.T) {
 		]
 	  }`
 
-	tMux.HandleFunc(pat.Get("/message-streams/:StreamID/suppressions/dump"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/message-streams/:StreamID/suppressions/dump"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetSuppressions(context.Background(), "outbound", nil)
-	if err != nil {
-		t.Fatalf("GetSuppressions: %s", err.Error())
-	}
+	res, err := s.client.GetSuppressions(context.Background(), "outbound", nil)
+	s.Require().NoError(err)
 
-	if len(res) != 3 {
-		t.Fatalf("GetSuppressions: wrong number of suppression (%d)", len(res))
-	}
-
-	if res[0].EmailAddress != "address@wildbit.com" {
-		t.Fatalf("GetSuppressions: wrong suppression email address: %s", res[0].EmailAddress)
-	}
+	s.Len(res, 3, "GetSuppressions: wrong number of suppressions")
+	s.Equal("address@wildbit.com", res[0].EmailAddress, "GetSuppressions: wrong suppression email address")
 
 	responseJSON = `{
 		"Suppressions":[
@@ -60,31 +52,24 @@ func TestGetSuppressions(t *testing.T) {
 		]
 	  }`
 
-	tMux.HandleFunc(pat.Get("/message-streams/:StreamID/suppressions/dump"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/message-streams/:StreamID/suppressions/dump"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err = client.GetSuppressions(context.Background(), "outbound", map[string]interface{}{
+	res, err = s.client.GetSuppressions(context.Background(), "outbound", map[string]interface{}{
 		"emailaddress":      "address@wildbit.com",
 		"fromdate":          "2019-12-10",
 		"todate":            "2019-12-11",
 		"suppressionreason": HardBounceReason,
 		"origin":            RecipientOrigin,
 	})
-	if err != nil {
-		t.Fatalf("%v", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if len(res) != 1 {
-		t.Fatalf("GetSuppressions: wrong number of suppression (%d)", len(res))
-	}
-
-	if res[0].EmailAddress != "address@wildbit.com" {
-		t.Fatalf("GetSuppressions: wrong suppression email address: %s", res[0].EmailAddress)
-	}
+	s.Len(res, 1, "GetSuppressions: wrong number of suppressions")
+	s.Equal("address@wildbit.com", res[0].EmailAddress, "GetSuppressions: wrong suppression email address")
 }
 
-func TestCreateSuppressions(t *testing.T) {
+func (s *PostmarkTestSuite) TestCreateSuppressions() {
 	responseJSON := `{
 		"Suppressions":[
 		  {
@@ -105,25 +90,18 @@ func TestCreateSuppressions(t *testing.T) {
 		]
 	  }`
 
-	tMux.HandleFunc(pat.Post("/message-streams/:StreamID/suppressions"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Post("/message-streams/:StreamID/suppressions"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.CreateSuppressions(context.Background(), "outbound", []Suppression{})
-	if err != nil {
-		t.Fatalf("%v", err.Error())
-	}
+	res, err := s.client.CreateSuppressions(context.Background(), "outbound", []Suppression{})
+	s.Require().NoError(err)
 
-	if len(res) != 3 {
-		t.Fatalf("CreateSuppressions: wrong number of suppression (%d)", len(res))
-	}
-
-	if res[0].EmailAddress != "good.address@wildbit.com" {
-		t.Fatalf("CreateSuppressions: wrong suppression email address: %s", res[0].EmailAddress)
-	}
+	s.Len(res, 3, "CreateSuppressions: wrong number of suppressions")
+	s.Equal("good.address@wildbit.com", res[0].EmailAddress, "CreateSuppressions: wrong suppression email address")
 }
 
-func TestDeleteSuppressions(t *testing.T) {
+func (s *PostmarkTestSuite) TestDeleteSuppressions() {
 	responseJSON := `{
 		"Suppressions":[
 		  {
@@ -138,20 +116,13 @@ func TestDeleteSuppressions(t *testing.T) {
 		]
 	  }`
 
-	tMux.HandleFunc(pat.Post("/message-streams/:StreamID/suppressions/delete"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Post("/message-streams/:StreamID/suppressions/delete"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.DeleteSuppressions(context.Background(), "outbound", []Suppression{})
-	if err != nil {
-		t.Fatalf("%v", err.Error())
-	}
+	res, err := s.client.DeleteSuppressions(context.Background(), "outbound", []Suppression{})
+	s.Require().NoError(err)
 
-	if len(res) != 3 {
-		t.Fatalf("CreateSuppressions: wrong number of suppression (%d)", len(res))
-	}
-
-	if res[0].EmailAddress != "good.address@wildbit.com" {
-		t.Fatalf("CreateSuppressions: wrong suppression email address: %s", res[0].EmailAddress)
-	}
+	s.Len(res, 3, "DeleteSuppressions: wrong number of suppressions")
+	s.Equal("good.address@wildbit.com", res[0].EmailAddress, "DeleteSuppressions: wrong suppression email address")
 }

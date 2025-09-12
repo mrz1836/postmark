@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"testing"
 
 	"goji.io/pat"
 )
@@ -13,7 +12,7 @@ const (
 	transactionalDev = "transactional-dev"
 )
 
-func TestListMessageStreams(t *testing.T) {
+func (s *PostmarkTestSuite) TestListMessageStreams() {
 	responseJSON := `{
 		"MessageStreams": [			{
 				"ID": "outbound",
@@ -61,69 +60,44 @@ func TestListMessageStreams(t *testing.T) {
 		"TotalCount": 3
 	}`
 
-	tMux.HandleFunc(pat.Get("/message-streams"), func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Query().Get("IncludeArchivedStreams") != "false" {
-			t.Fatalf("MessageStreams: wrong IncludeArchivedStreams value (%s)", req.URL.Query().Get("IncludeArchivedStreams"))
-		}
-		if req.URL.Query().Get("MessageStreamType") != "All" {
-			t.Fatalf("MessageStreams: wrong messageStreamType value (%s)", req.URL.Query().Get("MessageStreamType"))
-		}
+	s.mux.HandleFunc(pat.Get("/message-streams"), func(w http.ResponseWriter, req *http.Request) {
+		s.Equal("false", req.URL.Query().Get("IncludeArchivedStreams"), "MessageStreams: wrong IncludeArchivedStreams value")
+		s.Equal("All", req.URL.Query().Get("MessageStreamType"), "MessageStreams: wrong messageStreamType value")
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.ListMessageStreams(context.Background(), "All", false)
-	if err != nil {
-		t.Fatalf("MessageStreams: %s", err.Error())
-	}
-
-	if len(res) != 3 {
-		t.Fatalf("MessageStreams: wrong number of message streams (%d)", len(res))
-	}
+	res, err := s.client.ListMessageStreams(context.Background(), "All", false)
+	s.Require().NoError(err)
+	s.Len(res, 3, "MessageStreams: wrong number of message streams")
 
 	// For each message stream, check the ServerID
 	for _, ms := range res {
-		if ms.ServerID != 123457 {
-			t.Fatalf("MessageStreams: wrong ServerID (%d)", ms.ServerID)
-		}
-		if ms.ArchivedAt != nil {
-			t.Fatalf("MessageStreams: wrong ArchivedAt (%s)", *ms.ArchivedAt)
-		}
+		s.Equal(int(123457), ms.ServerID, "MessageStreams: wrong ServerID")
+		s.Nil(ms.ArchivedAt, "MessageStreams: ArchivedAt should be nil")
 	}
 
-	if res[0].ID != "outbound" {
-		t.Fatalf("MessageStreams: wrong ID (%s)", res[0].ID)
-	}
-	if res[1].ID != "inbound" {
-		t.Fatalf("MessageStreams: wrong ID (%s)", res[1].ID)
-	}
-	if res[2].ID != transactionalDev {
-		t.Fatalf("MessageStreams: wrong ID (%s)", res[2].ID)
-	}
+	s.Equal("outbound", res[0].ID, "MessageStreams: wrong ID for first stream")
+	s.Equal("inbound", res[1].ID, "MessageStreams: wrong ID for second stream")
+	s.Equal(transactionalDev, res[2].ID, "MessageStreams: wrong ID for third stream")
 }
 
-func TestGetUnknownMessageStream(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetUnknownMessageStream() {
 	responseJSON := `{"ErrorCode":1226,"Message":"The message stream for the provided 'ID' was not found."}`
 
-	tMux.HandleFunc(pat.Get("/message-streams/unknown"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/message-streams/unknown"), func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetMessageStream(context.Background(), "unknown")
-	if err == nil {
-		t.Fatalf("MessageStream: expected error")
-	}
-	if err.Error() != "The message stream for the provided 'ID' was not found." {
-		t.Fatalf("MessageStream: wrong error message (%s)", err.Error())
-	}
+	res, err := s.client.GetMessageStream(context.Background(), "unknown")
+	s.Require().Error(err, "MessageStream: expected error")
+	s.Equal("The message stream for the provided 'ID' was not found.", err.Error(), "MessageStream: wrong error message")
 
 	var zero MessageStream
-	if res != zero {
-		t.Fatalf("MessageStream: expected empty response")
-	}
+	s.Equal(zero, res, "MessageStream: expected empty response")
 }
 
-func TestGetMessageStream(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetMessageStream() {
 	responseJSON := `{
 		"ID": "broadcasts",
 		"ServerID": 123456,
@@ -139,29 +113,20 @@ func TestGetMessageStream(t *testing.T) {
 		}
 	}`
 
-	tMux.HandleFunc(pat.Get("/message-streams/broadcasts"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/message-streams/broadcasts"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetMessageStream(context.Background(), "broadcasts")
-	if err != nil {
-		t.Fatalf("MessageStream: %s", err.Error())
-	}
+	res, err := s.client.GetMessageStream(context.Background(), "broadcasts")
+	s.Require().NoError(err)
 
-	if res.ID != "broadcasts" {
-		t.Fatalf("MessageStream: wrong ID (%s)", res.ID)
-	}
-
-	if res.Name != "Broadcast Stream" {
-		t.Fatalf("MessageStream: wrong Name (%s)", res.Name)
-	}
-
-	if *res.Description != "This is my stream to send broadcast messages" {
-		t.Fatalf("MessageStream: wrong Description (%s)", *res.Description)
-	}
+	s.Equal("broadcasts", res.ID, "MessageStream: wrong ID")
+	s.Equal("Broadcast Stream", res.Name, "MessageStream: wrong Name")
+	s.Require().NotNil(res.Description, "MessageStream: Description should not be nil")
+	s.Equal("This is my stream to send broadcast messages", *res.Description, "MessageStream: wrong Description")
 }
 
-func TestEditMessageStream(t *testing.T) {
+func (s *PostmarkTestSuite) TestEditMessageStream() {
 	responseJSON := `{
 		"ID": "transactional-dev",
 		"ServerID": 123457,
@@ -184,43 +149,28 @@ func TestEditMessageStream(t *testing.T) {
 		},
 	}
 
-	tMux.HandleFunc(pat.Patch("/message-streams/transactional-dev"), func(w http.ResponseWriter, req *http.Request) {
+	s.mux.HandleFunc(pat.Patch("/message-streams/transactional-dev"), func(w http.ResponseWriter, req *http.Request) {
 		var body EditMessageStreamRequest
 		err := json.NewDecoder(req.Body).Decode(&body)
-		if err != nil {
-			t.Fatalf("Failed to read request body: %s", err.Error())
-		}
+		s.Require().NoError(err, "Failed to read request body")
 
-		if body.Description != nil {
-			t.Fatalf("EditMessageStream: wrong Description (%v)", body.Description)
-		}
-		if editReq.Name != body.Name {
-			t.Fatalf("EditMessageStream: wrong Name (%s)", body.Name)
-		}
-		if editReq.SubscriptionManagementConfiguration.UnsubscribeHandlingType != body.SubscriptionManagementConfiguration.UnsubscribeHandlingType {
-			t.Fatalf("EditMessageStream: wrong UnsubscribeHandlingType (%s)", body.SubscriptionManagementConfiguration.UnsubscribeHandlingType)
-		}
+		s.Nil(body.Description, "EditMessageStream: Description should be nil")
+		s.Equal(editReq.Name, body.Name, "EditMessageStream: wrong Name")
+		s.Equal(editReq.SubscriptionManagementConfiguration.UnsubscribeHandlingType, body.SubscriptionManagementConfiguration.UnsubscribeHandlingType, "EditMessageStream: wrong UnsubscribeHandlingType")
 
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.EditMessageStream(context.Background(), transactionalDev, editReq)
-	if err != nil {
-		t.Fatalf("MessageStream: %s", err.Error())
-	}
+	res, err := s.client.EditMessageStream(context.Background(), transactionalDev, editReq)
+	s.Require().NoError(err)
 
-	if res.ID != transactionalDev {
-		t.Fatalf("MessageStream: wrong ID (%s)", res.ID)
-	}
-	if res.ServerID != 123457 {
-		t.Fatalf("MessageStream: wrong ServerID (%d)", res.ServerID)
-	}
-	if *res.Description != "Updating my dev transactional stream" {
-		t.Fatalf("MessageStream: wrong Description (%s)", *res.Description)
-	}
+	s.Equal(transactionalDev, res.ID, "MessageStream: wrong ID")
+	s.Equal(int(123457), res.ServerID, "MessageStream: wrong ServerID")
+	s.Require().NotNil(res.Description, "MessageStream: Description should not be nil")
+	s.Equal("Updating my dev transactional stream", *res.Description, "MessageStream: wrong Description")
 }
 
-func TestCreateMessageStream(t *testing.T) {
+func (s *PostmarkTestSuite) TestCreateMessageStream() {
 	responseJSON := `{
 		"ID": "transactional-dev",
 		"ServerID": 123457,
@@ -246,54 +196,38 @@ func TestCreateMessageStream(t *testing.T) {
 		},
 	}
 
-	tMux.HandleFunc(pat.Post("/message-streams"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Post("/message-streams"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.CreateMessageStream(context.Background(), createReq)
-	if err != nil {
-		t.Fatalf("MessageStream: %s", err.Error())
-	}
+	res, err := s.client.CreateMessageStream(context.Background(), createReq)
+	s.Require().NoError(err)
 
-	if res.ID != transactionalDev {
-		t.Fatalf("MessageStream: wrong ID (%s)", res.ID)
-	}
-	if res.ServerID != 123457 {
-		t.Fatalf("MessageStream: wrong ServerID (%d)", res.ServerID)
-	}
-	if res.MessageStreamType != "Transactional" {
-		t.Fatalf("MessageStream: wrong MessageStreamType (%s)", res.MessageStreamType)
-	}
+	s.Equal(transactionalDev, res.ID, "MessageStream: wrong ID")
+	s.Equal(int(123457), res.ServerID, "MessageStream: wrong ServerID")
+	s.Equal(MessageStreamType("Transactional"), res.MessageStreamType, "MessageStream: wrong MessageStreamType")
 }
 
-func TestArchiveMessageStream(t *testing.T) {
+func (s *PostmarkTestSuite) TestArchiveMessageStream() {
 	responseJSON := `{
 		"ID": "transactional-dev",
 		"ServerID": 123457,
 		"ExpectedPurgeDate": "2020-08-30T12:30:00.00-04:00"
 	}`
 
-	tMux.HandleFunc(pat.Post("/message-streams/transactional-dev/archive"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Post("/message-streams/transactional-dev/archive"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.ArchiveMessageStream(context.Background(), transactionalDev)
-	if err != nil {
-		t.Fatalf("MessageStream: %s", err.Error())
-	}
+	res, err := s.client.ArchiveMessageStream(context.Background(), transactionalDev)
+	s.Require().NoError(err)
 
-	if res.ID != transactionalDev {
-		t.Fatalf("MessageStream: wrong ID (%s)", res.ID)
-	}
-	if res.ServerID != 123457 {
-		t.Fatalf("MessageStream: wrong ServerID (%d)", res.ServerID)
-	}
-	if res.ExpectedPurgeDate != "2020-08-30T12:30:00.00-04:00" {
-		t.Fatalf("MessageStream: wrong ExpectedPurgeDate (%s)", res.ExpectedPurgeDate)
-	}
+	s.Equal(transactionalDev, res.ID, "MessageStream: wrong ID")
+	s.Equal(int(123457), res.ServerID, "MessageStream: wrong ServerID")
+	s.Equal("2020-08-30T12:30:00.00-04:00", res.ExpectedPurgeDate, "MessageStream: wrong ExpectedPurgeDate")
 }
 
-func TestUnarchiveMessageStream(t *testing.T) {
+func (s *PostmarkTestSuite) TestUnarchiveMessageStream() {
 	responseJSON := `{
 		"ID": "transactional-dev",
 		"ServerID": 123457,
@@ -308,19 +242,13 @@ func TestUnarchiveMessageStream(t *testing.T) {
 		}
 	}`
 
-	tMux.HandleFunc(pat.Post("/message-streams/transactional-dev/unarchive"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Post("/message-streams/transactional-dev/unarchive"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.UnarchiveMessageStream(context.Background(), transactionalDev)
-	if err != nil {
-		t.Fatalf("MessageStream: %s", err.Error())
-	}
+	res, err := s.client.UnarchiveMessageStream(context.Background(), transactionalDev)
+	s.Require().NoError(err)
 
-	if res.ID != transactionalDev {
-		t.Fatalf("MessageStream: wrong ID (%s)", res.ID)
-	}
-	if res.ServerID != 123457 {
-		t.Fatalf("MessageStream: wrong ServerID (%d)", res.ServerID)
-	}
+	s.Equal(transactionalDev, res.ID, "MessageStream: wrong ID")
+	s.Equal(int(123457), res.ServerID, "MessageStream: wrong ServerID")
 }

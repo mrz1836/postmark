@@ -3,12 +3,11 @@ package postmark
 import (
 	"context"
 	"net/http"
-	"testing"
 
 	"goji.io/pat"
 )
 
-func TestGetTemplate(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetTemplate() {
 	responseJSON := `{
 		"Name": "Onboarding Email",
 		"TemplateId": 1234,
@@ -19,21 +18,17 @@ func TestGetTemplate(t *testing.T) {
 		"Active": false
 	}`
 
-	tMux.HandleFunc(pat.Get("/templates/:templateID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/templates/:templateID"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetTemplate(context.Background(), "1234")
-	if err != nil {
-		t.Fatalf("Template: %s", err.Error())
-	}
+	res, err := s.client.GetTemplate(context.Background(), "1234")
+	s.Require().NoError(err)
 
-	if res.Name != "Onboarding Email" {
-		t.Fatalf("Template: wrong name!")
-	}
+	s.Equal("Onboarding Email", res.Name, "Template: wrong name")
 }
 
-func TestGetTemplates(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetTemplates() {
 	responseJSON := `{
 		"TotalCount": 2,
 		"Templates": [
@@ -50,91 +45,74 @@ func TestGetTemplates(t *testing.T) {
 		]
 	}`
 
-	tMux.HandleFunc(pat.Get("/templates"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/templates"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, count, err := client.GetTemplates(context.Background(), 100, 10)
-	if err != nil {
-		t.Fatalf("GetTemplates: %s", err.Error())
-	}
+	res, count, err := s.client.GetTemplates(context.Background(), 100, 10)
+	s.Require().NoError(err)
 
-	if len(res) == 0 {
-		t.Fatalf("GetTemplates: unmarshaled to empty")
-	}
-
-	if count != 2 {
-		t.Fatalf("GetTemplates: unmarshaled to empty")
-	}
+	s.NotEmpty(res, "GetTemplates: result should not be empty")
+	s.Equal(int64(2), count, "GetTemplates: wrong count")
 }
 
-func TestCreateTemplate(t *testing.T) {
+func (s *PostmarkTestSuite) TestCreateTemplate() {
 	responseJSON := `{
 		"TemplateId": 1234,
 		"Name": "Onboarding Email",
 		"Active": true
 	}`
 
-	tMux.HandleFunc(pat.Post("/templates"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Post("/templates"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.CreateTemplate(context.Background(), Template{
+	res, err := s.client.CreateTemplate(context.Background(), Template{
 		Name:     "Onboarding Email",
 		Subject:  "Hello from {{company.name}}!",
 		TextBody: "Hello, {{name}}!",
 		HTMLBody: "<html><body>Hello, {{name}}!</body></html>",
 	})
-	if err != nil {
-		t.Fatalf("CreateTemplate: %s", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if res.Name != "Onboarding Email" {
-		t.Fatalf("CreateTemplate: wrong name!")
-	}
+	s.Equal("Onboarding Email", res.Name, "CreateTemplate: wrong name")
 }
 
-func TestEditTemplate(t *testing.T) {
+func (s *PostmarkTestSuite) TestEditTemplate() {
 	responseJSON := `{
 		"TemplateId": 1234,
 		  "Name": "Onboarding Emailzzzzz",
 		  "Active": true
 	}`
 
-	tMux.HandleFunc(pat.Put("/templates/:templateID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Put("/templates/:templateID"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.EditTemplate(context.Background(), "1234", Template{
+	res, err := s.client.EditTemplate(context.Background(), "1234", Template{
 		Name:     "Onboarding Emailzzzzz",
 		Subject:  "Hello from {{company.name}}!",
 		TextBody: "Hello, {{name}}!",
 		HTMLBody: "<html><body>Hello, {{name}}!</body></html>",
 	})
-	if err != nil {
-		t.Fatalf("EditTemplate: %s", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if res.Name != "Onboarding Emailzzzzz" {
-		t.Fatalf("EditTemplate: wrong name!")
-	}
+	s.Equal("Onboarding Emailzzzzz", res.Name, "EditTemplate: wrong name")
 }
 
-func TestDeleteTemplate(t *testing.T) {
+func (s *PostmarkTestSuite) TestDeleteTemplate() {
 	responseJSON := `{
 	  "ErrorCode": 0,
 	  "Message": "Template 1234 removed."
 	}`
 
-	tMux.HandleFunc(pat.Delete("/templates/:templateID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Delete("/templates/:templateID"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
 	// Success
-	err := client.DeleteTemplate(context.Background(), "1234")
-	if err != nil {
-		t.Fatalf("DeleteTemplate: %s", err.Error())
-	}
+	err := s.client.DeleteTemplate(context.Background(), "1234")
+	s.Require().NoError(err)
 
 	// Failure
 	responseJSON = `{
@@ -142,13 +120,11 @@ func TestDeleteTemplate(t *testing.T) {
 	  "Message": "Invalid JSON"
 	}`
 
-	err = client.DeleteTemplate(context.Background(), "1234")
-	if err == nil {
-		t.Fatalf("DeleteTemplate  should have failed")
-	}
+	err = s.client.DeleteTemplate(context.Background(), "1234")
+	s.Require().Error(err, "DeleteTemplate should have failed")
 }
 
-func TestValidateTemplate(t *testing.T) {
+func (s *PostmarkTestSuite) TestValidateTemplate() {
 	responseJSON := `{
 		"AllContentIsValid": true,
 		"HtmlBody": {
@@ -186,11 +162,11 @@ func TestValidateTemplate(t *testing.T) {
 		}
 	}`
 
-	tMux.HandleFunc(pat.Post("/templates/validate"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Post("/templates/validate"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.ValidateTemplate(context.Background(), ValidateTemplateBody{
+	res, err := s.client.ValidateTemplate(context.Background(), ValidateTemplateBody{
 		Subject:  "{{#company}}{{name}}{{/company}} {{subjectHeadline}}",
 		TextBody: "{{#company}}{{address}}{{/company}}{{#each person}} {{name}} {{/each}}",
 		HTMLBody: "{{#company}}{{phone}}{{/company}}{{#each person}} {{name}} {{/each}}",
@@ -199,13 +175,9 @@ func TestValidateTemplate(t *testing.T) {
 		},
 		InlineCSSForHTMLTestRender: false,
 	})
-	if err != nil {
-		t.Fatalf("ValidateTemplate: %s", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if !res.AllContentIsValid {
-		t.Fatalf("ValidateTemplate: AllContentIsValid should be true")
-	}
+	s.True(res.AllContentIsValid, "ValidateTemplate: AllContentIsValid should be true")
 }
 
 func getTestTemplatedEmail() TemplatedEmail {
@@ -247,7 +219,7 @@ func getTestTemplatedEmail() TemplatedEmail {
 	}
 }
 
-func TestSendTemplatedEmail(t *testing.T) {
+func (s *PostmarkTestSuite) TestSendTemplatedEmail() {
 	responseJSON := `{
 		"To": "receiver@example.com",
 		"SubmittedAt": "2014-02-17T07:25:01.4178645-05:00",
@@ -256,21 +228,17 @@ func TestSendTemplatedEmail(t *testing.T) {
 		"Message": "OK"
 	}`
 
-	tMux.HandleFunc(pat.Post("/email/withTemplate"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Post("/email/withTemplate"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.SendTemplatedEmail(context.Background(), getTestTemplatedEmail())
-	if err != nil {
-		t.Fatalf("SendTemplatedEmail: %s", err.Error())
-	}
+	res, err := s.client.SendTemplatedEmail(context.Background(), getTestTemplatedEmail())
+	s.Require().NoError(err)
 
-	if res.MessageID != "0a129aee-e1cd-480d-b08d-4f48548ff48d" {
-		t.Fatalf("SendTemplatedEmail: incorrect message ID")
-	}
+	s.Equal("0a129aee-e1cd-480d-b08d-4f48548ff48d", res.MessageID, "SendTemplatedEmail: incorrect message ID")
 }
 
-func TestSendTemplatedBatch(t *testing.T) {
+func (s *PostmarkTestSuite) TestSendTemplatedBatch() {
 	responseJSON := `[
 	  {
 		"To": "receiver@example.com",
@@ -287,17 +255,13 @@ func TestSendTemplatedBatch(t *testing.T) {
 	}
 	]`
 
-	tMux.HandleFunc(pat.Post("/email/batchWithTemplates"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Post("/email/batchWithTemplates"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
 	testTemplatedEmail := getTestTemplatedEmail()
-	res, err := client.SendTemplatedEmailBatch(context.Background(), []TemplatedEmail{testTemplatedEmail, testTemplatedEmail})
-	if err != nil {
-		t.Fatalf("SendTemplatedBatch: %s", err.Error())
-	}
+	res, err := s.client.SendTemplatedEmailBatch(context.Background(), []TemplatedEmail{testTemplatedEmail, testTemplatedEmail})
+	s.Require().NoError(err)
 
-	if len(res) != 2 {
-		t.Fatalf("SendTemplatedBatch: wrong response array size!")
-	}
+	s.Len(res, 2, "SendTemplatedBatch: wrong response array size")
 }

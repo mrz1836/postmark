@@ -4,27 +4,41 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"testing"
 
+	"github.com/stretchr/testify/suite"
 	"goji.io"
 )
 
-var (
-	tMux    = goji.NewMux()  //nolint:gochecknoglobals // test infrastructure
-	tServer *httptest.Server //nolint:gochecknoglobals // test infrastructure
-	client  *Client          //nolint:gochecknoglobals // test infrastructure
-)
+type PostmarkTestSuite struct {
+	suite.Suite
 
-func init() { //nolint:gochecknoinits // test infrastructure
-	tServer = httptest.NewServer(tMux)
+	mux    *goji.Mux
+	server *httptest.Server
+	client *Client
+}
+
+func (s *PostmarkTestSuite) SetupSuite() {
+	s.mux = goji.NewMux()
+	s.server = httptest.NewServer(s.mux)
 
 	transport := &http.Transport{
 		Proxy: func(_ *http.Request) (*url.URL, error) {
-			// Reroute...
-			return url.Parse(tServer.URL)
+			return url.Parse(s.server.URL)
 		},
 	}
 
-	client = NewClient("", "")
-	client.HTTPClient = &http.Client{Transport: transport}
-	client.BaseURL = tServer.URL
+	s.client = NewClient("", "")
+	s.client.HTTPClient = &http.Client{Transport: transport}
+	s.client.BaseURL = s.server.URL
+}
+
+func (s *PostmarkTestSuite) TearDownSuite() {
+	if s.server != nil {
+		s.server.Close()
+	}
+}
+
+func TestPostmarkSuite(t *testing.T) {
+	suite.Run(t, new(PostmarkTestSuite))
 }

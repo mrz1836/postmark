@@ -4,12 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"testing"
 
 	"goji.io/pat"
 )
 
-func TestGetServers(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetServers() {
 	responseJSON := `{
   "TotalCount": 2,
   "Servers": [
@@ -68,25 +67,18 @@ func TestGetServers(t *testing.T) {
   ]
 }`
 
-	tMux.HandleFunc(pat.Get("/servers"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/servers"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetServers(context.Background(), 100, 10, "")
-	if err != nil {
-		t.Fatalf("GetServers: %s", err.Error())
-	}
+	res, err := s.client.GetServers(context.Background(), 100, 10, "")
+	s.Require().NoError(err)
 
-	if len(res.Servers) == 0 {
-		t.Fatalf("GetServers: unmarshaled to empty")
-	}
-
-	if res.TotalCount != 2 {
-		t.Fatalf("GetServers: unmarshaled to empty")
-	}
+	s.NotEmpty(res.Servers, "GetServers: servers should not be empty")
+	s.Equal(int(2), res.TotalCount, "GetServers: wrong total count")
 }
 
-func TestGetServer(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetServer() {
 	responseJSON := `{
 	  "ID": 1,
 	  "Name": "Staging Testing",
@@ -108,21 +100,17 @@ func TestGetServer(t *testing.T) {
 	  "InboundSpamThreshold": 0
 	}`
 
-	tMux.HandleFunc(pat.Get("/servers/:serverID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/servers/:serverID"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetServer(context.Background(), 1)
-	if err != nil {
-		t.Fatalf("GetServer: %s", err.Error())
-	}
+	res, err := s.client.GetServer(context.Background(), 1)
+	s.Require().NoError(err)
 
-	if res.Name != "Staging Testing" {
-		t.Fatalf("GetServer: wrong name!: %s", res.Name)
-	}
+	s.Equal("Staging Testing", res.Name, "GetServer: wrong name")
 }
 
-func TestCreateServer(t *testing.T) {
+func (s *PostmarkTestSuite) TestCreateServer() {
 	responseJSON := `{
   "ID": 1,
   "Name": "Staging Testing",
@@ -146,11 +134,11 @@ func TestCreateServer(t *testing.T) {
   "EnableSmtpApiErrorHooks": false
 }`
 
-	tMux.HandleFunc(pat.Post("/servers"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Post("/servers"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.CreateServer(context.Background(), ServerCreateRequest{
+	res, err := s.client.CreateServer(context.Background(), ServerCreateRequest{
 		Name:                       "Staging Testing",
 		Color:                      "red",
 		SMTPAPIActivated:           true,
@@ -164,16 +152,12 @@ func TestCreateServer(t *testing.T) {
 		IncludeBounceContentInHook: true,
 		EnableSMTPAPIErrorHooks:    false,
 	})
-	if err != nil {
-		t.Fatalf("CreateServer: %s", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if res.Name != "Staging Testing" {
-		t.Fatalf("CreateServer: wrong name!")
-	}
+	s.Equal("Staging Testing", res.Name, "CreateServer: wrong name")
 }
 
-func TestEditServer(t *testing.T) {
+func (s *PostmarkTestSuite) TestEditServer() {
 	responseJSON := `{
 	  "ID": 1,
 	  "Name": "Production Testing",
@@ -195,37 +179,31 @@ func TestEditServer(t *testing.T) {
 	  "InboundSpamThreshold": 10
 	}`
 
-	tMux.HandleFunc(pat.Put("/servers/:serverID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Put("/servers/:serverID"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.EditServer(context.Background(), 1234, ServerEditRequest{
+	res, err := s.client.EditServer(context.Background(), 1234, ServerEditRequest{
 		Name: "Production Testing",
 	})
-	if err != nil {
-		t.Fatalf("EditServer: %s", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if res.Name != "Production Testing" {
-		t.Fatalf("EditServer: wrong name!: %s", res.Name)
-	}
+	s.Equal("Production Testing", res.Name, "EditServer: wrong name")
 }
 
-func TestDeleteServer(t *testing.T) {
+func (s *PostmarkTestSuite) TestDeleteServer() {
 	responseJSON := `{
 	  "ErrorCode": 0,
 	  "Message": "Server 1234 removed."
 	}`
 
-	tMux.HandleFunc(pat.Delete("/servers/:serverID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Delete("/servers/:serverID"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
 	// Success
-	err := client.DeleteServer(context.Background(), 1234)
-	if err != nil {
-		t.Fatalf("DeleteServer: %s", err.Error())
-	}
+	err := s.client.DeleteServer(context.Background(), 1234)
+	s.Require().NoError(err)
 
 	// Failure
 	responseJSON = `{
@@ -233,14 +211,12 @@ func TestDeleteServer(t *testing.T) {
 	  "Message": "Invalid JSON"
 	}`
 
-	err = client.DeleteServer(context.Background(), 1234)
-	if err == nil {
-		t.Fatalf("DeleteServer: should have failed")
-	}
+	err = s.client.DeleteServer(context.Background(), 1234)
+	s.Require().Error(err, "DeleteServer: should have failed")
 }
 
-func TestServer_MarshalJSON(t *testing.T) {
-	t.Run("sets default values when empty", func(t *testing.T) {
+func (s *PostmarkTestSuite) TestServerMarshalJSON() {
+	s.Run("sets default values when empty", func() {
 		server := Server{
 			ID:   123,
 			Name: "My Server",
@@ -248,25 +224,17 @@ func TestServer_MarshalJSON(t *testing.T) {
 		}
 
 		data, err := json.Marshal(server)
-		if err != nil {
-			t.Fatalf("unexpected error during marshal: %v", err)
-		}
+		s.Require().NoError(err, "unexpected error during marshal")
 
 		var result map[string]interface{}
 		err = json.Unmarshal(data, &result)
-		if err != nil {
-			t.Fatalf("unexpected error during unmarshal: %v", err)
-		}
+		s.Require().NoError(err, "unexpected error during unmarshal")
 
-		if result["TrackLinks"] != "None" {
-			t.Errorf("expected TrackLinks to be 'None', got %v", result["TrackLinks"])
-		}
-		if result["DeliveryType"] != "Live" {
-			t.Errorf("expected DeliveryType to be 'Live', got %v", result["DeliveryType"])
-		}
+		s.Equal("None", result["TrackLinks"], "expected TrackLinks to be 'None'")
+		s.Equal("Live", result["DeliveryType"], "expected DeliveryType to be 'Live'")
 	})
 
-	t.Run("preserves existing values", func(t *testing.T) {
+	s.Run("preserves existing values", func() {
 		server := Server{
 			ID:           456,
 			Name:         "Another Server",
@@ -275,21 +243,13 @@ func TestServer_MarshalJSON(t *testing.T) {
 		}
 
 		data, err := json.Marshal(server)
-		if err != nil {
-			t.Fatalf("unexpected error during marshal: %v", err)
-		}
+		s.Require().NoError(err, "unexpected error during marshal")
 
 		var result map[string]interface{}
 		err = json.Unmarshal(data, &result)
-		if err != nil {
-			t.Fatalf("unexpected error during unmarshal: %v", err)
-		}
+		s.Require().NoError(err, "unexpected error during unmarshal")
 
-		if result["TrackLinks"] != "HtmlOnly" {
-			t.Errorf("expected TrackLinks to be 'HtmlOnly', got %v", result["TrackLinks"])
-		}
-		if result["DeliveryType"] != "Sandbox" {
-			t.Errorf("expected DeliveryType to be 'Sandbox', got %v", result["DeliveryType"])
-		}
+		s.Equal("HtmlOnly", result["TrackLinks"], "expected TrackLinks to be 'HtmlOnly'")
+		s.Equal("Sandbox", result["DeliveryType"], "expected DeliveryType to be 'Sandbox'")
 	})
 }

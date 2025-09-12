@@ -3,12 +3,11 @@ package postmark
 import (
 	"context"
 	"net/http"
-	"testing"
 
 	"goji.io/pat"
 )
 
-func TestGetSenderSignatures(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetSenderSignatures() {
 	responseJSON := `{
 	"TotalCount": 2,
 	"SenderSignatures": [
@@ -31,21 +30,17 @@ func TestGetSenderSignatures(t *testing.T) {
 	]
   }`
 
-	tMux.HandleFunc(pat.Get("/senders"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/senders"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetSenderSignatures(context.Background(), 50, 0)
-	if err != nil {
-		t.Fatalf("GetSenderSignatures: %s", err.Error())
-	}
+	res, err := s.client.GetSenderSignatures(context.Background(), 50, 0)
+	s.Require().NoError(err)
 
-	if res.TotalCount != 2 {
-		t.Fatalf("GetSenderSignatures: wrong TotalCount!")
-	}
+	s.Equal(int(2), res.TotalCount, "GetSenderSignatures: wrong TotalCount")
 }
 
-func TestGetSenderSignature(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetSenderSignature() {
 	responseJSON := `{
   "Domain": "postmarkapp.com",
   "EmailAddress": "jp@postmarkapp.com",
@@ -72,21 +67,17 @@ func TestGetSenderSignature(t *testing.T) {
   "ConfirmationPersonalNote": "This is a note visible to the recipient to provide context of what Postmark is."
 }`
 
-	tMux.HandleFunc(pat.Get("/senders/:signatureID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/senders/:signatureID"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetSenderSignature(context.Background(), 1234)
-	if err != nil {
-		t.Fatalf("ServerSignature: %s", err.Error())
-	}
+	res, err := s.client.GetSenderSignature(context.Background(), 1234)
+	s.Require().NoError(err)
 
-	if res.Name != "JP Toto" {
-		t.Fatalf("ServerSignature: wrong name!")
-	}
+	s.Equal("JP Toto", res.Name, "SenderSignature: wrong name")
 }
 
-func TestCreateSenderSignature(t *testing.T) {
+func (s *PostmarkTestSuite) TestCreateSenderSignature() {
 	responseJSON := `{
   "Domain": "example.com",
   "EmailAddress": "john.doe@example.com",
@@ -113,27 +104,23 @@ func TestCreateSenderSignature(t *testing.T) {
   "ConfirmationPersonalNote": "This is a note visible to the recipient to provide context of what Postmark is."
 }`
 
-	tMux.HandleFunc(pat.Post("/senders"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Post("/senders"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.CreateSenderSignature(context.Background(), SenderSignatureCreateRequest{
+	res, err := s.client.CreateSenderSignature(context.Background(), SenderSignatureCreateRequest{
 		FromEmail:                "john.doe@example.com",
 		Name:                     "John Doe",
 		ReplyToEmail:             "reply@example.com",
 		ReturnPathDomain:         "pm-bounces.example.com",
 		ConfirmationPersonalNote: "This is a note visible to the recipient to provide context of what Postmark is.",
 	})
-	if err != nil {
-		t.Fatalf("CreateSenderSignature: %s", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if res.Name != "John Doe" {
-		t.Fatalf("CreateSenderSignature: wrong name!")
-	}
+	s.Equal("John Doe", res.Name, "CreateSenderSignature: wrong name")
 }
 
-func TestEditSenderSignature(t *testing.T) {
+func (s *PostmarkTestSuite) TestEditSenderSignature() {
 	responseJSON := `{
   "Domain": "example.com",
   "EmailAddress": "john.doe@example.com",
@@ -160,40 +147,34 @@ func TestEditSenderSignature(t *testing.T) {
   "ConfirmationPersonalNote": "This is a note visible to the recipient to provide context of what Postmark is."
 }`
 
-	tMux.HandleFunc(pat.Put("/senders/:signatureID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Put("/senders/:signatureID"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.EditSenderSignature(context.Background(), 1, SenderSignatureEditRequest{
+	res, err := s.client.EditSenderSignature(context.Background(), 1, SenderSignatureEditRequest{
 		Name:                     "Jane Doe",
 		ReplyToEmail:             "jane.doe@example.com",
 		ReturnPathDomain:         "pm-bounces.example.com",
 		ConfirmationPersonalNote: "This is a note visible to the recipient to provide context of what Postmark is.",
 	})
-	if err != nil {
-		t.Fatalf("EditSenderSignature: %s", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if res.Name != "Jane Doe" {
-		t.Fatalf("EditSenderSignature: wrong name!")
-	}
+	s.Equal("Jane Doe", res.Name, "EditSenderSignature: wrong name")
 }
 
-func TestDeleteSenderSignature(t *testing.T) {
+func (s *PostmarkTestSuite) TestDeleteSenderSignature() {
 	responseJSON := `{
 	  "ErrorCode": 0,
 	  "Message": "SenderSignature 1234 removed."
 	}`
 
-	tMux.HandleFunc(pat.Delete("/senders/:signatureID"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Delete("/senders/:signatureID"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
 	// Success
-	err := client.DeleteSenderSignature(context.Background(), 1234)
-	if err != nil {
-		t.Fatalf("DeleteSenderSignature: %s", err.Error())
-	}
+	err := s.client.DeleteSenderSignature(context.Background(), 1234)
+	s.Require().NoError(err)
 
 	// Failure
 	responseJSON = `{
@@ -201,8 +182,6 @@ func TestDeleteSenderSignature(t *testing.T) {
 	  "Message": "Invalid JSON"
 	}`
 
-	err = client.DeleteSenderSignature(context.Background(), 1234)
-	if err == nil {
-		t.Fatalf("DeleteSenderSignature  should have failed")
-	}
+	err = s.client.DeleteSenderSignature(context.Background(), 1234)
+	s.Require().Error(err, "DeleteSenderSignature should have failed")
 }

@@ -3,12 +3,11 @@ package postmark
 import (
 	"context"
 	"net/http"
-	"testing"
 
 	"goji.io/pat"
 )
 
-func TestGetInboundMessage(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetInboundMessage() {
 	responseJSON := `{
 		"From": "dart-zzzzz@yandex.ru",
 		  "FromName": "Dart Zzzzz",
@@ -85,26 +84,20 @@ func TestGetInboundMessage(t *testing.T) {
 		  "Status": "Blocked"
 	}`
 
-	tMux.HandleFunc(pat.Get("/messages/inbound/cc5727a0-ea30-4e79-baea-aa43c9628ac4/details"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/messages/inbound/cc5727a0-ea30-4e79-baea-aa43c9628ac4/details"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetInboundMessage(context.Background(), "cc5727a0-ea30-4e79-baea-aa43c9628ac4")
-	if err != nil {
-		t.Fatalf("GetInboundMessage: %s", err.Error())
-	}
+	res, err := s.client.GetInboundMessage(context.Background(), "cc5727a0-ea30-4e79-baea-aa43c9628ac4")
+	s.Require().NoError(err)
 
-	if res.MessageID != "cc5727a0-ea30-4e79-baea-aa43c9628ac4" {
-		t.Fatalf("GetInboundMessage: wrong MessageID (%v)", res.MessageID)
-	}
+	s.Equal("cc5727a0-ea30-4e79-baea-aa43c9628ac4", res.MessageID, "GetInboundMessage: wrong MessageID")
 
 	_, err = res.Time()
-	if err != nil {
-		t.Fatalf("GetInboundMessage: date couldn't be parsed: %s", res.Date)
-	}
+	s.Require().NoError(err, "GetInboundMessage: date couldn't be parsed: %s", res.Date)
 }
 
-func TestGetInboundMessages(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetInboundMessages() {
 	responseJSON := `{
 		"TotalCount": 7,
 	   	"InboundMessages": [
@@ -137,67 +130,61 @@ func TestGetInboundMessages(t *testing.T) {
 	   ]
 	}`
 
-	tMux.HandleFunc(pat.Get("/messages/inbound"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/messages/inbound"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	_, total, err := client.GetInboundMessages(context.Background(), 100, 0, map[string]interface{}{
+	_, total, err := s.client.GetInboundMessages(context.Background(), 100, 0, map[string]interface{}{
 		"recipient": "john.doe@yahoo.com",
 		"fromdate":  "2015-02-01",
 		"todate":    "2015-03-01",
 		"status":    "blocked",
 	})
-	if err != nil {
-		t.Fatalf("GetInboundMessages: %s", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if total != 7 {
-		t.Fatalf("GetInboundMessages: wrong total (%d)", total)
-	}
+	s.Equal(int64(7), total, "GetInboundMessages: wrong total")
 }
 
-func TestBypassInboundMessage(t *testing.T) {
+func (s *PostmarkTestSuite) TestBypassInboundMessage() {
 	responseJSON := `{
 		"ErrorCode": 0,
 		"Message": "Successfully bypassed message: 792a3e9d-0078-40df-a6b0-fc78f87bf277."
 	}`
 
-	tMux.HandleFunc(pat.Put("/messages/inbound/792a3e9d-0078-40df-a6b0-fc78f87bf277/bypass"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Put("/messages/inbound/792a3e9d-0078-40df-a6b0-fc78f87bf277/bypass"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
 	// Success
-	err := client.BypassInboundMessage(context.Background(), "792a3e9d-0078-40df-a6b0-fc78f87bf277")
-	if err != nil {
-		t.Fatalf("BypassInboundMessage: %s", err.Error())
-	}
+	err := s.client.BypassInboundMessage(context.Background(), "792a3e9d-0078-40df-a6b0-fc78f87bf277")
+	s.Require().NoError(err)
 
 	// Failure
 	responseJSON = `{
 		"ErrorCode": 701,
 		"Message": "This message was not found or cannot be bypassed."
 	}`
-	err = client.BypassInboundMessage(context.Background(), "792a3e9d-0078-40df-a6b0-fc78f87bf277")
-	if err != nil && err.Error() != "This message was not found or cannot be bypassed." {
-		t.Fatalf("BypassInboundMessage should have failed")
+	err = s.client.BypassInboundMessage(context.Background(), "792a3e9d-0078-40df-a6b0-fc78f87bf277")
+	if err != nil {
+		s.Equal("This message was not found or cannot be bypassed.", err.Error(), "BypassInboundMessage should have failed with expected error")
+	} else {
+		s.T().Fatal("BypassInboundMessage should have failed")
 	}
 }
 
-func TestRetryInboundMessage(t *testing.T) {
+func (s *PostmarkTestSuite) TestRetryInboundMessage() {
 	responseJSON := `{
 	  "ErrorCode": 0,
 	  "Message": "Successfully rescheduled failed message: 041e3d29-737d-491e-9a13-a94d3rjkjka13."
 	}`
 
-	tMux.HandleFunc(pat.Put("/messages/inbound/041e3d29-737d-491e-9a13-a94d3rjkjka13/retry"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Put("/messages/inbound/041e3d29-737d-491e-9a13-a94d3rjkjka13/retry"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
 	// Success
-	err := client.RetryInboundMessage(context.Background(), "041e3d29-737d-491e-9a13-a94d3rjkjka13")
-	if err != nil {
-		t.Fatalf("RetryInboundMessage: %s", err.Error())
-	}
+	err := s.client.RetryInboundMessage(context.Background(), "041e3d29-737d-491e-9a13-a94d3rjkjka13")
+	s.Require().NoError(err)
 
 	// Failure
 	responseJSON = `{
@@ -205,8 +192,10 @@ func TestRetryInboundMessage(t *testing.T) {
 	  "Message": "This message was not found or cannot be retried."
 	}`
 
-	err = client.RetryInboundMessage(context.Background(), "041e3d29-737d-491e-9a13-a94d3rjkjka13")
-	if err != nil && err.Error() != "This message was not found or cannot be retried." {
-		t.Fatalf("RetryInboundMessage should have failed")
+	err = s.client.RetryInboundMessage(context.Background(), "041e3d29-737d-491e-9a13-a94d3rjkjka13")
+	if err != nil {
+		s.Equal("This message was not found or cannot be retried.", err.Error(), "RetryInboundMessage should have failed with expected error")
+	} else {
+		s.T().Fatal("RetryInboundMessage should have failed")
 	}
 }

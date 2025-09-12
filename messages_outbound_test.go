@@ -4,12 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"testing"
 
 	"goji.io/pat"
 )
 
-func TestGetOutboundMessage(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetOutboundMessage() {
 	responseJSON := `{
 	  "TextBody": "Thank you for your order...",
 	  "HtmlBody": "<p>Thank you for your order...</p>",
@@ -63,36 +62,30 @@ func TestGetOutboundMessage(t *testing.T) {
 	  ]
 	}`
 
-	tMux.HandleFunc(pat.Get("/messages/outbound/07311c54-0687-4ab9-b034-b54b5bad88ba/details"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/messages/outbound/07311c54-0687-4ab9-b034-b54b5bad88ba/details"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetOutboundMessage(context.Background(), "07311c54-0687-4ab9-b034-b54b5bad88ba")
-	if err != nil {
-		t.Fatalf("GetOutboundMessage: %s", err.Error())
-	}
+	res, err := s.client.GetOutboundMessage(context.Background(), "07311c54-0687-4ab9-b034-b54b5bad88ba")
+	s.Require().NoError(err)
 
-	if res.MessageID != "07311c54-0687-4ab9-b034-b54b5bad88ba" {
-		t.Fatalf("GetOutboundMessage: wrong MessageID (%v)", res.MessageID)
-	}
+	s.Equal("07311c54-0687-4ab9-b034-b54b5bad88ba", res.MessageID, "GetOutboundMessage: wrong MessageID")
 }
 
-func TestGetOutboundMessageDump(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetOutboundMessageDump() {
 	dump := `From: \"John Doe\" <john.doe@yahoo.com> \r\nTo: \"john.doe@yahoo.com\" <john.doe@yahoo.com>\r\nReply-To: joe@domain.com\r\nDate: Fri, 14 Feb 2014 11:12:56 -0500\r\nSubject: Parts Order #5454\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\nX-Mailer: aspNetEmail ver 4.0.0.22\r\nX-Job: 44013_34141\r\nX-virtual-MTA: shared1\r\nX-Complaints-To: abuse@postmarkapp.com\r\nX-PM-RCPT: |bTB8NDQwMTN8MzQxNDF8anBAd2lsZGJpdC5jb20=|\r\nX-PM-Tag: product-orders\r\nX-PM-Message-Id: 07311c54-0687-4ab9-b034-b54b5bad88ba\r\nMessage-ID: <SC-ORD-MAIL4390fbe08b95f4257984dcaed896b4730@SC-ORD-MAIL4>\r\n\r\nThank you for your order=2E=2E=2E\r\n`
 
 	responseJSON := fmt.Sprintf(`{"Body": "%s"}`, dump)
 
-	tMux.HandleFunc(pat.Get("/messages/outbound/07311c54-0687-4ab9-b034-b54b5bad88ba/dump"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/messages/outbound/07311c54-0687-4ab9-b034-b54b5bad88ba/dump"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	_, err := client.GetOutboundMessageDump(context.Background(), "07311c54-0687-4ab9-b034-b54b5bad88ba")
-	if err != nil {
-		t.Fatalf("GetOutboundMessageDump: %s", err.Error())
-	}
+	_, err := s.client.GetOutboundMessageDump(context.Background(), "07311c54-0687-4ab9-b034-b54b5bad88ba")
+	s.Require().NoError(err)
 }
 
-func TestGetOutboundMessages(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetOutboundMessages() {
 	responseJSON := `{
 	  "TotalCount": 194,
 		"Messages": [
@@ -119,27 +112,23 @@ func TestGetOutboundMessages(t *testing.T) {
 		]
 	}`
 
-	tMux.HandleFunc(pat.Get("/messages/outbound"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/messages/outbound"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	_, total, err := client.GetOutboundMessages(context.Background(), 100, 0, map[string]interface{}{
+	_, total, err := s.client.GetOutboundMessages(context.Background(), 100, 0, map[string]interface{}{
 		"recipient": "john.doe@yahoo.com",
 		"tag":       "welcome",
 		"status":    "",
 		"todate":    "2015-01-12",
 		"fromdate":  "2015-01-01",
 	})
-	if err != nil {
-		t.Fatalf("GetOutboundMessages: %s", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if total != 194 {
-		t.Fatalf("GetOutboundMessages: wrong total (%d)", total)
-	}
+	s.Equal(int64(194), total, "GetOutboundMessages: wrong total")
 }
 
-func TestGetOutboundMessagesOpens(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetOutboundMessagesOpens() {
 	responseJSON := `{
 		"TotalCount": 1,
 		"Opens": [
@@ -176,23 +165,19 @@ func TestGetOutboundMessagesOpens(t *testing.T) {
 		]
 
 	}`
-	tMux.HandleFunc(pat.Get("/messages/outbound/opens"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/messages/outbound/opens"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	_, total, err := client.GetOutboundMessagesOpens(context.Background(), 100, 0, map[string]interface{}{
+	_, total, err := s.client.GetOutboundMessagesOpens(context.Background(), 100, 0, map[string]interface{}{
 		"recipient": "john.doe@yahoo.com",
 	})
-	if err != nil {
-		t.Fatalf("GetOutboundMessagesOpens: %s", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if total != 1 {
-		t.Fatalf("GetOutboundMessagesOpens: wrong total (%d)", total)
-	}
+	s.Equal(int64(1), total, "GetOutboundMessagesOpens: wrong total")
 }
 
-func TestGetOutboundMessageOpens(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetOutboundMessageOpens() {
 	responseJSON := `{
 		"TotalCount": 1,
 	  "Opens": [
@@ -228,16 +213,12 @@ func TestGetOutboundMessageOpens(t *testing.T) {
 	  ]
 	}`
 
-	tMux.HandleFunc(pat.Get("/messages/outbound/opens/927e56d4-dc66-4070-bbf0-1db76c2ae14b"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/messages/outbound/opens/927e56d4-dc66-4070-bbf0-1db76c2ae14b"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	_, total, err := client.GetOutboundMessageOpens(context.Background(), "927e56d4-dc66-4070-bbf0-1db76c2ae14b", 100, 0)
-	if err != nil {
-		t.Fatalf("GetOutboundMessageOpens: %s", err.Error())
-	}
+	_, total, err := s.client.GetOutboundMessageOpens(context.Background(), "927e56d4-dc66-4070-bbf0-1db76c2ae14b", 100, 0)
+	s.Require().NoError(err)
 
-	if total != 1 {
-		t.Fatalf("GetOutboundMessageOpens: wrong total (%d)", total)
-	}
+	s.Equal(int64(1), total, "GetOutboundMessageOpens: wrong total")
 }

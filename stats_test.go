@@ -3,12 +3,11 @@ package postmark
 import (
 	"context"
 	"net/http"
-	"testing"
 
 	"goji.io/pat"
 )
 
-func TestGetOutboundStats(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetOutboundStats() {
 	responseJSON := `{
 	  "Sent": 615,
 	  "Bounced": 64,
@@ -24,24 +23,20 @@ func TestGetOutboundStats(t *testing.T) {
 	  "WithReadTimeRecorded": 10
 	}`
 
-	tMux.HandleFunc(pat.Get("/stats/outbound"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/stats/outbound"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetOutboundStats(context.Background(), map[string]interface{}{
+	res, err := s.client.GetOutboundStats(context.Background(), map[string]interface{}{
 		"fromdate": "2014-01-01",
 		"todate":   "2014-02-01",
 	})
-	if err != nil {
-		t.Fatalf("GetOutboundStats: %v", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if res.Sent != 615 {
-		t.Fatalf("GetOutboundStats: wrong Sent: %v", res.Sent)
-	}
+	s.Equal(int64(615), res.Sent, "GetOutboundStats: wrong Sent")
 }
 
-func TestGetSentCounts(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetSentCounts() {
 	responseJSON := `{
 	  "Days": [
 	    {
@@ -64,28 +59,21 @@ func TestGetSentCounts(t *testing.T) {
 	  "Sent": 615
 	}`
 
-	tMux.HandleFunc(pat.Get("/stats/outbound/sends"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/stats/outbound/sends"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetSentCounts(context.Background(), map[string]interface{}{
+	res, err := s.client.GetSentCounts(context.Background(), map[string]interface{}{
 		"fromdate": "2014-01-01",
 		"todate":   "2014-02-01",
 	})
-	if err != nil {
-		t.Fatalf("GetSentCounts: %v", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if res.Sent != 615 {
-		t.Fatalf("GetSentCounts: wrong Sent: %v", res.Sent)
-	}
-
-	if res.Days[0].Sent != 140 {
-		t.Fatalf("GetSentCounts: wrong day Sent count")
-	}
+	s.Equal(int64(615), res.Sent, "GetSentCounts: wrong Sent")
+	s.Equal(int64(140), res.Days[0].Sent, "GetSentCounts: wrong day Sent count")
 }
 
-func TestGetBounceCounts(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetBounceCounts() {
 	responseJSON := `{
 	  "Days": [
 	    {
@@ -113,28 +101,21 @@ func TestGetBounceCounts(t *testing.T) {
 	  "Transient": 16
 	}`
 
-	tMux.HandleFunc(pat.Get("/stats/outbound/bounces"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/stats/outbound/bounces"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetBounceCounts(context.Background(), map[string]interface{}{
+	res, err := s.client.GetBounceCounts(context.Background(), map[string]interface{}{
 		"fromdate": "2014-01-01",
 		"todate":   "2014-02-01",
 	})
-	if err != nil {
-		t.Fatalf("GetBounceCounts: %v", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if res.HardBounce != 12 {
-		t.Fatalf("GetBounceCounts: wrong HardBounce: %v", res.HardBounce)
-	}
-
-	if res.Days[0].HardBounce != 12 {
-		t.Fatalf("GetBounceCounts: wrong day HardBounce count")
-	}
+	s.Equal(int64(12), res.HardBounce, "GetBounceCounts: wrong HardBounce")
+	s.Equal(int64(12), res.Days[0].HardBounce, "GetBounceCounts: wrong day HardBounce count")
 }
 
-func TestGetSpamCounts(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetSpamCounts() {
 	responseJSON := `{
 	  "Days": [
 	    {
@@ -153,28 +134,21 @@ func TestGetSpamCounts(t *testing.T) {
 	  "SpamComplaint": 10
 	}`
 
-	tMux.HandleFunc(pat.Get("/stats/outbound/spam"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/stats/outbound/spam"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetSpamCounts(context.Background(), map[string]interface{}{
+	res, err := s.client.GetSpamCounts(context.Background(), map[string]interface{}{
 		"fromdate": "2014-01-01",
 		"todate":   "2014-02-01",
 	})
-	if err != nil {
-		t.Fatalf("GetSpamCounts: %v", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if res.SpamComplaint != 10 {
-		t.Fatalf("GetSpamCounts: wrong SpamComplaint: %v", res.SpamComplaint)
-	}
-
-	if res.Days[0].SpamComplaint != 2 {
-		t.Fatalf("GetSpamCounts: wrong day SpamComplaint count")
-	}
+	s.Equal(int64(10), res.SpamComplaint, "GetSpamCounts: wrong SpamComplaint")
+	s.Equal(int64(2), res.Days[0].SpamComplaint, "GetSpamCounts: wrong day SpamComplaint count")
 }
 
-func TestGetTrackedCounts(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetTrackedCounts() {
 	responseJSON := `{
 	  "Days": [
 	    {
@@ -201,28 +175,21 @@ func TestGetTrackedCounts(t *testing.T) {
 	  "Tracked": 111
 	}`
 
-	tMux.HandleFunc(pat.Get("/stats/outbound/tracked"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/stats/outbound/tracked"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetTrackedCounts(context.Background(), map[string]interface{}{
+	res, err := s.client.GetTrackedCounts(context.Background(), map[string]interface{}{
 		"fromdate": "2014-01-01",
 		"todate":   "2014-02-01",
 	})
-	if err != nil {
-		t.Fatalf("GetTrackedCounts: %v", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if res.Tracked != 111 {
-		t.Fatalf("GetTrackedCounts: wrong Tracked: %v", res.Tracked)
-	}
-
-	if res.Days[0].Tracked != 24 {
-		t.Fatalf("GetTrackedCounts: wrong day Tracked count")
-	}
+	s.Equal(int64(111), res.Tracked, "GetTrackedCounts: wrong Tracked")
+	s.Equal(int64(24), res.Days[0].Tracked, "GetTrackedCounts: wrong day Tracked count")
 }
 
-func TestGetOpenCounts(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetOpenCounts() {
 	responseJSON := `{
 		"Days": [
 		    {
@@ -255,28 +222,21 @@ func TestGetOpenCounts(t *testing.T) {
 	  "Unique": 26
 	}`
 
-	tMux.HandleFunc(pat.Get("/stats/outbound/opens"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/stats/outbound/opens"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetOpenCounts(context.Background(), map[string]interface{}{
+	res, err := s.client.GetOpenCounts(context.Background(), map[string]interface{}{
 		"fromdate": "2014-01-01",
 		"todate":   "2014-02-01",
 	})
-	if err != nil {
-		t.Fatalf("GetOpenCounts: %v", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if res.Opens != 166 {
-		t.Fatalf("GetOpenCounts: wrong Opens: %v", res.Opens)
-	}
-
-	if res.Days[0].Opens != 44 {
-		t.Fatalf("GetOpenCounts: wrong day Opens count")
-	}
+	s.Equal(int64(166), res.Opens, "GetOpenCounts: wrong Opens")
+	s.Equal(int64(44), res.Days[0].Opens, "GetOpenCounts: wrong day Opens count")
 }
 
-func TestGetPlatformCounts(t *testing.T) {
+func (s *PostmarkTestSuite) TestGetPlatformCounts() {
 	responseJSON := `{
 		"Days": [
 			{
@@ -301,23 +261,16 @@ func TestGetPlatformCounts(t *testing.T) {
 		"WebMail": 2
 	}`
 
-	tMux.HandleFunc(pat.Get("/stats/outbound/platform"), func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(pat.Get("/stats/outbound/platform"), func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	res, err := client.GetPlatformCounts(context.Background(), map[string]interface{}{
+	res, err := s.client.GetPlatformCounts(context.Background(), map[string]interface{}{
 		"fromdate": "2014-01-01",
 		"todate":   "2014-02-01",
 	})
-	if err != nil {
-		t.Fatalf("GetPlatformCounts: %v", err.Error())
-	}
+	s.Require().NoError(err)
 
-	if res.Desktop != 4 {
-		t.Fatalf("GetPlatformCounts: wrong Desktop: %d", res.Desktop)
-	}
-
-	if res.Days[0].Desktop != 1 {
-		t.Fatalf("GetPlatformCounts: wrong day Desktop count")
-	}
+	s.Equal(int64(4), res.Desktop, "GetPlatformCounts: wrong Desktop")
+	s.Equal(int64(1), res.Days[0].Desktop, "GetPlatformCounts: wrong day Desktop count")
 }
