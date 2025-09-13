@@ -242,10 +242,10 @@ extra baggage.
 	* [x] [`GET /servers`](https://postmarkapp.com/developer/api/servers-api#list-servers) - List servers ([servers.go](servers.go))
 	* [x] [`DELETE /servers/{serverid}`](https://postmarkapp.com/developer/api/servers-api#delete-server) - Delete a server ([servers.go](servers.go))
 
-* [ ] **[Inbound Rules Triggers API](https://postmarkapp.com/developer/api/inbound-rules-triggers-api)**
-	* [ ] [`GET /triggers/inboundrules`](https://postmarkapp.com/developer/api/inbound-rules-triggers-api#list-inbound-rule-triggers) - List inbound rule triggers
-	* [ ] [`POST /triggers/inboundrules`](https://postmarkapp.com/developer/api/inbound-rules-triggers-api#create-inbound-rule-trigger) - Create an inbound rule trigger
-	* [ ] [`DELETE /triggers/inboundrules/{triggerid}`](https://postmarkapp.com/developer/api/inbound-rules-triggers-api#delete-trigger) - Delete a single trigger
+* [x] **[Inbound Rules Triggers API](https://postmarkapp.com/developer/api/inbound-rules-triggers-api)**
+	* [x] [`GET /triggers/inboundrules`](https://postmarkapp.com/developer/api/inbound-rules-triggers-api#list-inbound-rule-triggers) - List inbound rule triggers ([inbound_rules_triggers.go](inbound_rules_triggers.go))
+	* [x] [`POST /triggers/inboundrules`](https://postmarkapp.com/developer/api/inbound-rules-triggers-api#create-inbound-rule-trigger) - Create an inbound rule trigger ([inbound_rules_triggers.go](inbound_rules_triggers.go))
+	* [x] [`DELETE /triggers/inboundrules/{triggerid}`](https://postmarkapp.com/developer/api/inbound-rules-triggers-api#delete-trigger) - Delete a single trigger ([inbound_rules_triggers.go](inbound_rules_triggers.go))
 
 * [x] **[Data Removal API](https://postmarkapp.com/developer/api/data-removals-api)**
 	* [x] [`POST /data-removals`](https://postmarkapp.com/developer/api/data-removals-api#create-data-removal-request) - Create a data removal request ([data_removals.go](data_removals.go))

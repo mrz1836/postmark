@@ -141,6 +141,9 @@ func main() {
 
 	// Example 13: Stats API examples
 	demonstrateStatsAPI(client)
+
+	// Example 14: Inbound Rules Triggers API examples
+	demonstrateInboundRulesTriggersAPI(client)
 }
 
 // demonstrateBounceAPI shows examples of using the Bounce API
@@ -528,4 +531,55 @@ func demonstrateClickStatsAPI(ctx context.Context, client *postmark.Client, opti
 		log.Printf("Clicks by Platform - Desktop: %d, Mobile: %d, WebMail: %d, Unknown: %d",
 			clickPlatformCounts.Desktop, clickPlatformCounts.Mobile, clickPlatformCounts.WebMail, clickPlatformCounts.Unknown)
 	}
+}
+
+// demonstrateInboundRulesTriggersAPI shows examples of using the Inbound Rules Triggers API
+func demonstrateInboundRulesTriggersAPI(client *postmark.Client) {
+	ctx := context.Background()
+
+	// List existing inbound rule triggers
+	triggers, totalCount, err := client.GetInboundRuleTriggers(ctx, 50, 0)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Found %d inbound rule triggers out of %d total", len(triggers), totalCount)
+	for _, trigger := range triggers {
+		log.Printf("Trigger ID %d: %s", trigger.ID, trigger.Rule)
+	}
+
+	// Create inbound rule trigger for blocking specific email
+	emailTrigger, err := client.CreateInboundRuleTrigger(ctx, "spam@example.com")
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Created email trigger: ID %d blocking '%s'", emailTrigger.ID, emailTrigger.Rule)
+
+	// Create inbound rule trigger for blocking entire domain
+	domainTrigger, err := client.CreateInboundRuleTrigger(ctx, "*.spammer.com")
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Created domain trigger: ID %d blocking '%s'", domainTrigger.ID, domainTrigger.Rule)
+
+	// Delete the created triggers (cleanup)
+	err = client.DeleteInboundRuleTrigger(ctx, emailTrigger.ID)
+	if err != nil {
+		log.Printf("Failed to delete email trigger: %v", err)
+	} else {
+		log.Printf("Deleted email trigger: ID %d", emailTrigger.ID)
+	}
+
+	err = client.DeleteInboundRuleTrigger(ctx, domainTrigger.ID)
+	if err != nil {
+		log.Printf("Failed to delete domain trigger: %v", err)
+	} else {
+		log.Printf("Deleted domain trigger: ID %d", domainTrigger.ID)
+	}
+
+	// List triggers again to confirm deletion
+	triggersAfter, totalCountAfter, err := client.GetInboundRuleTriggers(ctx, 50, 0)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("After cleanup: %d inbound rule triggers out of %d total", len(triggersAfter), totalCountAfter)
 }
