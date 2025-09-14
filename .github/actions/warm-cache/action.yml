@@ -163,7 +163,13 @@ runs:
       run: |
         set -euo pipefail
         echo "🔧 Build cache miss - pre-building packages..."
-        magex build:prebuild
+
+        echo "============================================================"
+        echo "=== Pre-building Packages ==="
+        echo "============================================================"
+
+        # Limit parallelism to avoid OOM on GitHub Actions runners
+        go build -p 2 ./...
 
         echo "🏗️ Building stdlib for host platform…"
         magex install:stdlib

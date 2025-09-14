@@ -36,6 +36,7 @@ on:
 # Security: Restrictive default permissions with job-level overrides for least privilege access
 permissions:
   contents: read
+  actions: read # Required for artifact downloads
 
 jobs:
   # ----------------------------------------------------------------------------------
@@ -46,6 +47,7 @@ jobs:
     if: always() # Always run to check results even if jobs continued on error
     permissions:
       contents: read # Read repository content for validation
+      actions: read # Read workflow artifacts for download
     runs-on: ${{ inputs.primary-runner }}
 
     steps:
