@@ -107,6 +107,7 @@ on:
 # Security: Restrictive default permissions with job-level overrides for least privilege access
 permissions:
   contents: read # Default read-only access to repository contents
+  actions: read # Required for test validation workflow to access artifacts
 
 jobs:
   # ----------------------------------------------------------------------------------
@@ -171,6 +172,7 @@ jobs:
       pages: write # Required: Coverage workflow needs to deploy to GitHub Pages
       id-token: write # Required: Coverage workflow needs GitHub Pages authentication
       statuses: write # Required: Coverage workflow needs to create commit status checks
+      actions: read # Required: Coverage workflow needs to access artifacts from workflow runs
     uses: ./.github/workflows/fortress-coverage.yml
     with:
       coverage-file: coverage.txt

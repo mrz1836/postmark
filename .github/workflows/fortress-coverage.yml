@@ -51,6 +51,7 @@ on:
 # Security: Restrictive default permissions with job-level overrides
 permissions:
   contents: read
+  actions: read # Required for artifact downloads
 
 jobs:
   # ----------------------------------------------------------------------------------
@@ -112,6 +113,7 @@ jobs:
       id-token: write # Required: GitHub Pages authentication
       pull-requests: write # Required: Create PR comments with coverage
       statuses: write # Required: Create commit status checks
+      actions: read # Required: Download artifacts from workflow runs
 
     steps:
       # ————————————————————————————————————————————————————————————————
@@ -2299,6 +2301,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      actions: read # Required: Download artifacts from workflow runs
     steps:
       # ————————————————————————————————————————————————————————————————
       # Setup and environment

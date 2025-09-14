@@ -238,6 +238,7 @@ jobs:
       pages: write # Required: Coverage workflow needs to deploy to GitHub Pages
       id-token: write # Required: Coverage workflow needs GitHub Pages authentication
       statuses: write # Required: Coverage workflow needs to create commit status checks
+      actions: read # Required: Test validation workflow needs to access artifacts
     uses: ./.github/workflows/fortress-test-suite.yml
     with:
       code-coverage-enabled: ${{ needs.setup.outputs.code-coverage-enabled }}
@@ -408,6 +409,7 @@ jobs:
     needs: [load-env, setup, test-magex, pre-commit, security, code-quality, test-suite, benchmarks, release, status-check]
     permissions:
       contents: read # Read repository content for completion report
+      actions: read # Required for artifact downloads
     uses: ./.github/workflows/fortress-completion-report.yml
     with:
       benchmarks-result: ${{ needs.benchmarks.result }}

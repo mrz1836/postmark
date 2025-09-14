@@ -41,6 +41,7 @@ on:
 # Security: Restrictive default permissions with job-level overrides for least privilege access
 permissions:
   contents: read
+  actions: read # Required for artifact downloads
 
 jobs:
   # ----------------------------------------------------------------------------------
