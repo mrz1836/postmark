@@ -10,9 +10,9 @@
 
 name: GoFortress (Version Release)
 
-# ————————————————————————————————————————————————————————————————
+# --------------------------------------------------------------------
 # Workflow Call Configuration
-# ————————————————————————————————————————————————————————————————
+# --------------------------------------------------------------------
 on:
   workflow_call:
     inputs:
@@ -30,6 +30,10 @@ on:
         type: string
       golangci-lint-version:
         description: "Version of golangci-lint to use"
+        required: true
+        type: string
+      go-sum-file:
+        description: "Path to go.sum file for dependency verification"
         required: true
         type: string
     secrets:
@@ -54,18 +58,18 @@ jobs:
     permissions:
       contents: write # Required: "magex release" creates GitHub releases and uploads assets
     steps:
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Checkout code and set up Go environment
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📥 Checkout code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           fetch-depth: 0 # Required for changelog generation
           token: ${{ secrets.github-token }}
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Set environment variables from JSON input
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔧 Set environment variables
         env:
           ENV_JSON: ${{ inputs.env-json }}
@@ -75,9 +79,9 @@ jobs:
             echo "$key=$value" >> $GITHUB_ENV
           done
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Setup Go with caching and version management
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🏗️ Setup Go with Cache
         id: setup-go-release
         uses: ./.github/actions/setup-go-with-cache
@@ -86,10 +90,11 @@ jobs:
           matrix-os: ${{ inputs.primary-runner }}
           go-primary-version: ${{ inputs.go-primary-version }}
           go-secondary-version: ${{ inputs.go-primary-version }}
+          go-sum-file: ${{ inputs.go-sum-file }}
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Validate version tag format
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🏷️ Validate version tag
         id: validate-tag
         run: |
@@ -117,18 +122,26 @@ jobs:
           echo "version_without_v=${TAG#v}" >> $GITHUB_OUTPUT
           echo "is_prerelease=$([[ -n "$PRERELEASE" ]] && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
+      # Extract Go module directory from GO_SUM_FILE path
+      # --------------------------------------------------------------------
+      - name: 🔧 Extract Go module directory
+        uses: ./.github/actions/extract-module-dir
+        with:
+          go-sum-file: ${{ inputs.go-sum-file }}
+
+      # --------------------------------------------------------------------
       # Setup MAGE-X (required for magex godocs command)
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔧 Setup MAGE-X
         uses: ./.github/actions/setup-magex
         with:
           magex-version: ${{ env.MAGE_X_VERSION }}
           runner-os: ${{ inputs.primary-runner }}
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Extract GoReleaser version from environment
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔧 Extract GoReleaser version
         id: extract-goreleaser
         run: |
@@ -143,9 +156,9 @@ jobs:
           echo "✅ Using GoReleaser version: $GORELEASER_VERSION"
           echo "version=$GORELEASER_VERSION" >> $GITHUB_OUTPUT
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Setup GoReleaser (required for magex release:validate command)
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🚀 Setup GoReleaser
         uses: ./.github/actions/setup-goreleaser
         env:
@@ -154,38 +167,52 @@ jobs:
           goreleaser-version: ${{ steps.extract-goreleaser.outputs.version }}
           runner-os: ${{ inputs.primary-runner }}
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Restore Cache golangci-lint (helps if linter is run as part of release)
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 💾 Cache golangci-lint analysis
         id: cache-golangci-lint
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: ${{ env.GOLANGCI_LINT_CACHE }}
-          key: ${{ inputs.primary-runner }}-golangci-lint-analysis-${{ hashFiles('.golangci.json', '**/go.sum') }}-${{ inputs.golangci-lint-version }}
+          key: ${{ inputs.primary-runner }}-golangci-lint-analysis-${{ hashFiles('.golangci.json', env.GO_SUM_FILE) }}-${{ inputs.golangci-lint-version }}
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Pre-flight config validation
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔍 Validate GoReleaser configuration
         id: validate-goreleaser-configuration
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "🔍 Validating GoReleaser configuration via MAGE-X..."
+          GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
 
-          if magex release:validate --verbose; then
-            echo "✅ GoReleaser configuration is valid"
-            echo "goreleaser_config_status=valid" >> $GITHUB_OUTPUT
+          if [ -n "$GO_MODULE_DIR" ]; then
+            echo "🔧 Running magex release:validate from directory: $GO_MODULE_DIR"
+            if (cd "$GO_MODULE_DIR" && magex release:validate --verbose); then
+              echo "✅ GoReleaser configuration is valid"
+              echo "goreleaser_config_status=valid" >> $GITHUB_OUTPUT
+            else
+              echo "❌ GoReleaser configuration is invalid" >&2
+              echo "goreleaser_config_status=invalid" >> $GITHUB_OUTPUT
+              exit 1
+            fi
           else
-            echo "❌ GoReleaser configuration is invalid" >&2
-            echo "goreleaser_config_status=invalid" >> $GITHUB_OUTPUT
-            exit 1
+            echo "🔧 Running magex release:validate from repository root"
+            if magex release:validate --verbose; then
+              echo "✅ GoReleaser configuration is valid"
+              echo "goreleaser_config_status=valid" >> $GITHUB_OUTPUT
+            else
+              echo "❌ GoReleaser configuration is invalid" >&2
+              echo "goreleaser_config_status=invalid" >> $GITHUB_OUTPUT
+              exit 1
+            fi
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Extract changelog information
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📝 Extract changelog information
         id: changelog
         run: |
@@ -262,9 +289,9 @@ jobs:
             echo "EOF" >> $GITHUB_OUTPUT
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Build and publish the release (using magex to ensure Go version consistency)
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🚀 Run GoReleaser via MAGE-X
         id: goreleaser
         env:
@@ -277,35 +304,67 @@ jobs:
           ENABLE_GODOCS=$(echo '${{ inputs.env-json }}' | jq -r '.ENABLE_GODOCS_PUBLISHING // "false"')
 
           # Run release with or without godocs based on configuration
+          GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
+
           if [[ "$ENABLE_GODOCS" == "true" ]]; then
             echo "📚 Running release with godocs publishing enabled..."
-            if magex release godocs -v; then
-              echo "✅ GoReleaser with godocs via MAGE-X completed successfully"
-              echo "goreleaser_status=success" >> $GITHUB_OUTPUT
-              echo "godocs_published=true" >> $GITHUB_OUTPUT
+            if [ -n "$GO_MODULE_DIR" ]; then
+              echo "🔧 Running magex release godocs from directory: $GO_MODULE_DIR"
+              if (cd "$GO_MODULE_DIR" && magex release godocs -v); then
+                echo "✅ GoReleaser with godocs via MAGE-X completed successfully"
+                echo "goreleaser_status=success" >> $GITHUB_OUTPUT
+                echo "godocs_published=true" >> $GITHUB_OUTPUT
+              else
+                echo "❌ GoReleaser with godocs via MAGE-X encountered issues" >&2
+                echo "goreleaser_status=failure" >> $GITHUB_OUTPUT
+                echo "godocs_published=false" >> $GITHUB_OUTPUT
+                exit 1
+              fi
             else
-              echo "❌ GoReleaser with godocs via MAGE-X encountered issues" >&2
-              echo "goreleaser_status=failure" >> $GITHUB_OUTPUT
-              echo "godocs_published=false" >> $GITHUB_OUTPUT
-              exit 1
+              echo "🔧 Running magex release godocs from repository root"
+              if magex release godocs -v; then
+                echo "✅ GoReleaser with godocs via MAGE-X completed successfully"
+                echo "goreleaser_status=success" >> $GITHUB_OUTPUT
+                echo "godocs_published=true" >> $GITHUB_OUTPUT
+              else
+                echo "❌ GoReleaser with godocs via MAGE-X encountered issues" >&2
+                echo "goreleaser_status=failure" >> $GITHUB_OUTPUT
+                echo "godocs_published=false" >> $GITHUB_OUTPUT
+                exit 1
+              fi
             fi
           else
             echo "ℹ️ Running release without godocs publishing..."
-            if magex release -v; then
-              echo "✅ GoReleaser via MAGE-X completed successfully"
-              echo "goreleaser_status=success" >> $GITHUB_OUTPUT
-              echo "godocs_published=skipped" >> $GITHUB_OUTPUT
+            if [ -n "$GO_MODULE_DIR" ]; then
+              echo "🔧 Running magex release from directory: $GO_MODULE_DIR"
+              if (cd "$GO_MODULE_DIR" && magex release -v); then
+                echo "✅ GoReleaser via MAGE-X completed successfully"
+                echo "goreleaser_status=success" >> $GITHUB_OUTPUT
+                echo "godocs_published=skipped" >> $GITHUB_OUTPUT
+              else
+                echo "❌ GoReleaser via MAGE-X encountered issues" >&2
+                echo "goreleaser_status=failure" >> $GITHUB_OUTPUT
+                echo "godocs_published=skipped" >> $GITHUB_OUTPUT
+                exit 1
+              fi
             else
-              echo "❌ GoReleaser via MAGE-X encountered issues" >&2
-              echo "goreleaser_status=failure" >> $GITHUB_OUTPUT
-              echo "godocs_published=skipped" >> $GITHUB_OUTPUT
-              exit 1
+              echo "🔧 Running magex release from repository root"
+              if magex release -v; then
+                echo "✅ GoReleaser via MAGE-X completed successfully"
+                echo "goreleaser_status=success" >> $GITHUB_OUTPUT
+                echo "godocs_published=skipped" >> $GITHUB_OUTPUT
+              else
+                echo "❌ GoReleaser via MAGE-X encountered issues" >&2
+                echo "goreleaser_status=failure" >> $GITHUB_OUTPUT
+                echo "godocs_published=skipped" >> $GITHUB_OUTPUT
+                exit 1
+              fi
             fi
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Generate release summary
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📊 Generate release summary
         if: always()
         run: |
@@ -353,9 +412,9 @@ jobs:
             echo "Please check the workflow logs for more details." >> $GITHUB_STEP_SUMMARY
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Collect cache statistics
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📊 Collect cache statistics
         id: cache-stats-release
         if: always()
@@ -369,9 +428,9 @@ jobs:
           gomod-cache-hit: ${{ steps.setup-go-release.outputs.module-cache-hit }}
           gobuild-cache-hit: ${{ steps.setup-go-release.outputs.build-cache-hit }}
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Upload infrastructure cache statistics
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📤 Upload infrastructure cache statistics
         if: always()
         uses: ./.github/actions/upload-statistics

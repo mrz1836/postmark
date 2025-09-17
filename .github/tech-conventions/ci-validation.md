@@ -76,7 +76,7 @@ All PRs must pass these checks before merge:
     path: |
       ~/go/pkg/mod
       ~/.cache/go-build
-    key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+    key: ${{ runner.os }}-go-${{ hashFiles('${{ $GO_SUM_FILE }}') }}
 ```
 
 <br><br>

@@ -46,13 +46,16 @@ inputs:
     description: "Whether to force pull Redis images even when cached"
     required: false
     default: "false"
+  go-sum-file:
+    description: "Path to go.sum file for cache key generation"
+    required: true
 
 runs:
   using: "composite"
   steps:
-    # ————————————————————————————————————————————————————————————————
+    # --------------------------------------------------------------------
     # Parse environment variables
-    # ————————————————————————————————————————————————————————————————
+    # --------------------------------------------------------------------
     - name: 🔧 Parse environment variables
       shell: bash
       env:
@@ -63,15 +66,15 @@ runs:
           echo "$key=$value" >> $GITHUB_ENV
         done
 
-    # ————————————————————————————————————————————————————————————————
+    # --------------------------------------------------------------------
     # Checkout code to access local actions (setup-go-with-cache, setup-magex)
-    # ————————————————————————————————————————————————————————————————
+    # --------------------------------------------------------------------
     - name: 📥 Checkout code
       uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-    # ————————————————————————————————————————————————————————————————
+    # --------------------------------------------------------------------
     # Set environment variables
-    # ————————————————————————————————————————————————————————————————
+    # --------------------------------------------------------------------
     - name: ⚙️ Set cache paths
       id: set-cache-env
       shell: bash
@@ -93,6 +96,7 @@ runs:
         matrix-os: ${{ inputs.matrix-os }}
         go-primary-version: ${{ inputs.go-primary-version }}
         go-secondary-version: ${{ inputs.go-secondary-version }}
+        go-sum-file: ${{ inputs.go-sum-file }}
 
     # ────────────────────────────────────────────────────────────────────────────
     # Setup MAGE-X (required for magex commands in cache warming)
@@ -103,9 +107,9 @@ runs:
         magex-version: ${{ env.MAGE_X_VERSION }}
         runner-os: ${{ inputs.matrix-os }}
 
-    # ————————————————————————————————————————————————————————————————
+    # --------------------------------------------------------------------
     # Warm Redis Docker image cache
-    # ————————————————————————————————————————————————————————————————
+    # --------------------------------------------------------------------
     - name: 🗄️ Warm Redis Cache
       if: inputs.redis-enabled == 'true'
       id: warm-redis
@@ -115,19 +119,50 @@ runs:
         runner-os: ${{ inputs.matrix-os }}
         force-pull: ${{ inputs.redis-cache-force-pull }}
 
-    # ————————————————————————————————————————————————————————————————
+    # --------------------------------------------------------------------
+    # Extract Go module directory from GO_SUM_FILE path
+    # --------------------------------------------------------------------
+    - name: 🔧 Extract Go module directory
+      id: extract-module-dir
+      shell: bash
+      run: |
+        GO_SUM_FILE="${{ inputs.go-sum-file }}"
+        GO_MODULE_DIR=$(dirname "$GO_SUM_FILE")
+
+        # Handle root directory case (dirname returns ".")
+        if [ "$GO_MODULE_DIR" = "." ]; then
+          GO_MODULE_DIR=""
+          echo "📁 Go module directory: repository root"
+        else
+          echo "📁 Go module directory: $GO_MODULE_DIR"
+        fi
+
+        # Export for subsequent steps
+        echo "GO_MODULE_DIR=$GO_MODULE_DIR" >> $GITHUB_ENV
+        echo "module-dir=$GO_MODULE_DIR" >> $GITHUB_OUTPUT
+
+    # --------------------------------------------------------------------
     # Ensure go.sum exists and download modules
-    # ————————————————————————————————————————————————————————————————
+    # --------------------------------------------------------------------
     - name: 📋 Ensure go.sum exists
       shell: bash
       run: |
-        echo "🔍 Checking for go.sum file..."
-        if [ ! -f go.sum ]; then
-          echo "⚠️ go.sum not found, running 'magex tidy' to generate it."
-          magex tidy
-          echo "✅ go.sum generated successfully"
+        GO_SUM_FILE="${{ inputs.go-sum-file }}"
+        GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
+
+        echo "🔍 Checking for go.sum file at: $GO_SUM_FILE"
+        if [ ! -f "$GO_SUM_FILE" ]; then
+          echo "⚠️ Go.sum not found at $GO_SUM_FILE, running 'magex tidy' to generate it."
+          if [ -n "$GO_MODULE_DIR" ]; then
+            echo "🔧 Running magex tidy from directory: $GO_MODULE_DIR"
+            (cd "$GO_MODULE_DIR" && magex tidy)
+          else
+            echo "🔧 Running magex tidy from repository root"
+            magex tidy
+          fi
+          echo "✅ Go.sum generated successfully at $GO_SUM_FILE"
         else
-          echo "✅ go.sum already exists"
+          echo "✅ Go.sum already exists at $GO_SUM_FILE"
         fi
 
     # ────────────────────────────────────────────────────────────────────────────
@@ -150,8 +185,20 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
         echo "⬇️ Module cache miss - downloading modules..."
-        magex deps:download
+
+        echo "============================================================"
+        echo "=== Downloading Dependencies ==="
+        echo "============================================================"
+
+        if [ -n "$GO_MODULE_DIR" ]; then
+          echo "🔧 Running magex deps:download from directory: $GO_MODULE_DIR"
+          (cd "$GO_MODULE_DIR" && magex deps:download)
+        else
+          echo "🔧 Running magex deps:download from repository root"
+          magex deps:download
+        fi
         echo "✅ Modules downloaded successfully"
 
     # ────────────────────────────────────────────────────────────────────────────
@@ -162,17 +209,32 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
         echo "🔧 Build cache miss - pre-building packages..."
 
         echo "============================================================"
         echo "=== Pre-building Packages ==="
         echo "============================================================"
 
-        # Limit parallelism to avoid OOM on GitHub Actions runners
-        go build -p 2 ./...
+        # Use MAGE_X_PARALLEL from env if set, otherwise default to 1 for memory safety
+        PARALLEL_JOBS="${MAGE_X_PARALLEL:-1}"
+        echo "🔧 Using parallelism level: $PARALLEL_JOBS (from MAGE_X_PARALLEL env var)"
 
-        echo "🏗️ Building stdlib for host platform…"
-        magex install:stdlib
+        if [ -n "$GO_MODULE_DIR" ]; then
+          echo "🔧 Running build commands from directory: $GO_MODULE_DIR"
+          # Use configured parallelism to avoid OOM on GitHub Actions runners
+          (cd "$GO_MODULE_DIR" && magex build:prebuild p="$PARALLEL_JOBS" strategy=smart)
+
+          echo "🏗️ Building stdlib for host platform..."
+          (cd "$GO_MODULE_DIR" && magex install:stdlib)
+        else
+          echo "🔧 Running build commands from repository root"
+          # Use configured parallelism to avoid OOM on GitHub Actions runners
+          magex build:prebuild p="$PARALLEL_JOBS" strategy=smart
+
+          echo "🏗️ Building stdlib for host platform..."
+          magex install:stdlib
+        fi
 
         echo "✅ Build cache warmed for Go ${{ inputs.go-version }}"
 
@@ -186,7 +248,7 @@ runs:
         path: |
           ~/.cache/go-build
           ~/.cache/go-build/test
-        key: ${{ inputs.matrix-os }}-gobuild-${{ inputs.go-version }}-${{ hashFiles('**/go.sum') }}
+        key: ${{ inputs.matrix-os }}-gobuild-${{ inputs.go-version }}-${{ hashFiles(inputs.go-sum-file) }}
 
     # ────────────────────────────────────────────────────────────────────────────
     # Save the Go module cache we just populated
@@ -196,11 +258,11 @@ runs:
       uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.0.2
       with:
         path: ~/go/pkg/mod
-        key: ${{ inputs.matrix-os }}-gomod-${{ hashFiles('**/go.sum') }}
+        key: ${{ inputs.matrix-os }}-gomod-${{ hashFiles(inputs.go-sum-file) }}
 
-    # ————————————————————————————————————————————————————————————————
+    # --------------------------------------------------------------------
     # Track cache performance (no outputs - use artifacts instead)
-    # ————————————————————————————————————————————————————————————————
+    # --------------------------------------------------------------------
     - name: 📊 Calculate cache statistics
       id: cache-summary
       if: always()
@@ -253,9 +315,9 @@ runs:
           fi
         fi
 
-    # ————————————————————————————————————————————————————————————————
+    # --------------------------------------------------------------------
     # Upload cache statistics
-    # ————————————————————————————————————————————————————————————————
+    # --------------------------------------------------------------------
     - name: 📤 Upload cache statistics
       if: always()
       uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3

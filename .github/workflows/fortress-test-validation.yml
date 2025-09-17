@@ -51,23 +51,23 @@ jobs:
     runs-on: ${{ inputs.primary-runner }}
 
     steps:
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Checkout code (required for local actions)
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📥 Checkout code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Parse environment variables
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔧 Parse environment variables
         uses: ./.github/actions/parse-env
         with:
           env-json: ${{ inputs.env-json }}
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Download unit test result artifacts with resilience
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📥 Download unit test results (with retry)
         uses: ./.github/actions/download-artifact-resilient
         with:
@@ -102,9 +102,9 @@ jobs:
           timeout: ${{ env.ARTIFACT_DOWNLOAD_TIMEOUT }}
           continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Flatten downloaded artifacts to expected directory structure
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🗂️ Flatten downloaded artifacts
         if: always()
         run: |
@@ -133,9 +133,9 @@ jobs:
             echo "⚠️ No test-results directory found"
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Deduplicate test failures across matrix jobs
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔄 Deduplicate test failures
         run: |
           echo "🔄 Deduplicating test failures across matrix jobs..."
@@ -147,13 +147,17 @@ jobs:
           TOTAL_UNIQUE_FAILURES=0
 
           # Collect all signature files from different matrix jobs (including subdirectories)
-          if compgen -G "test-results/*test-failures-signatures.json" >/dev/null 2>&1; then
+          # Check for both regular test signatures and fuzz test signatures
+          SIGNATURE_PATTERN_1="test-results/*test-failures-signatures.json"
+          SIGNATURE_PATTERN_2="test-results/*fuzz-failures-signatures.json"
+
+          if compgen -G "$SIGNATURE_PATTERN_1" >/dev/null 2>&1 || compgen -G "$SIGNATURE_PATTERN_2" >/dev/null 2>&1; then
             echo "📋 Found failure signature files:"
-            ls -la test-results/*test-failures-signatures.json 2>/dev/null || echo "No signature files found"
+            ls -la test-results/*test-failures-signatures.json test-results/*fuzz-failures-signatures.json 2>/dev/null || echo "No signature files found"
 
             # Debug: Show content of signature files
             echo "🔍 Debugging signature file contents:"
-            for sig_file in test-results/*test-failures-signatures.json; do
+            for sig_file in test-results/*test-failures-signatures.json test-results/*fuzz-failures-signatures.json; do
               if [[ -f "$sig_file" ]]; then
                 echo "📄 File: $sig_file"
                 echo "  • File size: $(wc -c < "$sig_file") bytes"
@@ -163,7 +167,7 @@ jobs:
             done
 
             # Merge all signature files and deduplicate by signature
-            for sig_file in test-results/*test-failures-signatures.json; do
+            for sig_file in test-results/*test-failures-signatures.json test-results/*fuzz-failures-signatures.json; do
               if [[ -s "$sig_file" ]]; then
                 echo "📄 Processing: $sig_file"
                 RAW_COUNT=$(jq 'length' "$sig_file" 2>/dev/null || echo "0")
@@ -175,16 +179,28 @@ jobs:
             done
 
             # Combine all signature files and deduplicate
-            jq -s 'add | group_by(.signature) | map({
-              signature: .[0].signature,
-              unique_id: .[0].unique_id,
-              type: .[0].type,
-              package: .[0].package,
-              test: .[0].test,
-              output: .[0].output,
-              occurrences: length,
-              matrix_jobs: [.[].matrix_job // "unknown"] | unique
-            })' test-results/*test-failures-signatures.json > deduplicated-failures.json 2>/dev/null || echo '[]' > deduplicated-failures.json
+            # Create a list of all signature files that exist
+            SIGNATURE_FILES=""
+            for pattern in test-results/*test-failures-signatures.json test-results/*fuzz-failures-signatures.json; do
+              if [[ -f "$pattern" ]]; then
+                SIGNATURE_FILES="$SIGNATURE_FILES $pattern"
+              fi
+            done
+
+            if [[ -n "$SIGNATURE_FILES" ]]; then
+              jq -s 'add | group_by(.signature) | map({
+                signature: .[0].signature,
+                unique_id: .[0].unique_id,
+                type: .[0].type,
+                package: .[0].package,
+                test: .[0].test,
+                output: .[0].output,
+                occurrences: length,
+                matrix_jobs: [.[].matrix_job // "unknown"] | unique
+              })' $SIGNATURE_FILES > deduplicated-failures.json 2>/dev/null || echo '[]' > deduplicated-failures.json
+            else
+              echo '[]' > deduplicated-failures.json
+            fi
 
             TOTAL_UNIQUE_FAILURES=$(jq 'length' deduplicated-failures.json 2>/dev/null || echo "0")
 
@@ -230,9 +246,9 @@ jobs:
             duplicates_eliminated: (($raw | tonumber) - ($unique | tonumber))
           }' > deduplication-stats.json
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Enhanced test results validation with deduplication
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔍 Validate test results
         run: |
           echo "🔍 Validating test results using deduplicated failure analysis..."
@@ -297,18 +313,20 @@ jobs:
                   echo "📄 Processing summary file: $summary_file for failure counting"
 
                   # Count test failures - handle both regular test format and fuzz test format
-                  LEGACY_TEST_COUNT=$(jq '[.[] | select(.failures) | .failures[]] | length' "$summary_file" 2>/dev/null || echo "0")
+                  # Regular test format: .failures array contains individual test failures (excluding fuzz tests)
+                  LEGACY_TEST_COUNT=$(jq '[.[] | select(.failures and ((.Type // null) != "test")) | .failures[]] | length' "$summary_file" 2>/dev/null || echo "0")
 
-                  # Also count entries that are fuzz tests (Type == "test" and has .failures field with content)
-                  FUZZ_TEST_COUNT=$(jq '[.[] | select(.Type == "test" and (.failures // [] | length > 0))] | length' "$summary_file" 2>/dev/null || echo "0")
+                  # Count fuzz test failures - fuzz tests have Type field and failures array
+                  # This counts the number of individual test failures within fuzz test entries
+                  FUZZ_TEST_FAILURES=$(jq '[.[] | select((.Type // null) == "test") | (.failures // [])[]] | length' "$summary_file" 2>/dev/null || echo "0")
 
                   # Count build failures
-                  BUILD_COUNT=$(jq '[.[] | select(.Type == "build")] | length' "$summary_file" 2>/dev/null || echo "0")
+                  BUILD_COUNT=$(jq '[.[] | select((.Type // null) == "build")] | length' "$summary_file" 2>/dev/null || echo "0")
 
-                  LEGACY_COUNT=$((LEGACY_TEST_COUNT + FUZZ_TEST_COUNT))
+                  LEGACY_COUNT=$((LEGACY_TEST_COUNT + FUZZ_TEST_FAILURES))
                   TOTAL_FAILURES=$((TOTAL_FAILURES + LEGACY_COUNT + BUILD_COUNT))
 
-                  echo "  • Test failures: $LEGACY_TEST_COUNT, Fuzz failures: $FUZZ_TEST_COUNT, Build failures: $BUILD_COUNT"
+                  echo "  • Test failures: $LEGACY_TEST_COUNT, Fuzz failures: $FUZZ_TEST_FAILURES, Build failures: $BUILD_COUNT"
                   echo "  • Total from this file: $((LEGACY_COUNT + BUILD_COUNT))"
                 fi
               done
@@ -334,7 +352,7 @@ jobs:
                 echo "📊 Checking $stats_file..."
 
                 # Extract fuzz test results
-                FUZZ_PASSED=$(jq -r '.test_passed // empty' "$stats_file")
+                FUZZ_PASSED=$(jq -r '.test_passed // false' "$stats_file")
                 FUZZ_EXIT_CODE=$(jq -r '.test_exit_code // empty' "$stats_file")
                 FUZZ_NAME=$(jq -r '.name // empty' "$stats_file")
 
@@ -372,8 +390,8 @@ jobs:
 
                   # Count all failure types
                   RECOUNT_TEST=$(jq '[.[] | select(.failures) | .failures[]] | length' "$summary_file" 2>/dev/null || echo "0")
-                  RECOUNT_FUZZ=$(jq '[.[] | select(.Type == "test" and (.failures // [] | length > 0))] | length' "$summary_file" 2>/dev/null || echo "0")
-                  RECOUNT_BUILD=$(jq '[.[] | select(.Type == "build")] | length' "$summary_file" 2>/dev/null || echo "0")
+                  RECOUNT_FUZZ=$(jq '[.[] | select((.Type // null) == "test") | (.failures // [])[]] | length' "$summary_file" 2>/dev/null || echo "0")
+                  RECOUNT_BUILD=$(jq '[.[] | select((.Type // null) == "build")] | length' "$summary_file" 2>/dev/null || echo "0")
 
                   FILE_FAILURES=$((RECOUNT_TEST + RECOUNT_FUZZ + RECOUNT_BUILD))
                   TOTAL_FAILURES=$((TOTAL_FAILURES + FILE_FAILURES))
@@ -428,7 +446,7 @@ jobs:
               fi
 
               # Show test failures with enhanced details
-              TEST_FAILURES=$(jq -r '.[] | select(.type == "test") |
+              TEST_FAILURES=$(jq -r '.[] | select(.type == "test" and (.test | startswith("Fuzz") | not)) |
                 "  📦 " + (.package | split("/") | .[-1] // .[-2] // .) + ": " + .test + " (" + (.occurrences | tostring) + " matrix jobs)"' deduplicated-failures.json 2>/dev/null)
               if [[ -n "$TEST_FAILURES" ]]; then
                 echo ""
@@ -440,7 +458,7 @@ jobs:
                 echo ""
                 echo "📝 Test Error Details:"
                 echo "---------------------"
-                jq -r '.[] | select(.type == "test") |
+                jq -r '.[] | select(.type == "test" and (.test | startswith("Fuzz") | not)) |
                   "❌ " + .test + " (" + (.package | split("/") | .[-1] // .[-2] // .) + "):" +
                   "\n" + (.output // "No error output available")' deduplicated-failures.json 2>/dev/null | head -c 3000
               fi
@@ -484,48 +502,54 @@ jobs:
                   echo "📦 Package Summary:"
 
                   # Show build failures first
-                  BUILD_PACKAGES=$(jq -r '.[] | select(.Type == "build") | select(.Package | test("^[a-zA-Z0-9/_.-]+$")) | "  🔨 \(.Package | split("/") | .[-1] // .[-2] // .): Build failed"' "$failure_file" 2>/dev/null || true)
+                  BUILD_PACKAGES=$(jq -r '.[] | select((.Type // null) == "build") | select(.Package | test("^[a-zA-Z0-9/_.-]+$")) | "  🔨 \(.Package | split("/") | .[-1] // .[-2] // .): Build failed"' "$failure_file" 2>/dev/null || true)
                   if [[ -n "$BUILD_PACKAGES" ]]; then
                     echo "$BUILD_PACKAGES"
                   fi
 
-                  # Then show test failures
-                  TEST_PACKAGES=$(jq -r '.[] | select(.Type == "test" or .Type == null) | select(.Package | test("^[a-zA-Z0-9/_.-]+$")) | "  📦 \(.Package | split("/") | .[-1] // .[-2] // .): \(.failures | length) test failure(s)"' "$failure_file" 2>/dev/null || true)
+                  # Show regular test failures
+                  TEST_PACKAGES=$(jq -r '.[] | select((.Type // null) == null) | select(.Package | test("^[a-zA-Z0-9/_.-]+$")) | "  📦 \(.Package | split("/") | .[-1] // .[-2] // .): \(.failures | length) test failure(s)"' "$failure_file" 2>/dev/null || true)
                   if [[ -n "$TEST_PACKAGES" ]]; then
                     echo "$TEST_PACKAGES"
                   fi
 
+                  # Show fuzz test failures
+                  FUZZ_PACKAGES=$(jq -r '.[] | select((.Type // null) == "test") | select(.Package | test("^[a-zA-Z0-9/_.-]+$")) | "  🎯 \(.Package | split("/") | .[-1] // .[-2] // .): \(.failures | length) fuzz test failure(s)"' "$failure_file" 2>/dev/null || true)
+                  if [[ -n "$FUZZ_PACKAGES" ]]; then
+                    echo "$FUZZ_PACKAGES"
+                  fi
+
                   # Show build failures in detail
-                  BUILD_FAILURE_COUNT=$(jq -r '[.[] | select(.Type == "build")] | length' "$failure_file" 2>/dev/null || echo "0")
+                  BUILD_FAILURE_COUNT=$(jq -r '[.[] | select((.Type // null) == "build")] | length' "$failure_file" 2>/dev/null || echo "0")
                   if [[ "$BUILD_FAILURE_COUNT" -gt 0 ]]; then
                     echo ""
                     echo "🔨 Build Failures:"
                     echo "------------------"
 
-                    jq -r '.[] | select(.Type == "build") | select(.Package | test("^[a-zA-Z0-9/_.-]+$")) |
+                    jq -r '.[] | select((.Type // null) == "build") | select(.Package | test("^[a-zA-Z0-9/_.-]+$")) |
                       "📦 " + (.Package | split("/") | .[-1] // .[-2] // .) + ":" +
                       ((.BuildErrors[]? // []) | "\n  ❌ " + .)' "$failure_file" 2>/dev/null || true
                   fi
 
-                  # Show test failures
-                  TEST_FAILURE_COUNT=$(jq -r '[.[] | select(.Type == "test" or .Type == null)] | length' "$failure_file" 2>/dev/null || echo "0")
+                  # Show regular test failures
+                  TEST_FAILURE_COUNT=$(jq -r '[.[] | select((.Type // null) == null)] | length' "$failure_file" 2>/dev/null || echo "0")
                   if [[ "$TEST_FAILURE_COUNT" -gt 0 ]]; then
                     echo ""
                     echo "🧪 Test Failures:"
                     echo "-----------------"
 
-                  # Show detailed failed tests with package context (leaf failures only) - only for test failures
-                  #
-                  # Problem: Go's nested test structure (TestA/TestB/TestC) reports failures for
-                  # all parent tests when a leaf test fails, causing confusing output like:
-                  #   ❌ TestNetworkEdgeCases/concurrent_api_operations/concurrency_3 (integration) <- actual failure
-                  #   ❌ TestNetworkEdgeCases/concurrent_api_operations (integration)              <- parent (redundant)
-                  #   ❌ TestNetworkEdgeCases (integration)                                       <- parent (redundant)
-                  #   ❌  (integration)                                                           <- empty (artifact)
-                  #
-                  # Solution: Extract and deduplicate to show only the actual failed leaf tests
-                  # This reduces "4 failures" to "1 actual failure" for better clarity.
-                  RAW_FAILED_TESTS=$(jq -r '.[] as $parent | select($parent.Type == "test" or $parent.Type == null) | select($parent.Package | test("^[a-zA-Z0-9/_.-]+$")) | $parent.failures[] | .Test + " (" + ($parent.Package | split("/") | .[-1] // .[-2] // .) + ")"' "$failure_file" 2>/dev/null)
+                    # Show detailed failed tests with package context (leaf failures only) - only for test failures
+                    #
+                    # Problem: Go's nested test structure (TestA/TestB/TestC) reports failures for
+                    # all parent tests when a leaf test fails, causing confusing output like:
+                    #   ❌ TestNetworkEdgeCases/concurrent_api_operations/concurrency_3 (integration) <- actual failure
+                    #   ❌ TestNetworkEdgeCases/concurrent_api_operations (integration)              <- parent (redundant)
+                    #   ❌ TestNetworkEdgeCases (integration)                                       <- parent (redundant)
+                    #   ❌  (integration)                                                           <- empty (artifact)
+                    #
+                    # Solution: Extract and deduplicate to show only the actual failed leaf tests
+                    # This reduces "4 failures" to "1 actual failure" for better clarity.
+                    RAW_FAILED_TESTS=$(jq -r '.[] as $parent | select(($parent.Type // null) == null) | select($parent.Package | test("^[a-zA-Z0-9/_.-]+$")) | $parent.failures[] | .Test + " (" + ($parent.Package | split("/") | .[-1] // .[-2] // .) + ")"' "$failure_file" 2>/dev/null)
 
                   # Smart filtering: Only show the most specific (deepest nested) test failures
                   FAILED_TESTS=$(echo "$RAW_FAILED_TESTS" | awk '
@@ -583,16 +607,44 @@ jobs:
                     head -c 2000 "$failure_file" | sed 's/^/  /'
                   fi
 
-                  # Show any error outputs if available from the enhanced failure details (for test failures only)
-                  ERROR_OUTPUTS=$(jq -r '.[] as $package | select($package.Type == "test" or $package.Type == null) | select($package.Package | test("^[a-zA-Z0-9/_.-]+$")) | $package.failures[] | select(.Output and .Output != "" and .Output != null) | "❌ \(.Test) (\($package.Package | split("/") | .[-1] // .[-2] // .))\n\(.Output)\n"' "$failure_file" 2>/dev/null | head -c 3000)
-                  if [[ -n "$ERROR_OUTPUTS" ]]; then
-                    echo ""
-                    echo "📝 Test Error Messages:"
-                    echo "----------------------"
-                    echo "$ERROR_OUTPUTS"
-                  fi
+                    # Show any error outputs if available from the enhanced failure details (for test failures only)
+                    ERROR_OUTPUTS=$(jq -r '.[] as $package | select(($package.Type // null) == null) | select($package.Package | test("^[a-zA-Z0-9/_.-]+$")) | $package.failures[] | select(.Output and .Output != "" and .Output != null) | "❌ \(.Test) (\($package.Package | split("/") | .[-1] // .[-2] // .))\n\(.Output)\n"' "$failure_file" 2>/dev/null | head -c 3000)
+                    if [[ -n "$ERROR_OUTPUTS" ]]; then
+                      echo ""
+                      echo "📝 Test Error Messages:"
+                      echo "----------------------"
+                      echo "$ERROR_OUTPUTS"
+                    fi
+                  fi  # End of regular test failures section
 
-                  fi  # End of test failures section
+                  # Show fuzz test failures
+                  FUZZ_FAILURE_COUNT=$(jq -r '[.[] | select((.Type // null) == "test")] | length' "$failure_file" 2>/dev/null || echo "0")
+                  if [[ "$FUZZ_FAILURE_COUNT" -gt 0 ]]; then
+                    echo ""
+                    echo "🎯 Fuzz Test Failures:"
+                    echo "---------------------"
+
+                    # Extract fuzz test failures
+                    FUZZ_FAILED_TESTS=$(jq -r '.[] as $parent | select(($parent.Type // null) == "test") | select($parent.Package | test("^[a-zA-Z0-9/_.-]+$")) | $parent.failures[] | .Test + " (" + ($parent.Package | split("/") | .[-1] // .[-2] // .) + ")"' "$failure_file" 2>/dev/null)
+
+                    if [[ -n "$FUZZ_FAILED_TESTS" ]]; then
+                      echo "$FUZZ_FAILED_TESTS" | sed 's/^/  🎯 /'
+
+                      # Show detailed fuzz test error outputs with re-run commands
+                      FUZZ_ERROR_OUTPUTS=$(jq -r '.[] as $package | select(($package.Type // null) == "test") | select($package.Package | test("^[a-zA-Z0-9/_.-]+$")) | $package.failures[] | select(.Output and .Output != "" and .Output != null) |
+                        "🎯 \(.Test) (\($package.Package | split("/") | .[-1] // .[-2] // .)):\n🔍 Error Output:\n\(.Output)" +
+                        (if (.Output | contains("Failing input written to")) then "\n💡 Re-run command: Check output above for re-run command" else "" end) + "\n"' "$failure_file" 2>/dev/null | head -c 4000)
+
+                      if [[ -n "$FUZZ_ERROR_OUTPUTS" ]]; then
+                        echo ""
+                        echo "📝 Fuzz Test Error Details:"
+                        echo "--------------------------"
+                        echo "$FUZZ_ERROR_OUTPUTS"
+                      fi
+                    else
+                      echo "  ⚠️ No fuzz test failures found in JSON structure"
+                    fi
+                  fi  # End of fuzz test failures section
                 else
                   echo "  • No structured failure data found in JSON"
                 fi
@@ -633,9 +685,9 @@ jobs:
             echo "✅ All $TOTAL_TESTS tests passed validation"
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Create validation summary for GitHub UI with deduplication info
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📊 Create validation summary
         if: always()
         run: |
@@ -742,9 +794,9 @@ jobs:
             done
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Upload validation artifacts for completion report
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📤 Upload validation summary
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

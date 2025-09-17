@@ -89,6 +89,10 @@ on:
         required: false
         type: string
         default: "true"
+      go-sum-file:
+        description: "Path to go.sum file for dependency verification"
+        required: true
+        type: string
 
 # Security: Restrictive default permissions with job-level overrides for least privilege access
 permissions:
@@ -117,23 +121,23 @@ jobs:
           - ${{ inputs.redis-enabled == 'true' && format('{0}:{0}', inputs.redis-port) || '9999:9999' }}
 
     steps:
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Checkout code (required for local actions)
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📥 Checkout code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Parse environment variables
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔧 Parse environment variables
         uses: ./.github/actions/parse-env
         with:
           env-json: ${{ inputs.env-json }}
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Setup Go with caching and version management
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🏗️ Setup Go with Cache
         id: setup-go-test
         uses: ./.github/actions/setup-go-with-cache
@@ -142,19 +146,28 @@ jobs:
           matrix-os: ${{ matrix.os }}
           go-primary-version: ${{ inputs.go-primary-version }}
           go-secondary-version: ${{ inputs.go-secondary-version }}
+          go-sum-file: ${{ inputs.go-sum-file }}
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
+      # Extract Go module directory from GO_SUM_FILE path
+      # --------------------------------------------------------------------
+      - name: 🔧 Extract Go module directory
+        uses: ./.github/actions/extract-module-dir
+        with:
+          go-sum-file: ${{ inputs.go-sum-file }}
+
+      # --------------------------------------------------------------------
       # Setup MAGE-X (required for magex test commands)
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔧 Setup MAGE-X
         uses: ./.github/actions/setup-magex
         with:
           magex-version: ${{ env.MAGE_X_VERSION }}
           runner-os: ${{ matrix.os }}
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Start test timer
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: ⏱️ Start test timer
         id: test-timer
         run: |
@@ -162,18 +175,27 @@ jobs:
           echo "test-start=$TEST_START" >> $GITHUB_OUTPUT
           echo "🕒 Test timer started at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Detect test output mode based on test count and configuration
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔍 Detect test output mode
         id: detect-mode
         run: |
           # Count total tests in the repository (excluding vendor and testdata)
-          TEST_COUNT=$(find . -type f -name '*_test.go' \
-            -not -path './vendor/*' \
-            -not -path './third_party/*' \
-            -not -path './testdata/*' \
-            -exec grep -hE '^\s*func (\([^)]+\) )?Test[A-Z0-9_]' {} + | wc -l | xargs)
+          GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
+          if [ -n "$GO_MODULE_DIR" ]; then
+            TEST_COUNT=$(cd "$GO_MODULE_DIR" && find . -type f -name '*_test.go' \
+              -not -path './vendor/*' \
+              -not -path './third_party/*' \
+              -not -path './testdata/*' \
+              -exec grep -hE '^\s*func (\([^)]+\) )?Test[A-Z0-9_]' {} + | wc -l | xargs)
+          else
+            TEST_COUNT=$(find . -type f -name '*_test.go' \
+              -not -path './vendor/*' \
+              -not -path './third_party/*' \
+              -not -path './testdata/*' \
+              -exec grep -hE '^\s*func (\([^)]+\) )?Test[A-Z0-9_]' {} + | wc -l | xargs)
+          fi
 
           # Sanitize count (ensure it's numeric)
           TEST_COUNT=${TEST_COUNT:-0}
@@ -197,9 +219,9 @@ jobs:
           echo "detected-mode=$DETECTED_MODE" >> $GITHUB_OUTPUT
           echo "test-count=$TEST_COUNT" >> $GITHUB_OUTPUT
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Setup Redis service using composite action with caching
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🗄️ Setup Redis Service
         id: setup-redis
         uses: ./.github/actions/setup-redis-service
@@ -212,18 +234,18 @@ jobs:
           use-cache: "true"
           trust-service-health: ${{ inputs.redis-trust-service-health }}
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Setup test failure detection functions
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔧 Setup failure detection
         uses: ./.github/actions/test-failure-detection
         with:
           output-file: "test-output.log"
           mode: "text" # Will be overridden during actual detection
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Run tests with appropriate configuration
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🧪 Run tests
         id: run-tests
         continue-on-error: true
@@ -276,7 +298,11 @@ jobs:
           echo "🔧 Running: $MAGEX_CMD (timeout: $TEST_TIMEOUT)"
 
           # Pre-execution diagnostic info for better visibility
-          PACKAGE_COUNT=$(find . -name '*.go' -not -path './vendor/*' -not -path './third_party/*' | xargs dirname | sort -u | wc -l | xargs)
+          if [ -n "$GO_MODULE_DIR" ]; then
+            PACKAGE_COUNT=$(cd "$GO_MODULE_DIR" && find . -name '*.go' -not -path './vendor/*' -not -path './third_party/*' | xargs dirname | sort -u | wc -l | xargs)
+          else
+            PACKAGE_COUNT=$(find . -name '*.go' -not -path './vendor/*' -not -path './third_party/*' | xargs dirname | sort -u | wc -l | xargs)
+          fi
           PACKAGE_COUNT=${PACKAGE_COUNT:-0}
           echo "🚀 Starting test execution:"
           echo "   • Total tests: $TEST_COUNT"
@@ -296,7 +322,13 @@ jobs:
           if [[ "$MODE" == "FULL" ]]; then
             echo "📝 Using FULL output mode - showing all test output"
             echo "🔍 Executing: $MAGEX_CMD"
-            $MAGEX_CMD 2>&1 | tee test-output.log
+            if [ -n "$GO_MODULE_DIR" ]; then
+              echo "🔧 Running from directory: $GO_MODULE_DIR"
+              (cd "$GO_MODULE_DIR" && $MAGEX_CMD) 2>&1 | tee test-output.log
+            else
+              echo "🔧 Running from repository root"
+              $MAGEX_CMD 2>&1 | tee test-output.log
+            fi
             TEST_EXIT_CODE=${PIPESTATUS[0]}
             echo "🔍 Magex command exit code: $TEST_EXIT_CODE"
 
@@ -309,7 +341,13 @@ jobs:
           elif [[ "$MODE" == "FAILURES_ONLY" ]]; then
             echo "📝 Using FAILURES_ONLY mode - JSON output with failure extraction"
             echo "🔍 Executing: $MAGEX_CMD"
-            $MAGEX_CMD 2>&1 | tee test-output.log
+            if [ -n "$GO_MODULE_DIR" ]; then
+              echo "🔧 Running from directory: $GO_MODULE_DIR"
+              (cd "$GO_MODULE_DIR" && $MAGEX_CMD) 2>&1 | tee test-output.log
+            else
+              echo "🔧 Running from repository root"
+              $MAGEX_CMD 2>&1 | tee test-output.log
+            fi
             TEST_EXIT_CODE=${PIPESTATUS[0]}
             echo "🔍 Magex command exit code: $TEST_EXIT_CODE"
 
@@ -347,13 +385,29 @@ jobs:
 
           echo "🏁 Test execution completed with exit code: $TEST_EXIT_CODE"
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Normalize coverage file name if coverage was generated
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔄 Normalize coverage file name
         if: inputs.code-coverage-enabled == 'true' && steps.run-tests.outputs.test-exit-code == '0'
         run: |
-          # Look for generated coverage files with various naming patterns
+          # Check if we need to look in the module directory first
+          GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
+
+          if [ -n "$GO_MODULE_DIR" ]; then
+            echo "📁 Looking for coverage files in module directory: $GO_MODULE_DIR"
+            # Move coverage file from module directory to root if it exists there
+            for coverage_file in coverage.out coverage.txt cover.out cover.txt profile.out profile.txt; do
+              if [[ -f "$GO_MODULE_DIR/$coverage_file" ]]; then
+                echo "📁 Found coverage file in module directory: $GO_MODULE_DIR/$coverage_file"
+                echo "🔄 Moving to repository root as coverage.txt"
+                mv "$GO_MODULE_DIR/$coverage_file" coverage.txt
+                break
+              fi
+            done
+          fi
+
+          # Look for coverage files in root directory (either originally there or just moved)
           for coverage_file in coverage.out coverage.txt cover.out cover.txt profile.out profile.txt; do
             if [[ -f "$coverage_file" ]]; then
               echo "📁 Found coverage file: $coverage_file"
@@ -374,9 +428,9 @@ jobs:
             echo "⚠️ No coverage file found or file is empty"
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Inject matrix job info into failure signatures for deduplication tracking
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🏷️ Add matrix job info to signatures
         if: always()
         run: |
@@ -404,9 +458,9 @@ jobs:
             echo '[]' > test-failures-signatures.json
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Create test failure summary if failures occurred
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🚨 Create Test Failure Summary
         if: always() && steps.run-tests.outputs.test-exit-code != '0'
         run: |
@@ -548,9 +602,9 @@ jobs:
             jq . test-failures-summary.json
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Create test failure annotations for GitHub PR/commit view
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📋 Annotate Key Test Failures
         if: always() && steps.run-tests.outputs.test-exit-code != '0'
         run: |
@@ -576,9 +630,9 @@ jobs:
             echo "::error title=Test Suite Failed::❌ Test suite failed but no specific failure patterns detected"
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Generate comprehensive test statistics
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📊 Calculate test statistics
         id: test-summary
         if: always()
@@ -595,9 +649,9 @@ jobs:
           code-coverage-enabled: ${{ inputs.code-coverage-enabled }}
           fuzz-run: "false"
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Collect cache performance statistics
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📊 Collect cache statistics
         uses: ./.github/actions/collect-cache-stats
         with:
@@ -613,9 +667,9 @@ jobs:
           redis-image-size: ${{ steps.setup-redis.outputs.image-size }}
           redis-operation-time: ${{ steps.setup-redis.outputs.cache-operation-time }}
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Report Redis cache performance metrics
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📊 Report Redis Cache Performance
         if: inputs.redis-enabled == 'true'
         run: |
@@ -643,9 +697,9 @@ jobs:
             echo "📥 Performance: Redis pulled from Docker Hub - consider cache warming"
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Upload performance cache statistics for completion report
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📤 Upload performance cache statistics
         uses: ./.github/actions/upload-statistics
         with:
@@ -653,9 +707,9 @@ jobs:
           artifact-path: cache-stats-test-${{ matrix.os }}-${{ matrix.go-version }}.json
           retention-days: "1"
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Upload test outputs and failure details for validation
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📤 Upload test outputs and statistics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -670,9 +724,9 @@ jobs:
           retention-days: 1
           if-no-files-found: ignore
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Upload test statistics for completion report
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📤 Upload test statistics
         uses: ./.github/actions/upload-statistics
         with:
@@ -680,9 +734,9 @@ jobs:
           artifact-path: ${{ steps.test-summary.outputs.statistics-file }}
           retention-days: "1"
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Verify coverage file exists and upload for processing
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔍 Verify coverage file
         if: inputs.code-coverage-enabled == 'true'
         run: |
@@ -707,9 +761,9 @@ jobs:
             fi
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Upload coverage data for fortress-coverage workflow processing
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📤 Upload coverage data
         if: inputs.code-coverage-enabled == 'true' && hashFiles('coverage.txt') != '' && matrix.os == inputs.primary-runner && matrix.go-version == inputs.go-primary-version
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

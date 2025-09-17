@@ -29,6 +29,10 @@ on:
         description: "Whether GoFortress Pre-commit System is enabled"
         required: true
         type: string
+      go-sum-file:
+        description: "Path to go.sum file for dependency verification"
+        required: true
+        type: string
     outputs:
       pre-commit-version:
         description: "Version of go-pre-commit used"
@@ -53,25 +57,25 @@ jobs:
       pre-commit-version: ${{ steps.pre-commit-version.outputs.version }}
       checks-executed: ${{ steps.run-checks.outputs.executed }}
     steps:
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Checkout code (full checkout to ensure local actions are available)
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📥 Checkout code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           fetch-depth: 0 # Fetch full history to enable file change detection for all commit ranges
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Parse environment variables
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔧 Parse environment variables
         uses: ./.github/actions/parse-env
         with:
           env-json: ${{ inputs.env-json }}
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Setup Go with caching and version management
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🏗️ Setup Go with Cache
         id: setup-go-precommit
         uses: ./.github/actions/setup-go-with-cache
@@ -80,33 +84,42 @@ jobs:
           matrix-os: ${{ inputs.primary-runner }}
           go-primary-version: ${{ inputs.go-primary-version }}
           go-secondary-version: ${{ inputs.go-primary-version }}
+          go-sum-file: ${{ env.GO_SUM_FILE }}
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
+      # Extract Go module directory from GO_SUM_FILE path
+      # --------------------------------------------------------------------
+      - name: 🔧 Extract Go module directory
+        uses: ./.github/actions/extract-module-dir
+        with:
+          go-sum-file: ${{ env.GO_SUM_FILE }}
+
+      # --------------------------------------------------------------------
       # Set golangci-lint cache path (shared with code-quality workflow)
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔧 Set golangci-lint cache path
         run: |
           echo "🔧 Setting up golangci-lint cache path for shared caching..."
           echo "GOLANGCI_LINT_CACHE=$HOME/.cache/golangci-lint" >> $GITHUB_ENV
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Restore golangci-lint analysis cache (shared with code-quality workflow)
       # Use restore-only to avoid cache conflicts during parallel execution
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 💾 Restore golangci-lint analysis cache
         id: cache-golangci-lint-analysis
         uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: ${{ env.GOLANGCI_LINT_CACHE }}
-          key: ${{ inputs.primary-runner }}-golangci-lint-analysis-${{ hashFiles('.golangci.json', '**/go.sum') }}-${{ env.GO_PRE_COMMIT_GOLANGCI_LINT_VERSION }}
+          key: ${{ inputs.primary-runner }}-golangci-lint-analysis-${{ hashFiles('.golangci.json', env.GO_SUM_FILE) }}-${{ env.GO_PRE_COMMIT_GOLANGCI_LINT_VERSION }}
           restore-keys: |
-            ${{ inputs.primary-runner }}-golangci-lint-analysis-${{ hashFiles('.golangci.json', '**/go.sum') }}-
+            ${{ inputs.primary-runner }}-golangci-lint-analysis-${{ hashFiles('.golangci.json', env.GO_SUM_FILE) }}-
             ${{ inputs.primary-runner }}-golangci-lint-analysis-
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Restore (and later save) a compact cache for the go-pre-commit binary
       # Skip cache when using local development version
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 💾 Restore go-pre-commit binary cache
         id: go-pre-commit-cache
         if: env.GO_PRE_COMMIT_USE_LOCAL != 'true'
@@ -116,10 +129,10 @@ jobs:
             ~/.cache/go-pre-commit-bin
           key: ${{ inputs.primary-runner }}-go-pre-commit-${{ env.GO_PRE_COMMIT_VERSION }}
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Restore (and later save) a compact cache for go-pre-commit tools
       # (golangci-lint, gofumpt) to avoid reinstalling on every run
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 💾 Restore go-pre-commit tools cache
         id: go-pre-commit-tools-cache
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
@@ -170,13 +183,35 @@ jobs:
 
       - name: 🎯 Set go-pre-commit binary path
         run: |
-          # Set the binary path for both cache hit and cache miss scenarios
+          # Set the binary path for both cache hit and cache miss scenarios with validation
+          set -euo pipefail
           GO_BIN="$(go env GOPATH)/bin"
-          echo "GO_PRE_COMMIT_BINARY=$GO_BIN/go-pre-commit" >> $GITHUB_ENV
 
-      # ————————————————————————————————————————————————————————————————
+          # Validate GOPATH is set, exists, and is writable
+          if [[ -z "$GO_BIN" || "$GO_BIN" == "/bin" ]]; then
+            echo "❌ Invalid GOPATH detected: $GO_BIN"
+            exit 1
+          fi
+
+          if [[ ! -d "$GO_BIN" ]]; then
+            echo "❌ GOPATH bin directory does not exist: $GO_BIN"
+            exit 1
+          fi
+
+          if [[ ! -w "$GO_BIN" ]]; then
+            echo "❌ GOPATH bin directory is not writable: $GO_BIN"
+            exit 1
+          fi
+
+          GO_PRE_COMMIT_PATH="$GO_BIN/go-pre-commit"
+
+          # Store the validated binary path
+          echo "GO_PRE_COMMIT_BINARY=$GO_PRE_COMMIT_PATH" >> $GITHUB_ENV
+          echo "🔒 Binary path validated: $GO_PRE_COMMIT_PATH"
+
+      # --------------------------------------------------------------------
       # Display pre-commit configuration
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📋 Display pre-commit configuration
         run: |
           echo "🔧 GoFortress Pre-commit Configuration"
@@ -238,9 +273,9 @@ jobs:
           echo ""
           echo "=================================================="
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Install go-pre-commit tool when cache miss OR using local version
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔨 Install go-pre-commit tool
         if: steps.go-pre-commit-cache.outputs.cache-hit != 'true' || env.GO_PRE_COMMIT_USE_LOCAL == 'true'
         id: install-pre-commit
@@ -251,8 +286,16 @@ jobs:
             echo "  Building from source at: $GITHUB_WORKSPACE/cmd/go-pre-commit"
 
             # Build from local source
-            cd "$GITHUB_WORKSPACE"
-            go build -v -o /tmp/go-pre-commit ./cmd/go-pre-commit
+            GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
+            if [ -n "$GO_MODULE_DIR" ]; then
+              echo "🔧 Building go-pre-commit from directory: $GO_MODULE_DIR"
+              cd "$GITHUB_WORKSPACE/$GO_MODULE_DIR"
+              go build -v -o /tmp/go-pre-commit ./cmd/go-pre-commit
+            else
+              echo "🔧 Building go-pre-commit from repository root"
+              cd "$GITHUB_WORKSPACE"
+              go build -v -o /tmp/go-pre-commit ./cmd/go-pre-commit
+            fi
             chmod +x /tmp/go-pre-commit
 
             # Copy the freshly built binary to cache directory
@@ -263,8 +306,10 @@ jobs:
             mkdir -p "$(go env GOPATH)/bin"
             cp /tmp/go-pre-commit "$(go env GOPATH)/bin/go-pre-commit"
 
-            # Store the binary path
-            echo "GO_PRE_COMMIT_BINARY=$(go env GOPATH)/bin/go-pre-commit" >> $GITHUB_ENV
+            # Store the validated binary path
+            GO_BIN="$(go env GOPATH)/bin"
+            GO_PRE_COMMIT_PATH="$GO_BIN/go-pre-commit"
+            echo "GO_PRE_COMMIT_BINARY=$GO_PRE_COMMIT_PATH" >> $GITHUB_ENV
 
             # Show version info
             echo "✅ Local go-pre-commit built and stored in cache"
@@ -284,9 +329,10 @@ jobs:
             mkdir -p ~/.cache/go-pre-commit-bin
             cp "$(go env GOPATH)/bin/go-pre-commit" ~/.cache/go-pre-commit-bin/
 
-            # Store the binary path
+            # Store the validated binary path
             GO_BIN="$(go env GOPATH)/bin"
-            echo "GO_PRE_COMMIT_BINARY=$GO_BIN/go-pre-commit" >> $GITHUB_ENV
+            GO_PRE_COMMIT_PATH="$GO_BIN/go-pre-commit"
+            echo "GO_PRE_COMMIT_BINARY=$GO_PRE_COMMIT_PATH" >> $GITHUB_ENV
 
             # Verify installation
             echo "✅ go-pre-commit installed and stored in cache"
@@ -296,9 +342,9 @@ jobs:
             echo "version=$VERSION_OUTPUT" >> $GITHUB_OUTPUT
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Set install status for cache hit scenario (skip for local builds)
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: ✅ Set install status (cache hit)
         if: steps.go-pre-commit-cache.outputs.cache-hit == 'true' && env.GO_PRE_COMMIT_USE_LOCAL != 'true'
         id: install-pre-commit-cached
@@ -315,9 +361,9 @@ jobs:
             echo "version=${{ env.GO_PRE_COMMIT_VERSION }}" >> $GITHUB_OUTPUT
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Set pre-commit version output
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📌 Set pre-commit version
         id: pre-commit-version
         run: |
@@ -332,13 +378,14 @@ jobs:
             echo "version=not-installed" >> $GITHUB_OUTPUT
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Detect changed files for CI mode (when not checking all files)
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔍 Detect changed files for CI
         if: env.GO_PRE_COMMIT_ALL_FILES != 'true' && (steps.install-pre-commit.outputs.install_success == 'true' || steps.install-pre-commit-cached.outputs.install_success == 'true')
         id: detect-files
         run: |
+          set -euo pipefail  # Enable strict error handling
           echo "🔍 Detecting changed files for CI execution..."
           echo "=============================================="
 
@@ -436,13 +483,14 @@ jobs:
             echo ""
 
             # Filter files: only include files that still exist
+            # Use newline-separated format for safer file handling
             FILTERED_FILES=""
             while IFS= read -r file; do
               if [[ -f "$file" ]]; then
                 if [[ -z "$FILTERED_FILES" ]]; then
                   FILTERED_FILES="$file"
                 else
-                  FILTERED_FILES="$FILTERED_FILES,$file"
+                  FILTERED_FILES="$FILTERED_FILES"$'\n'"$file"
                 fi
                 echo "  ✅ Including $file"
               else
@@ -458,13 +506,18 @@ jobs:
           echo "📊 File Detection Results:"
           echo "=========================="
           if [[ -n "$CHANGED_FILES" ]]; then
-            FILE_COUNT=$(echo "$CHANGED_FILES" | tr ',' '\n' | wc -l | tr -d ' ')
+            FILE_COUNT=$(echo "$CHANGED_FILES" | wc -l | tr -d ' ')
             echo "✅ Detection successful!"
             echo "  • Method used: $DETECTION_METHOD"
             echo "  • Files found: $FILE_COUNT"
-            echo "  • Files: $CHANGED_FILES"
+            echo "  • Files: $(echo "$CHANGED_FILES" | tr '\n' ',' | sed 's/,$//')"
             echo ""
-            echo "changed_files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+            # Store files in newline-separated format for safer handling
+            {
+              echo "changed_files<<EOF_CHANGED_FILES"
+              echo "$CHANGED_FILES"
+              echo "EOF_CHANGED_FILES"
+            } >> $GITHUB_OUTPUT
             echo "detection_method=$DETECTION_METHOD" >> $GITHUB_OUTPUT
             echo "files_found=true" >> $GITHUB_OUTPUT
           else
@@ -480,13 +533,14 @@ jobs:
             echo "files_found=false" >> $GITHUB_OUTPUT
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Run pre-commit checks
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🚀 Run pre-commit checks
         if: steps.install-pre-commit.outputs.install_success == 'true' || steps.install-pre-commit-cached.outputs.install_success == 'true'
         id: run-checks
         run: |
+          set -euo pipefail  # Enable strict error handling
           echo "🚀 Running pre-commit checks..."
           echo "================================"
 
@@ -501,6 +555,12 @@ jobs:
           # The external tool will read environment variables from the merged configuration
           # that we've already loaded into the environment
 
+          # Validate the go-pre-commit binary exists and is executable before using it
+          if [[ ! -x "${{ env.GO_PRE_COMMIT_BINARY }}" ]]; then
+            echo "❌ go-pre-commit binary not found or not executable at: ${{ env.GO_PRE_COMMIT_BINARY }}"
+            exit 1
+          fi
+
           # Build command based on GO_PRE_COMMIT_ALL_FILES configuration
           if [[ "${{ env.GO_PRE_COMMIT_ALL_FILES }}" == "true" ]]; then
             echo "🔍 Mode: All Files"
@@ -514,10 +574,44 @@ jobs:
 
             echo "🔍 Mode: Changed Files Only"
             echo "  • Detection method: $DETECTION_METHOD"
-            echo "  • Files to check: $CHANGED_FILES"
-            echo "  • Command: go-pre-commit run --files $CHANGED_FILES"
+
+            # Count files for display (newline-separated format)
+            FILE_COUNT=$(echo "$CHANGED_FILES" | wc -l | tr -d ' ')
+            echo "  • Files to check: $FILE_COUNT files"
+
+            # Create a temporary file list for secure file passing
+            TEMP_FILE_LIST=$(mktemp)
+            echo "$CHANGED_FILES" > "$TEMP_FILE_LIST"
+
+            echo "  • Using temporary file list for secure file passing"
             echo ""
-            CHECKS_OUTPUT=$("${{ env.GO_PRE_COMMIT_BINARY }}" run --files "$CHANGED_FILES" 2>&1) || CHECKS_EXIT=$?
+
+            # Use a safer approach: create a comma-separated list in a controlled way
+            # by reading each line and properly escaping it
+            SAFE_FILE_LIST=""
+            while IFS= read -r file; do
+              if [[ -n "$file" ]]; then
+                # Escape the file name for safe shell usage
+                ESCAPED_FILE=$(printf '%q' "$file")
+                if [[ -z "$SAFE_FILE_LIST" ]]; then
+                  SAFE_FILE_LIST="$ESCAPED_FILE"
+                else
+                  SAFE_FILE_LIST="$SAFE_FILE_LIST,$ESCAPED_FILE"
+                fi
+              fi
+            done < "$TEMP_FILE_LIST"
+
+            if [[ -n "$SAFE_FILE_LIST" ]]; then
+              echo "  • Command: go-pre-commit run --files <escaped_file_list>"
+              CHECKS_OUTPUT=$("${{ env.GO_PRE_COMMIT_BINARY }}" run --files "$SAFE_FILE_LIST" 2>&1) || CHECKS_EXIT=$?
+            else
+              echo "  • No valid files to process, skipping"
+              CHECKS_OUTPUT="No files to process"
+              CHECKS_EXIT=0
+            fi
+
+            # Clean up temporary file
+            rm -f "$TEMP_FILE_LIST"
           else
             echo "🔍 Mode: Staged Files (Fallback)"
             echo "  • No changed files detected, falling back to staged files"
@@ -552,13 +646,14 @@ jobs:
           echo ""
           echo "✅ All pre-commit checks passed successfully"
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Cache tools that were installed during pre-commit execution
       # This step ensures tools like golangci-lint and gofumpt are cached for future runs
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 💾 Cache go-pre-commit tools after installation
         if: steps.go-pre-commit-tools-cache.outputs.cache-hit != 'true' && (steps.install-pre-commit.outputs.install_success == 'true' || steps.install-pre-commit-cached.outputs.install_success == 'true')
         run: |
+          set -euo pipefail  # Enable strict error handling
           echo "💾 Caching go-pre-commit tools..."
           TOOLS_DIR="$HOME/.cache/go-pre-commit-tools"
           GOPATH_BIN="$(go env GOPATH)/bin"
@@ -578,12 +673,13 @@ jobs:
 
           echo "✅ Tool caching completed"
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Job Summary
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📊 Job Summary
         if: always()
         run: |
+          set -euo pipefail  # Enable strict error handling
           echo "## 🪝 Pre-commit Checks Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
@@ -614,11 +710,11 @@ jobs:
             if [[ "${{ env.GO_PRE_COMMIT_ALL_FILES }}" != "true" && "${{ steps.detect-files.outputs.files_found }}" == "true" ]]; then
               echo "### 📁 Files Processed" >> $GITHUB_STEP_SUMMARY
               CHANGED_FILES="${{ steps.detect-files.outputs.changed_files }}"
-              FILE_COUNT=$(echo "$CHANGED_FILES" | tr ',' '\n' | wc -l | tr -d ' ')
+              FILE_COUNT=$(echo "$CHANGED_FILES" | wc -l | tr -d ' ')
               echo "**$FILE_COUNT changed files detected and processed:**" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
-              echo "$CHANGED_FILES" | tr ',' '\n' | while read file; do
-                if [ -n "$file" ]; then
+              echo "$CHANGED_FILES" | while IFS= read -r file; do
+                if [[ -n "$file" ]]; then
                   echo "- 📄 \`$file\`" >> $GITHUB_STEP_SUMMARY
                 fi
               done
@@ -636,7 +732,7 @@ jobs:
             if [[ "${{ env.GO_PRE_COMMIT_ALL_FILES }}" == "true" ]]; then
               echo "🎯 **All pre-commit checks passed successfully on all repository files.**" >> $GITHUB_STEP_SUMMARY
             elif [[ "${{ steps.detect-files.outputs.files_found }}" == "true" ]]; then
-              FILE_COUNT=$(echo "${{ steps.detect-files.outputs.changed_files }}" | tr ',' '\n' | wc -l | tr -d ' ')
+              FILE_COUNT=$(echo "${{ steps.detect-files.outputs.changed_files }}" | wc -l | tr -d ' ')
               echo "🎯 **All pre-commit checks passed successfully on $FILE_COUNT changed files.**" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
               echo "⚡ **Performance**: Fast CI execution by checking only changed files instead of entire repository." >> $GITHUB_STEP_SUMMARY
@@ -650,9 +746,9 @@ jobs:
             echo "- ✅ magex tidy" >> $GITHUB_STEP_SUMMARY
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Collect cache statistics
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📊 Collect cache statistics
         id: cache-stats
         if: always()
@@ -666,9 +762,9 @@ jobs:
           gomod-cache-hit: ${{ steps.setup-go-precommit.outputs.module-cache-hit }}
           gobuild-cache-hit: ${{ steps.setup-go-precommit.outputs.build-cache-hit }}
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Upload infrastructure cache statistics
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📤 Upload infrastructure cache statistics
         if: always()
         uses: ./.github/actions/upload-statistics

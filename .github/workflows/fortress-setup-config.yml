@@ -8,9 +8,7 @@
 #  Maintainer: @mrz1836
 #
 # ------------------------------------------------------------------------------------
-
 name: GoFortress (Setup Configuration)
-
 on:
   workflow_call:
     inputs:
@@ -73,6 +71,9 @@ on:
       go-secondary-version:
         description: "Secondary Go version"
         value: ${{ jobs.setup-config.outputs.go-secondary-version }}
+      go-sum-file:
+        description: "Go sum file location for dependency verification"
+        value: ${{ jobs.setup-config.outputs.go-sum-file }}
       go-versions:
         description: "Unique Go versions array"
         value: ${{ jobs.setup-config.outputs.go-versions }}
@@ -163,11 +164,9 @@ on:
       redis-service-mode:
         description: "Redis service mode (auto, always, never)"
         value: ${{ jobs.setup-config.outputs.redis-service-mode }}
-
 # Security: Restrictive default permissions with job-level overrides for least privilege access
 permissions:
   contents: read
-
 jobs:
   # ----------------------------------------------------------------------------------
   # Setup the configuration for the CI environment
@@ -183,6 +182,7 @@ jobs:
       fuzz-testing-enabled: ${{ steps.config.outputs.fuzz-testing-enabled }}
       go-primary-version: ${{ steps.config.outputs.go-primary-version }}
       go-secondary-version: ${{ steps.config.outputs.go-secondary-version }}
+      go-sum-file: ${{ steps.config.outputs.go-sum-file }}
       go-versions: ${{ steps.versions.outputs.versions }}
       go-lint-enabled: ${{ steps.config.outputs.go-lint-enabled }}
       yaml-lint-enabled: ${{ steps.config.outputs.yaml-lint-enabled }}
@@ -213,11 +213,10 @@ jobs:
       redis-cache-force-pull: ${{ steps.redis-config.outputs.redis-cache-force-pull }}
       redis-trust-service-health: ${{ steps.redis-config.outputs.redis-trust-service-health }}
       redis-service-mode: ${{ steps.redis-config.outputs.redis-service-mode }}
-
     steps:
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Start timer to record workflow start time
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: ⏱️ Record start time
         id: timer
         run: |
@@ -226,10 +225,9 @@ jobs:
           echo "start-time=$START_TIME" >> $GITHUB_OUTPUT
           echo "start-epoch=$START_EPOCH" >> $GITHUB_OUTPUT
           echo "🚀 Workflow started at: $START_TIME"
-
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Parse environment variables from JSON
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔧 Parse environment variables
         id: parse-env
         env:
@@ -243,23 +241,30 @@ jobs:
           done
 
           echo "✅ Environment variables parsed successfully"
-
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Checkout code (sparse checkout)
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📥 Checkout (sparse)
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           sparse-checkout: |
             .mage.yaml
             go.mod
-            go.sum
+            ${{ env.GO_SUM_FILE }}
             .github/workflows/fortress.yml
             .github/actions/configure-redis
-
-      # ————————————————————————————————————————————————————————————————
+            .github/actions/extract-module-dir
+      # --------------------------------------------------------------------
+      # Extract Go module directory from GO_SUM_FILE path
+      # --------------------------------------------------------------------
+      - name: 🔧 Extract Go module directory
+        id: extract-module-dir
+        uses: ./.github/actions/extract-module-dir
+        with:
+          go-sum-file: ${{ env.GO_SUM_FILE }}
+      # --------------------------------------------------------------------
       # Extract GoFortress version metadata from fortress.yml
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📋 Extract GoFortress Version
         id: extract-version
         run: |
@@ -298,10 +303,9 @@ jobs:
             echo "version=unknown" >> $GITHUB_OUTPUT
             echo "released=unknown" >> $GITHUB_OUTPUT
           fi
-
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Get Go versions and set up the matrix
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔍 Get Unique Go Versions
         id: versions
         run: |
@@ -314,10 +318,9 @@ jobs:
           VERSIONS=$(echo "$VERSIONS" | jq -c .)
           echo "versions=$VERSIONS" >> "$GITHUB_OUTPUT"
           echo "✅ Unique Go versions: $VERSIONS"
-
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Generate the test matrix based on Go versions and runner OSes
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔧 Generate Optimized Matrix
         id: matrix
         shell: bash
@@ -386,10 +389,9 @@ jobs:
           # ------------------------------------------------------------
           echo "matrix=$(echo "$MATRIX" | jq -c .)" >> "$GITHUB_OUTPUT"
           echo "✅ Matrix generated successfully"
-
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Configure environment variables
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔧 Configure CI Environment Configuration
         id: config
         run: |
@@ -398,6 +400,7 @@ jobs:
           # Validate and export Go versions
           echo "go-primary-version=${{ env.GO_PRIMARY_VERSION }}" >> $GITHUB_OUTPUT
           echo "go-secondary-version=${{ env.GO_SECONDARY_VERSION }}" >> $GITHUB_OUTPUT
+          echo "go-sum-file=${{ env.GO_SUM_FILE }}" >> $GITHUB_OUTPUT
 
           # Export runners (for reference in steps, not job level)
           echo "primary-runner=${{ env.PRIMARY_RUNNER }}" >> $GITHUB_OUTPUT
@@ -463,21 +466,19 @@ jobs:
           else
             echo "is-release-run=false" >> $GITHUB_OUTPUT
           fi
-
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Configure Redis service settings using composite action
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🗄️ Configure Redis Service
         id: redis-config
         uses: ./.github/actions/configure-redis
         with:
           env-json: ${{ inputs.env-json }}
-
-      # ————————————————————————————————————————————————————————————————
-      # Build the final summary of the configuration
-      # ————————————————————————————————————————————————————————————————
-      - name: 📋 Build Configuration Summary
-        id: config-summary
+      # --------------------------------------------------------------------
+      # Build the configuration summary (Part 1: Header and Core Config)
+      # --------------------------------------------------------------------
+      - name: 📋 Build Configuration Summary (Part 1)
+        id: config-summary-part1
         env:
           ENV_JSON: ${{ inputs.env-json }}
         run: |
@@ -502,7 +503,7 @@ jobs:
 
           # Count all fortress workflow files (including main fortress.yml)
           FORTRESS_FILES=$(find .github/workflows -name "fortress*.yml" | wc -l | tr -d ' ')
-          echo "| **Workflow Components** | ${FORTRESS_FILES} fortress modules |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Workflow Components** | ${FORTRESS_FILES} fortress files |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "<br><br>" >> $GITHUB_STEP_SUMMARY
 
@@ -532,7 +533,6 @@ jobs:
           CUSTOM_FOUND="${{ inputs.custom-file-found }}"
           BASE_COUNT="${{ inputs.base-var-count }}"
           CUSTOM_COUNT="${{ inputs.custom-var-count }}"
-          CONFIG_MODE="${{ inputs.config-mode }}"
 
           # Show configuration sources
           if [[ "$CUSTOM_FOUND" == "true" ]]; then
@@ -559,11 +559,24 @@ jobs:
           echo "| **Primary Go Version** | \`${{ env.GO_PRIMARY_VERSION }}\` | Main Go version for builds |" >> $GITHUB_STEP_SUMMARY
           echo "| **Secondary Go Version** | \`${{ env.GO_SECONDARY_VERSION }}\` | Additional Go version for testing |" >> $GITHUB_STEP_SUMMARY
           echo "| **Unique Go Versions** | $UNIQUE_GO_VERSIONS | Deduplicated list of Go versions |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Go Sum File** | \`${{ env.GO_SUM_FILE }}\` | Location of go.sum for dependency verification |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Go Module Directory** | \`${{ env.GO_MODULE_DIR || '.' }}\` | Directory containing go.mod (extracted from go.sum path) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Module Root Type** | $([ -n \"${{ env.GO_MODULE_DIR }}\" ] && echo \"📁 Subdirectory\" || echo \"📂 Repository Root\") | Whether go.mod is in repository root or subdirectory |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "<br><br>" >> $GITHUB_STEP_SUMMARY
+      # --------------------------------------------------------------------
+      # Build the configuration summary (Part 2: Test Matrix and Features)
+      # --------------------------------------------------------------------
+      - name: 📋 Build Configuration Summary (Part 2)
+        id: config-summary-part2
+        env:
+          ENV_JSON: ${{ inputs.env-json }}
+        run: |
+          MATRIX_JSON='${{ steps.matrix.outputs.matrix }}'
 
           # Test Matrix
           echo "## 🧪 Generated Test Matrix" >> $GITHUB_STEP_SUMMARY
+          MATRIX_COUNT=$(echo "$MATRIX_JSON" | jq '.include | length')
           echo "**Total test configurations**: $MATRIX_COUNT" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| # | OS | Go Version | Configuration Name |" >> $GITHUB_STEP_SUMMARY
@@ -593,7 +606,14 @@ jobs:
           echo "| **Go Docs Publishing** | $([ "${{ env.ENABLE_GODOCS_PUBLISHING }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Go documentation will $([ "${{ env.ENABLE_GODOCS_PUBLISHING }}" == "true" ] && echo "be syndicated to pkg.go.dev on releases" || echo "not be published") |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "<br><br>" >> $GITHUB_STEP_SUMMARY
-
+      # --------------------------------------------------------------------
+      # Build the configuration summary (Part 3: Benchmark and Coverage Config)
+      # --------------------------------------------------------------------
+      - name: 📋 Build Configuration Summary (Part 3)
+        id: config-summary-part3
+        env:
+          ENV_JSON: ${{ inputs.env-json }}
+        run: |
           # Benchmark Configuration (only show if benchmarks are enabled)
           if [[ "${{ env.ENABLE_BENCHMARKS }}" == "true" ]]; then
             echo "## 🏃 Benchmark Configuration" >> $GITHUB_STEP_SUMMARY
@@ -653,7 +673,14 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "<br><br>" >> $GITHUB_STEP_SUMMARY
           fi
-
+      # --------------------------------------------------------------------
+      # Build the configuration summary (Part 4: Pre-commit and Security)
+      # --------------------------------------------------------------------
+      - name: 📋 Build Configuration Summary (Part 4)
+        id: config-summary-part4
+        env:
+          ENV_JSON: ${{ inputs.env-json }}
+        run: |
           # Pre-Commit System Configuration (only show if pre-commit is enabled)
           if [[ "${{ env.ENABLE_GO_PRE_COMMIT }}" == "true" ]]; then
             echo "## 🪝 Pre-Commit System Configuration" >> $GITHUB_STEP_SUMMARY
@@ -691,6 +718,15 @@ jobs:
           echo "| **Nancy** | \`${{ env.NANCY_VERSION }}\` | Excludes: \`${{ env.NANCY_EXCLUDES }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "<br><br>" >> $GITHUB_STEP_SUMMARY
+      # --------------------------------------------------------------------
+      # Build the configuration summary (Part 5: Authentication and Variables)
+      # --------------------------------------------------------------------
+      - name: 📋 Build Configuration Summary (Part 5)
+        id: config-summary-part5
+        env:
+          ENV_JSON: ${{ inputs.env-json }}
+        run: |
+          ENV_COUNT=$(echo "$ENV_JSON" | jq 'keys | length')
 
           # GitHub Token Configuration
           echo "## 🔑 Authentication" >> $GITHUB_STEP_SUMMARY
@@ -736,3 +772,4 @@ jobs:
           echo "🎯 **Configuration completed successfully** at $(date -u +"%H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "_GoFortress CI/CD Pipeline - Built Strong. Tested Harder._" >> $GITHUB_STEP_SUMMARY
+

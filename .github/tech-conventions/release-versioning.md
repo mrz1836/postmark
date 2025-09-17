@@ -9,7 +9,7 @@
 We follow **Semantic Versioning (✧ SemVer)**:
 `MAJOR.MINOR.PATCH` → `1.2.3`
 
-| Segment   | Bumps When …                          | Examples        |
+| Segment   | Bumps When...                         | Examples        |
 |-----------|---------------------------------------|-----------------|
 | **MAJOR** | Breaking API change                   | `1.0.0 → 2.0.0` |
 | **MINOR** | Back‑compatible feature / enhancement | `1.2.0 → 1.3.0` |
