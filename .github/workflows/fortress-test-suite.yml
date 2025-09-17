@@ -96,6 +96,10 @@ on:
         required: false
         type: string
         default: "true"
+      go-sum-file:
+        description: "Path to go.sum file for dependency verification"
+        required: true
+        type: string
     secrets:
       github-token:
         description: "GitHub token for API access"
@@ -132,6 +136,7 @@ jobs:
       redis-health-interval: ${{ inputs.redis-health-interval }}
       redis-health-timeout: ${{ inputs.redis-health-timeout }}
       redis-trust-service-health: ${{ inputs.redis-trust-service-health }}
+      go-sum-file: ${{ inputs.go-sum-file }}
 
   # ----------------------------------------------------------------------------------
   # Fuzz Testing Execution (Primary platform only)
@@ -145,6 +150,7 @@ jobs:
       go-primary-version: ${{ inputs.go-primary-version }}
       go-secondary-version: ${{ inputs.go-secondary-version }}
       fuzz-testing-enabled: ${{ inputs.fuzz-testing-enabled }}
+      go-sum-file: ${{ inputs.go-sum-file }}
 
   # ----------------------------------------------------------------------------------
   # Test Results Validation (Aggregate all test results)
@@ -182,6 +188,7 @@ jobs:
       primary-runner: ${{ inputs.primary-runner }}
       event-name: ${{ github.event_name }}
       pr-number: ${{ github.event.pull_request.number }}
+      go-sum-file: ${{ inputs.go-sum-file }}
     secrets:
       github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

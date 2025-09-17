@@ -1,0 +1,85 @@
+# ------------------------------------------------------------------------------------
+#  Extract Go Module Directory Action (GoFortress)
+#
+#  Purpose: Extract the Go module directory from the GO_SUM_FILE path and export
+#  it as an environment variable for subsequent steps to use when running Go/magex
+#  commands from the correct directory.
+#
+#  Features:
+#    - Derives module directory from go.sum file path
+#    - Handles both subdirectory and root-level go.mod files
+#    - Exports GO_MODULE_DIR environment variable
+#    - Provides output for conditional logic
+#
+#  Usage:
+#    - uses: ./.github/actions/extract-module-dir
+#      with:
+#        go-sum-file: ${{ inputs.go-sum-file }}
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: "Extract Go Module Directory"
+description: "Extract the Go module directory from the GO_SUM_FILE path for running Go/magex commands"
+
+inputs:
+  go-sum-file:
+    description: "Path to go.sum file for extracting module directory"
+    required: true
+
+outputs:
+  module-dir:
+    description: "Go module directory path (empty if root directory)"
+    value: ${{ steps.extract.outputs.module-dir }}
+  is-root:
+    description: "Whether the module is in the root directory (true/false)"
+    value: ${{ steps.extract.outputs.is-root }}
+
+runs:
+  using: "composite"
+  steps:
+    # --------------------------------------------------------------------
+    # Extract Go module directory from GO_SUM_FILE path
+    # --------------------------------------------------------------------
+    - name: 🔧 Extract Go module directory
+      id: extract
+      shell: bash
+      run: |
+        GO_SUM_FILE="${{ inputs.go-sum-file }}"
+        GO_MODULE_DIR=$(dirname "$GO_SUM_FILE")
+
+        # Handle root directory case (dirname returns ".")
+        if [ "$GO_MODULE_DIR" = "." ]; then
+          GO_MODULE_DIR=""
+          IS_ROOT="true"
+          echo "📁 Go module directory: repository root"
+        else
+          IS_ROOT="false"
+          echo "📁 Go module directory: $GO_MODULE_DIR"
+        fi
+
+        # Export for subsequent steps in the same job
+        echo "GO_MODULE_DIR=$GO_MODULE_DIR" >> $GITHUB_ENV
+
+        # Set outputs for use in other jobs or conditional logic
+        echo "module-dir=$GO_MODULE_DIR" >> $GITHUB_OUTPUT
+        echo "is-root=$IS_ROOT" >> $GITHUB_OUTPUT
+
+        # Validate that the derived directory structure makes sense
+        if [ -n "$GO_MODULE_DIR" ]; then
+          GO_MOD_PATH="$GO_MODULE_DIR/go.mod"
+          if [ -f "$GO_MOD_PATH" ]; then
+            echo "✅ Verified: go.mod exists at $GO_MOD_PATH"
+          else
+            echo "⚠️  Warning: go.mod not found at $GO_MOD_PATH"
+          fi
+
+          if [ -f "$GO_SUM_FILE" ]; then
+            echo "✅ Verified: go.sum exists at $GO_SUM_FILE"
+          else
+            echo "⚠️  Warning: go.sum not found at $GO_SUM_FILE"
+          fi
+        else
+          echo "📋 Root directory mode - looking for go.mod and go.sum in repository root"
+        fi

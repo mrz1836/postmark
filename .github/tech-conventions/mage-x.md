@@ -1,6 +1,6 @@
 # MAGE-X Build Automation
 
-> Zero-boilerplate build automation for Go projects that replaces Makefiles with 240+ built-in commands and intelligent configuration.
+> Zero-boilerplate build automation for Go projects that replaces Makefiles with 190+ built-in commands and intelligent configuration.
 
 <br><br>
 
@@ -10,10 +10,10 @@
 
 ### Core Philosophy
 
-**"Write Once, Mage Everywhere: Enterprise Build Automation for Go"**
+**"Write Once, Mage Everywhere: Production Build Automation for Go"**
 
 - **Zero Setup Required**: No magefile.go needed for basic operations
-- **240+ Built-in Commands**: Complete build, test, lint, release, and deployment workflows
+- **190+ Built-in Commands**: Complete build, test, lint, release, and deployment workflows
 - **Hybrid Execution**: Built-in commands execute directly; custom commands from optional magefile.go
 - **Smart Configuration**: Uses `.mage.yaml` for project-specific settings
 - **Parameter Support**: Modern parameter syntax: `magex command param=value`
@@ -25,10 +25,10 @@
 | Traditional Makefiles                         | MAGE-X                                  |
 |-----------------------------------------------|-----------------------------------------|
 | Platform-specific (issues on Windows)         | Cross-platform (Linux, macOS, Windows)  |
-| Requires writing boilerplate for each project | 240+ commands available instantly       |
+| Requires writing boilerplate for each project | 190+ commands available instantly       |
 | Complex dependency management                 | Automatic dependency resolution         |
 | Limited parameter support                     | Rich parameter syntax with validation   |
-| No built-in testing/linting workflows         | Enterprise-ready quality workflows      |
+| No built-in testing/linting workflows         | Production-ready quality workflows      |
 | Manual tool management                        | Automatic tool discovery and management |
 | Shell-based (brittle)                         | Go-native (type-safe and robust)        |
 
@@ -134,9 +134,8 @@ magex build:linux           # Linux-specific build
 magex build:windows         # Windows-specific build
 magex build:darwin          # macOS-specific build
 
-# Docker integration
-magex build:docker          # Build Docker image
-magex build:docker:multi    # Multi-stage Docker build
+# Cross-platform builds
+magex build:all             # Build for all platforms
 ```
 
 ### Testing & Quality Assurance
@@ -164,12 +163,12 @@ magex staticcheck           # Advanced static analysis
 
 ```bash
 # Benchmarking
-magex bench                 # Standard benchmarks
-magex bench time=50ms       # Quick benchmarks
+magex bench                   # Standard benchmarks
+magex bench time=50ms         # Quick benchmarks
 magex bench time=10s count=3  # Comprehensive benchmarks
-magex bench:cpu             # CPU profiling
-magex bench:mem             # Memory profiling
-magex bench:profile         # General performance profiling
+magex bench:cpu               # CPU profiling
+magex bench:mem               # Memory profiling
+magex bench:profile           # General performance profiling
 
 # Performance analysis
 magex profile:cpu           # CPU profiling with visualization
@@ -232,7 +231,6 @@ MAGE-X supports rich parameter syntax for flexible command execution:
 # Time-based parameters
 magex bench time=50ms               # Quick benchmarks
 magex test:fuzz time=30s            # 30-second fuzz testing
-magex build:docker tag=v1.2.3      # Custom Docker tag
 
 # Numeric parameters
 magex bench count=3                 # Run 3 benchmark iterations
@@ -240,7 +238,6 @@ magex test:parallel workers=4       # Parallel test execution
 
 # Boolean flags
 magex version:bump bump=patch push  # Bump version and push tag
-magex build:docker multi-stage     # Enable multi-stage build
 magex test:verbose                  # Verbose test output
 ```
 
@@ -249,7 +246,6 @@ magex test:verbose                  # Verbose test output
 ```bash
 # Combine multiple parameters
 magex bench time=10s count=3 verbose         # Comprehensive benchmarking
-magex build:docker tag=latest push=true     # Build and push Docker image
 magex test:cover threshold=85 html=true     # Coverage with HTML reporting
 ```
 
@@ -266,12 +262,12 @@ magex deploy dry-run                # Preview deployment actions
 
 ## 🏛️ MAGE-X Namespace Architecture
 
-MAGE-X organizes its 240+ commands into **37 specialized namespaces**, each focusing on specific aspects of Go development:
+MAGE-X organizes its 190+ commands into **37 specialized namespaces**, each focusing on specific aspects of Go development:
 
 ### Core Development Namespaces
 
 **Build (`build:`)** - Compilation and binary creation
-- `build`, `build:clean`, `build:install`, `build:all`, `build:docker`
+- `build`, `build:clean`, `build:install`, `build:all`
 
 **Test (`test:`)** - Testing workflows and validation
 - `test`, `test:race`, `test:cover`, `test:fuzz`, `test:integration`
@@ -306,14 +302,6 @@ MAGE-X organizes its 240+ commands into **37 specialized namespaces**, each focu
 
 **Git (`git:`)** - Git operations and repository management
 - `git:tag`, `git:push`, `git:status`, `git:clean`
-
-### Enterprise Namespaces (Available)
-
-**Security (`security:`)** - Security scanning and compliance
-**Audit (`audit:`)** - Activity tracking and compliance reporting
-**Workflow (`workflow:`)** - Build automation and pipeline orchestration
-**Enterprise (`enterprise:`)** - Governance and enterprise management
-**Analytics (`analytics:`)** - Usage analytics and reporting
 
 <br><br>
 
@@ -630,12 +618,7 @@ MAGEX_LOG_LEVEL=debug magex lint    # Environment variable control
 # Command-specific help
 magex help build                    # Help for build commands
 magex build --help                  # Detailed build options
-magex --help                        # Global help and options
-
-# List all available commands
-magex list                          # All 240+ commands
-magex list:namespaces              # Available namespaces
-magex list:build                   # Commands in build namespace
+magex --help                        # Global help and options and list all commands
 ```
 
 <br><br>
@@ -644,7 +627,7 @@ magex list:build                   # Commands in build namespace
 
 ### Official Documentation
 - **Main Repository**: [github.com/mrz1836/mage-x](https://github.com/mrz1836/mage-x)
-- **Command Reference**: Complete documentation of all 240+ commands
+- **Command Reference**: Complete documentation of all 190+ commands
 - **Configuration Guide**: Comprehensive `.mage.yaml` configuration options
 - **API Documentation**: Go package documentation for extensions
 
@@ -665,11 +648,11 @@ magex list:build                   # Commands in build namespace
 ## 🎯 Key Takeaways
 
 1. **Zero Configuration**: Start using MAGE-X immediately without setup
-2. **240+ Built-in Commands**: Comprehensive workflows available instantly
+2. **190+ Built-in Commands**: Comprehensive workflows available instantly
 3. **Hybrid Model**: Built-in commands for speed, custom commands for flexibility
 4. **Cross-Platform**: Works consistently on Linux, macOS, and Windows
 5. **Performance**: Significantly faster than traditional build tools
-6. **Enterprise Ready**: Security, compliance, and governance features built-in
+6. **Production Ready**: Security, compliance, and governance features built-in
 
 MAGE-X transforms Go build automation from a chore into a productivity multiplier, enabling teams to focus on code rather than tooling configuration.
 

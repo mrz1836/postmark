@@ -266,16 +266,12 @@ runs:
           # Initialize JSON array for structured failures with signatures
           echo '[]' > "$signatures_file"
 
-          # Enhanced pattern matching for various failure formats
-          # Patterns handle: FAIL, --- FAIL, --FAIL, [FAIL], FAIL:, etc.
+          # Enhanced pattern matching for actual test failures only
+          # Exclude standalone FAIL lines, package summaries, and exit status indicators
           local patterns=(
-            '^FAIL[[:space:]:]'
-            '^---[[:space:]]*FAIL'
-            '^--[[:space:]]*FAIL'
-            '^\[?FAIL\]?[[:space:]:.]'
-            '--- FAIL:'
-            'FAIL[[:space:]]*:'
-            '^[[:space:]]*FAIL[[:space:]]'
+            '^---[[:space:]]*FAIL:[[:space:]]*[A-Za-z][A-Za-z0-9_]*'
+            '^--[[:space:]]*FAIL:[[:space:]]*[A-Za-z][A-Za-z0-9_]*'
+            '^\[?FAIL\]?[[:space:]]*[A-Za-z][A-Za-z0-9_]*'
           )
 
           local temp_failures=$(mktemp)
@@ -354,7 +350,13 @@ runs:
             echo '[]' > "$temp_signatures"
 
             while IFS= read -r failure_line; do
+              # Skip empty lines and generic failures
               if [[ -n "$failure_line" && "$failure_line" != *"Generic test failure"* ]]; then
+                # Skip standalone FAIL lines, package summaries, and exit status indicators
+                if [[ "$failure_line" =~ ^(FAIL[[:space:]]*$|FAIL[[:space:]]+github\.com|exit[[:space:]]+status) ]]; then
+                  continue
+                fi
+
                 # Extract package and test info from failure line
                 # Pattern: --- FAIL: TestName (package.name)
                 if [[ "$failure_line" =~ "FAIL:" ]]; then
@@ -376,17 +378,34 @@ runs:
                       unique_id: (($pkg + ":" + $test) | gsub("[^a-zA-Z0-9_/.-]"; "_"))
                     }' >> "$temp_signatures.items"
                   else
-                    # Regular test failure
-                    if [[ -n "$test_name" && -n "$package_name" && "$test_name" != "$package_name" ]]; then
-                      jq -n --arg pkg "$package_name" --arg test "$test_name" --arg output "$failure_line" '{
-                        type: "test",
-                        package: $pkg,
-                        test: $test,
-                        output: $output,
-                        line_number: null,
-                        signature: ($pkg + ":" + $test),
-                        unique_id: (($pkg + ":" + $test) | gsub("[^a-zA-Z0-9_/.-]"; "_"))
-                      }' >> "$temp_signatures.items"
+                    # Handle fuzz test failures specifically
+                    if [[ "$test_name" =~ ^Fuzz[A-Za-z0-9_]+ ]]; then
+                      # For fuzz tests, create a more specific signature to avoid duplicates
+                      # Only count the main fuzz test, not nested failures
+                      if [[ ! "$failure_line" =~ "#[0-9]+" ]]; then
+                        jq -n --arg pkg "$package_name" --arg test "$test_name" --arg output "$failure_line" '{
+                          type: "fuzz_test",
+                          package: $pkg,
+                          test: $test,
+                          output: $output,
+                          line_number: null,
+                          signature: ($pkg + ":" + $test + ":fuzz"),
+                          unique_id: (($pkg + ":" + $test + ":fuzz") | gsub("[^a-zA-Z0-9_/.-]"; "_"))
+                        }' >> "$temp_signatures.items"
+                      fi
+                    else
+                      # Regular test failure
+                      if [[ -n "$test_name" && -n "$package_name" && "$test_name" != "$package_name" ]]; then
+                        jq -n --arg pkg "$package_name" --arg test "$test_name" --arg output "$failure_line" '{
+                          type: "test",
+                          package: $pkg,
+                          test: $test,
+                          output: $output,
+                          line_number: null,
+                          signature: ($pkg + ":" + $test),
+                          unique_id: (($pkg + ":" + $test) | gsub("[^a-zA-Z0-9_/.-]"; "_"))
+                        }' >> "$temp_signatures.items"
+                      fi
                     fi
                   fi
                 fi

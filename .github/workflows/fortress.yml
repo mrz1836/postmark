@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------------
 #  🏰 GoFortress - Enterprise-grade CI/CD fortress for Go applications
 #
-#  Version: 1.0.3 | Released: 2025-09-11
+#  Version: 1.1.0 | Released: 2025-09-15
 #
 #  Built Strong. Tested Harder.
 #
@@ -30,9 +30,9 @@
 
 name: GoFortress
 
-# ————————————————————————————————————————————————————————————————
+# --------------------------------------------------------------------
 # Trigger Configuration
-# ————————————————————————————————————————————————————————————————
+# --------------------------------------------------------------------
 on:
   push:
     branches:
@@ -47,9 +47,9 @@ on:
 permissions:
   contents: read
 
-# ————————————————————————————————————————————————————————————————
+# --------------------------------------------------------------------
 # Concurrency Control
-# ————————————————————————————————————————————————————————————————
+# --------------------------------------------------------------------
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -72,9 +72,9 @@ jobs:
       custom-var-count: ${{ steps.load-env.outputs.custom-var-count }}
       config-mode: ${{ steps.load-env.outputs.config-mode }}
     steps:
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Check out code to access env file
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📥 Checkout code (sparse)
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -83,9 +83,9 @@ jobs:
             .github/.env.custom
             .github/actions/load-env
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Load and parse environment file
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🌍 Load environment variables
         uses: ./.github/actions/load-env
         id: load-env
@@ -134,9 +134,21 @@ jobs:
       matrix: ${{ fromJSON(needs.setup.outputs.warm-cache-matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
+      # Parse environment variables
+      # --------------------------------------------------------------------
+      - name: 🔧 Parse environment variables
+        env:
+          ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+        run: |
+          echo "📋 Setting environment variables..."
+          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
+            echo "$key=$value" >> $GITHUB_ENV
+          done
+
+      # --------------------------------------------------------------------
       # Checkout code to access local action
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📥 Checkout code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -146,20 +158,20 @@ jobs:
             .github/actions/cache-redis-image
             .github/.env.base
             go.mod
-            go.sum
+            ${{ env.GO_SUM_FILE }}
             .mage.yaml
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Extract verbose flag from env-json
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔁 Extract ENABLE_VERBOSE
         id: extract
         run: |
           echo "enable_verbose=$(echo '${{ needs.load-env.outputs.env-json }}' | jq -r '.ENABLE_VERBOSE_TEST_OUTPUT')" >> "$GITHUB_OUTPUT"
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Warm the Go and Redis caches using local action
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 🔥 Warm Go and Redis Caches
         uses: ./.github/actions/warm-cache # Might not resolve as it's a composite action
         with:
@@ -173,6 +185,7 @@ jobs:
           redis-enabled: ${{ needs.setup.outputs.redis-enabled }}
           redis-versions: ${{ needs.setup.outputs.redis-version }}
           redis-cache-force-pull: ${{ needs.setup.outputs.redis-cache-force-pull }}
+          go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
   # ----------------------------------------------------------------------------------
   # Security Scans
   # ----------------------------------------------------------------------------------
@@ -190,6 +203,7 @@ jobs:
       enable-gitleaks: ${{ needs.setup.outputs.gitleaks-enabled == 'true' }}
       go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
       primary-runner: ${{ needs.setup.outputs.primary-runner }}
+      go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
       github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
       gitleaks-license: ${{ secrets.GITLEAKS_LICENSE }}
@@ -209,6 +223,7 @@ jobs:
       yaml-lint-enabled: ${{ needs.setup.outputs.yaml-lint-enabled }}
       primary-runner: ${{ needs.setup.outputs.primary-runner }}
       static-analysis-enabled: ${{ needs.setup.outputs.static-analysis-enabled }}
+      go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
       github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
   # ----------------------------------------------------------------------------------
@@ -226,6 +241,7 @@ jobs:
       primary-runner: ${{ needs.setup.outputs.primary-runner }}
       go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
       pre-commit-enabled: ${{ needs.setup.outputs.pre-commit-enabled }}
+      go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
   # ----------------------------------------------------------------------------------
   # Test Suite
   # ----------------------------------------------------------------------------------
@@ -258,6 +274,7 @@ jobs:
       redis-health-interval: ${{ needs.setup.outputs.redis-health-interval }}
       redis-health-timeout: ${{ needs.setup.outputs.redis-health-timeout }}
       redis-trust-service-health: ${{ needs.setup.outputs.redis-trust-service-health }}
+      go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
       github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
@@ -286,6 +303,7 @@ jobs:
       redis-health-interval: ${{ needs.setup.outputs.redis-health-interval }}
       redis-health-timeout: ${{ needs.setup.outputs.redis-health-timeout }}
       redis-trust-service-health: ${{ needs.setup.outputs.redis-trust-service-health }}
+      go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
       github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
   # ----------------------------------------------------------------------------------
@@ -299,9 +317,9 @@ jobs:
       contents: read # Read repository content for status checking
     runs-on: ${{ needs.setup.outputs.primary-runner }}
     steps:
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Build a summary table for the UI (always runs)
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: 📊 Build results summary
         run: |
           {
@@ -322,11 +340,11 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Fail the workflow *only* when a dependency actually failed/canceled
       # - 'skipped' is OK (e.g. feature flag off)
       # - Benchmarks are currently optional (can fail without blocking)
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: ❌ Fail if any required job errored
         if: ${{ always() }}
         run: |
@@ -373,9 +391,9 @@ jobs:
             exit 1
           fi
 
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       # Succeed if all required jobs passed or were skipped
-      # ————————————————————————————————————————————————————————————————
+      # --------------------------------------------------------------------
       - name: ✅ Mark workflow success
         if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
         run: |
@@ -395,6 +413,7 @@ jobs:
       primary-runner: ${{ needs.setup.outputs.primary-runner }}
       go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
       golangci-lint-version: ${{ needs.code-quality.outputs.golangci-lint-version }}
+      go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
       github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
       slack-webhook: ${{ secrets.SLACK_WEBHOOK || '' }}

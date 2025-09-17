@@ -1,6 +1,12 @@
 - name: "automerge"
-  description: "Used for automatic merging"
+  description: "Label to automatically merge pull requests that meet all required conditions"
   color: FEF2C0
+- name: "automerge-enabled"
+  description: "Detected automerge PR and enabled automerge"
+  color: 006b75
+- name: "automated-sync"
+  description: "Automated sync PR, e.g. from a fork or external repo"
+  color: 006b75
 - name: "bug-P1"
   description: "Highest rated bug or issue, affects all"
   color: b23128
