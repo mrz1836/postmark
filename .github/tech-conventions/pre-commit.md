@@ -98,8 +98,7 @@ Pin specific tool versions for consistency across environments:
 
 ```bash
 # External tool versions
-GO_PRE_COMMIT_GOLANGCI_LINT_VERSION=v2.4.0
-GO_PRE_COMMIT_FUMPT_VERSION=v0.8.0
+GO_PRE_COMMIT_FUMPT_VERSION=latest
 GO_PRE_COMMIT_GOIMPORTS_VERSION=latest
 ```
 
