@@ -2,7 +2,6 @@ package postmark
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"testing"
 )
@@ -79,7 +78,7 @@ func (s *PostmarkTestSuite) TestDeleteInboundRuleTriggerNotFound() {
 	err := s.client.DeleteInboundRuleTrigger(context.Background(), 999999)
 	s.Require().Error(err, "DeleteInboundRuleTrigger should fail for non-existent trigger")
 	var apiErr APIError
-	s.True(errors.As(err, &apiErr), "Error should be APIError")
+	s.Require().ErrorAs(err, &apiErr, "Error should be APIError")
 	s.Equal(int64(1), apiErr.ErrorCode)
 	s.Equal("Trigger not found", apiErr.Message)
 }

@@ -172,7 +172,7 @@ func (s *PostmarkTestSuite) TestEditMessageStream() {
 	s.mux.Patch("/message-streams/transactional-dev", func(w http.ResponseWriter, req *http.Request) {
 		var body EditMessageStreamRequest
 		err := json.NewDecoder(req.Body).Decode(&body)
-		s.Require().NoError(err, "Failed to read request body")
+		s.NoError(err, "Failed to read request body")
 
 		s.Nil(body.Description, "EditMessageStream: Description should be nil")
 		s.Equal(editReq.Name, body.Name, "EditMessageStream: wrong Name")

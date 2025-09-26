@@ -212,7 +212,7 @@ func (s *PostmarkTestSuite) TestCreateWebhook() {
 		err := decoder.Decode(&res)
 		_ = req.Body.Close()
 
-		s.Require().NoError(err, "Failed to decode webhook request")
+		s.NoError(err, "Failed to decode webhook request")
 
 		s.Equal(outbound, res.MessageStream, "Webhook: wrong message stream")
 		s.True(res.Triggers.Open.Enabled, "Webhook: wrong Open trigger state")
@@ -220,7 +220,7 @@ func (s *PostmarkTestSuite) TestCreateWebhook() {
 		res.ID = 12345
 
 		resBytes, err := json.Marshal(res)
-		s.Require().NoError(err, "Failed to marshal webhook response")
+		s.NoError(err, "Failed to marshal webhook response")
 
 		_, _ = w.Write(resBytes)
 	})
@@ -267,7 +267,7 @@ func (s *PostmarkTestSuite) TestEditWebhook() {
 		err := decoder.Decode(&res)
 		_ = req.Body.Close()
 
-		s.Require().NoError(err, "Failed to decode webhook request")
+		s.NoError(err, "Failed to decode webhook request")
 
 		s.Equal(outbound, res.MessageStream, "Webhook: wrong message stream")
 		s.True(res.Triggers.Open.Enabled, "Webhook: wrong Open trigger state")
@@ -275,7 +275,7 @@ func (s *PostmarkTestSuite) TestEditWebhook() {
 		res.ID = 12345
 
 		resBytes, err := json.Marshal(res)
-		s.Require().NoError(err, "Failed to marshal webhook response")
+		s.NoError(err, "Failed to marshal webhook response")
 
 		_, _ = w.Write(resBytes)
 	})

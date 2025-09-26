@@ -51,6 +51,12 @@ on:
       gitleaks-license:
         description: "Gitleaks license key"
         required: false
+      ossi-username:
+        description: "OSS Index username or email for Nancy authentication"
+        required: false
+      ossi-token:
+        description: "OSS Index API token for Nancy authentication"
+        required: false
 
 # Security: Restrictive default permissions with job-level overrides for least privilege access
 permissions:
@@ -124,6 +130,9 @@ jobs:
       - name: 🔍 Ask Nancy
         uses: sonatype-nexus-community/nancy-github-action@726e338312e68ecdd4b4195765f174d3b3ce1533 # v1.0.3
         continue-on-error: false
+        env:
+          OSSI_USERNAME: ${{ secrets.ossi-username }}
+          OSSI_TOKEN: ${{ secrets.ossi-token }}
         with:
           githubToken: ${{ secrets.github-token }} # ← prevents rate-limit 403
           nancyVersion: ${{ env.NANCY_VERSION }}
