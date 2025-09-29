@@ -498,3 +498,71 @@ func BenchmarkPushTemplates(b *testing.B) {
 		}
 	}
 }
+
+// TestValidateTemplateAlias tests the header injection validation function
+func (s *PostmarkTestSuite) TestValidateTemplateAlias() {
+	// Test valid template aliases (no error expected)
+	validAliases := []string{
+		"valid-template",
+		"template123",
+		"",
+		"special_chars-template.name",
+	}
+
+	for _, alias := range validAliases {
+		err := validateTemplateAlias(alias)
+		s.Require().NoError(err, "Valid alias should not return error: %s", alias)
+	}
+
+	// Test invalid template aliases (error expected)
+	invalidAliases := []string{
+		"template\rwith\rcarriage\rreturns",
+		"template\nwith\nline\nfeeds",
+		"template\r\nwith\r\nboth",
+		"template\n\rwith\n\rmixed",
+	}
+
+	for _, alias := range invalidAliases {
+		err := validateTemplateAlias(alias)
+		s.Require().Error(err, "Invalid alias should return error: %s", alias)
+		s.Equal(ErrHeaderInjection, err, "Should return header injection error")
+	}
+}
+
+// TestSendTemplatedEmailWithHeaderInjection tests that SendTemplatedEmail rejects header injection
+func (s *PostmarkTestSuite) TestSendTemplatedEmailWithHeaderInjection() {
+	// Test with malicious template alias
+	maliciousEmail := TemplatedEmail{
+		TemplateID:    123,
+		TemplateAlias: "template\r\nBcc: evil@hacker.com\r\n",
+		From:          "sender@example.com",
+		To:            "recipient@example.com",
+	}
+
+	_, err := s.client.SendTemplatedEmail(context.Background(), maliciousEmail)
+	s.Require().Error(err, "Should reject email with header injection")
+	s.Equal(ErrHeaderInjection, err, "Should return header injection error")
+}
+
+// TestSendTemplatedEmailBatchWithHeaderInjection tests that batch sending rejects header injection
+func (s *PostmarkTestSuite) TestSendTemplatedEmailBatchWithHeaderInjection() {
+	validEmail := TemplatedEmail{
+		TemplateID: 123,
+		From:       "sender@example.com",
+		To:         "recipient@example.com",
+	}
+
+	maliciousEmail := TemplatedEmail{
+		TemplateID:    456,
+		TemplateAlias: "template\nwith\ninjection",
+		From:          "sender@example.com",
+		To:            "recipient2@example.com",
+	}
+
+	emails := []TemplatedEmail{validEmail, maliciousEmail}
+
+	_, err := s.client.SendTemplatedEmailBatch(context.Background(), emails)
+	s.Require().Error(err, "Should reject batch with header injection")
+	s.Contains(err.Error(), "email 1", "Should indicate which email failed")
+	s.Contains(err.Error(), "header injection", "Should indicate header injection error")
+}

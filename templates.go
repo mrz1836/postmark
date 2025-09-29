@@ -2,9 +2,22 @@ package postmark
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 )
+
+// ErrHeaderInjection is returned when header injection is detected
+var ErrHeaderInjection = errors.New("header injection detected: illegal characters in template alias")
+
+// validateTemplateAlias checks for header injection attempts in template alias
+func validateTemplateAlias(alias string) error {
+	if strings.Contains(alias, "\r") || strings.Contains(alias, "\n") {
+		return ErrHeaderInjection
+	}
+	return nil
+}
 
 // Template represents an email template on the server
 type Template struct {
@@ -217,6 +230,11 @@ type TemplatedEmail struct {
 
 // SendTemplatedEmail sends an email using a template (TemplateID)
 func (client *Client) SendTemplatedEmail(ctx context.Context, email TemplatedEmail) (EmailResponse, error) {
+	// Validate TemplateAlias for header injection
+	if err := validateTemplateAlias(email.TemplateAlias); err != nil {
+		return EmailResponse{}, err
+	}
+
 	res := EmailResponse{}
 	err := client.doRequest(ctx, parameters{
 		Method:    "POST",
@@ -229,6 +247,13 @@ func (client *Client) SendTemplatedEmail(ctx context.Context, email TemplatedEma
 
 // SendTemplatedEmailBatch sends batch email using a template (TemplateID)
 func (client *Client) SendTemplatedEmailBatch(ctx context.Context, emails []TemplatedEmail) ([]EmailResponse, error) {
+	// Validate TemplateAlias for header injection in all emails
+	for i, email := range emails {
+		if err := validateTemplateAlias(email.TemplateAlias); err != nil {
+			return nil, fmt.Errorf("email %d: %w", i, err)
+		}
+	}
+
 	var res []EmailResponse
 	formatEmails := map[string]interface{}{
 		"Messages": emails,
