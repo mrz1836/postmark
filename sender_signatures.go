@@ -132,7 +132,7 @@ func (client *Client) GetSenderSignatures(ctx context.Context, count, offset int
 	values.Add("offset", fmt.Sprintf("%d", offset))
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("senders?%s", values.Encode()),
 		TokenType: accountToken,
 	}, &res)

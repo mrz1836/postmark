@@ -29,19 +29,19 @@ func NewTestRouter() *TestRouter {
 }
 
 // ServeHTTP implements http.Handler interface.
-func (tr *TestRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	for _, route := range tr.routes {
-		if route.method != r.Method {
+func (tr *TestRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	for _, r := range tr.routes {
+		if r.method != req.Method {
 			continue
 		}
 
-		if tr.matchRoute(route, r, w) {
+		if tr.matchRoute(r, req, w) {
 			return
 		}
 	}
 
 	// No route found
-	http.NotFound(w, r)
+	http.NotFound(w, req)
 }
 
 // HandleFunc registers a handler function for the given method and pattern.
@@ -62,27 +62,27 @@ func (tr *TestRouter) HandleFunc(method, pattern string, handler http.HandlerFun
 
 // Get registers a GET handler for the given pattern.
 func (tr *TestRouter) Get(pattern string, handler http.HandlerFunc) {
-	tr.HandleFunc("GET", pattern, handler)
+	tr.HandleFunc(http.MethodGet, pattern, handler)
 }
 
 // Post registers a POST handler for the given pattern.
 func (tr *TestRouter) Post(pattern string, handler http.HandlerFunc) {
-	tr.HandleFunc("POST", pattern, handler)
+	tr.HandleFunc(http.MethodPost, pattern, handler)
 }
 
 // Put registers a PUT handler for the given pattern.
 func (tr *TestRouter) Put(pattern string, handler http.HandlerFunc) {
-	tr.HandleFunc("PUT", pattern, handler)
+	tr.HandleFunc(http.MethodPut, pattern, handler)
 }
 
 // Delete registers a DELETE handler for the given pattern.
 func (tr *TestRouter) Delete(pattern string, handler http.HandlerFunc) {
-	tr.HandleFunc("DELETE", pattern, handler)
+	tr.HandleFunc(http.MethodDelete, pattern, handler)
 }
 
 // Patch registers a PATCH handler for the given pattern.
 func (tr *TestRouter) Patch(pattern string, handler http.HandlerFunc) {
-	tr.HandleFunc("PATCH", pattern, handler)
+	tr.HandleFunc(http.MethodPatch, pattern, handler)
 }
 
 // matchRoute attempts to match a route and execute its handler.

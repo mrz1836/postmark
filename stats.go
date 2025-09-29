@@ -3,6 +3,7 @@ package postmark
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 )
 
@@ -45,7 +46,7 @@ func (client *Client) GetOutboundStats(ctx context.Context, options map[string]i
 	}
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("stats/outbound?%s", values.Encode()),
 		TokenType: serverToken,
 	}, &res)
@@ -78,7 +79,7 @@ func (client *Client) GetSentCounts(ctx context.Context, options map[string]inte
 	}
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("stats/outbound/sends?%s", values.Encode()),
 		TokenType: serverToken,
 	}, &res)
@@ -123,7 +124,7 @@ func (client *Client) GetBounceCounts(ctx context.Context, options map[string]in
 	}
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("stats/outbound/bounces?%s", values.Encode()),
 		TokenType: serverToken,
 	}, &res)
@@ -157,7 +158,7 @@ func (client *Client) GetSpamCounts(ctx context.Context, options map[string]inte
 	}
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("stats/outbound/spam?%s", values.Encode()),
 		TokenType: serverToken,
 	}, &res)
@@ -190,7 +191,7 @@ func (client *Client) GetTrackedCounts(ctx context.Context, options map[string]i
 	}
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("stats/outbound/tracked?%s", values.Encode()),
 		TokenType: serverToken,
 	}, &res)
@@ -227,7 +228,7 @@ func (client *Client) GetOpenCounts(ctx context.Context, options map[string]inte
 	}
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("stats/outbound/opens?%s", values.Encode()),
 		TokenType: serverToken,
 	}, &res)
@@ -278,7 +279,7 @@ func (client *Client) GetPlatformCounts(ctx context.Context, options map[string]
 	}
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("stats/outbound/platform?%s", values.Encode()),
 		TokenType: serverToken,
 	}, &res)
@@ -315,7 +316,7 @@ func (client *Client) GetClickCounts(ctx context.Context, options map[string]int
 	}
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("stats/outbound/clicks?%s", values.Encode()),
 		TokenType: serverToken,
 	}, &res)
@@ -368,7 +369,7 @@ func (client *Client) GetBrowserFamilyCounts(ctx context.Context, options map[st
 	}
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("stats/outbound/clicks/browserfamilies?%s", values.Encode()),
 		TokenType: serverToken,
 	}, &res)
@@ -405,7 +406,7 @@ func (client *Client) GetClickLocationCounts(ctx context.Context, options map[st
 	}
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("stats/outbound/clicks/location?%s", values.Encode()),
 		TokenType: serverToken,
 	}, &res)
@@ -450,7 +451,7 @@ func (client *Client) GetClickPlatformCounts(ctx context.Context, options map[st
 	}
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("stats/outbound/clicks/platforms?%s", values.Encode()),
 		TokenType: serverToken,
 	}, &res)
@@ -503,7 +504,7 @@ func (client *Client) GetEmailClientCounts(ctx context.Context, options map[stri
 	}
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("stats/outbound/opens/emailclients?%s", values.Encode()),
 		TokenType: serverToken,
 	}, &res)

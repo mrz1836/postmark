@@ -2,9 +2,23 @@ package postmark
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
+	"strings"
 )
+
+// ErrHeaderInjection is returned when header injection is detected
+var ErrHeaderInjection = errors.New("header injection detected: illegal characters in template alias")
+
+// validateTemplateAlias checks for header injection attempts in template alias
+func validateTemplateAlias(alias string) error {
+	if strings.Contains(alias, "\r") || strings.Contains(alias, "\n") {
+		return ErrHeaderInjection
+	}
+	return nil
+}
 
 // Template represents an email template on the server
 type Template struct {
@@ -50,7 +64,7 @@ type TemplateInfo struct {
 func (client *Client) GetTemplate(ctx context.Context, templateID string) (Template, error) {
 	res := Template{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("templates/%s", templateID),
 		TokenType: serverToken,
 	}, &res)
@@ -88,7 +102,7 @@ func (client *Client) GetTemplatesFiltered(ctx context.Context, count, offset in
 	}
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("templates?%s", values.Encode()),
 		TokenType: serverToken,
 	}, &res)
@@ -99,7 +113,7 @@ func (client *Client) GetTemplatesFiltered(ctx context.Context, count, offset in
 func (client *Client) CreateTemplate(ctx context.Context, template Template) (TemplateInfo, error) {
 	res := TemplateInfo{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "POST",
+		Method:    http.MethodPost,
 		Path:      "templates",
 		Payload:   template,
 		TokenType: serverToken,
@@ -111,7 +125,7 @@ func (client *Client) CreateTemplate(ctx context.Context, template Template) (Te
 func (client *Client) EditTemplate(ctx context.Context, templateID string, template Template) (TemplateInfo, error) {
 	res := TemplateInfo{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "PUT",
+		Method:    http.MethodPut,
 		Path:      fmt.Sprintf("templates/%s", templateID),
 		Payload:   template,
 		TokenType: serverToken,
@@ -123,7 +137,7 @@ func (client *Client) EditTemplate(ctx context.Context, templateID string, templ
 func (client *Client) DeleteTemplate(ctx context.Context, templateID string) error {
 	res := APIError{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "DELETE",
+		Method:    http.MethodDelete,
 		Path:      fmt.Sprintf("templates/%s", templateID),
 		TokenType: serverToken,
 	}, &res)
@@ -171,7 +185,7 @@ type ValidationError struct {
 func (client *Client) ValidateTemplate(ctx context.Context, validateTemplateBody ValidateTemplateBody) (ValidateTemplateResponse, error) {
 	res := ValidateTemplateResponse{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "POST",
+		Method:    http.MethodPost,
 		Path:      "templates/validate",
 		Payload:   validateTemplateBody,
 		TokenType: serverToken,
@@ -217,9 +231,14 @@ type TemplatedEmail struct {
 
 // SendTemplatedEmail sends an email using a template (TemplateID)
 func (client *Client) SendTemplatedEmail(ctx context.Context, email TemplatedEmail) (EmailResponse, error) {
+	// Validate TemplateAlias for header injection
+	if err := validateTemplateAlias(email.TemplateAlias); err != nil {
+		return EmailResponse{}, err
+	}
+
 	res := EmailResponse{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "POST",
+		Method:    http.MethodPost,
 		Path:      "email/withTemplate",
 		Payload:   email,
 		TokenType: serverToken,
@@ -229,12 +248,19 @@ func (client *Client) SendTemplatedEmail(ctx context.Context, email TemplatedEma
 
 // SendTemplatedEmailBatch sends batch email using a template (TemplateID)
 func (client *Client) SendTemplatedEmailBatch(ctx context.Context, emails []TemplatedEmail) ([]EmailResponse, error) {
+	// Validate TemplateAlias for header injection in all emails
+	for i, email := range emails {
+		if err := validateTemplateAlias(email.TemplateAlias); err != nil {
+			return nil, fmt.Errorf("email %d: %w", i, err)
+		}
+	}
+
 	var res []EmailResponse
 	formatEmails := map[string]interface{}{
 		"Messages": emails,
 	}
 	err := client.doRequest(ctx, parameters{
-		Method:    "POST",
+		Method:    http.MethodPost,
 		Path:      "email/batchWithTemplates",
 		Payload:   formatEmails,
 		TokenType: serverToken,
@@ -249,7 +275,7 @@ type PushTemplatesRequest struct {
 	// DestinationServerID: ID of the server to push templates to
 	DestinationServerID int64 `json:"DestinationServerId"`
 	// PerformChanges: Whether to actually perform the push (true) or just simulate it (false)
-	PerformChanges bool
+	PerformChanges bool `json:",omitempty"`
 }
 
 // PushedTemplate represents a template that was pushed between servers
@@ -276,7 +302,7 @@ type PushTemplatesResponse struct {
 func (client *Client) PushTemplates(ctx context.Context, request PushTemplatesRequest) (PushTemplatesResponse, error) {
 	res := PushTemplatesResponse{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "PUT",
+		Method:    http.MethodPut,
 		Path:      "templates/push",
 		Payload:   request,
 		TokenType: accountToken,

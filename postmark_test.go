@@ -56,7 +56,7 @@ func (s *PostmarkTestSuite) TestDoRequestWithPayload() {
 
 	var result map[string]string
 	err := s.client.doRequest(context.Background(), parameters{
-		Method:    "POST",
+		Method:    http.MethodPost,
 		Path:      "test",
 		TokenType: serverToken,
 		Payload:   payload,
@@ -77,7 +77,7 @@ func (s *PostmarkTestSuite) TestDoRequestWithAccountToken() {
 
 	var result map[string]string
 	err := s.client.doRequest(context.Background(), parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      "account-test",
 		TokenType: accountToken,
 	}, &result)
@@ -94,7 +94,7 @@ func (s *PostmarkTestSuite) TestDoRequestHTTPError() {
 
 	var result map[string]string
 	err := s.client.doRequest(context.Background(), parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      "error-test",
 		TokenType: serverToken,
 	}, &result)
@@ -108,7 +108,7 @@ func (s *PostmarkTestSuite) TestDoRequestContextCancellation() {
 
 	var result map[string]string
 	err := s.client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      "test",
 		TokenType: serverToken,
 	}, &result)
@@ -124,7 +124,7 @@ func (s *PostmarkTestSuite) TestDoRequestInvalidJSON() {
 
 	var result map[string]string
 	err := s.client.doRequest(context.Background(), parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      "invalid-json",
 		TokenType: serverToken,
 	}, &result)

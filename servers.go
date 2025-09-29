@@ -192,7 +192,7 @@ func (client *Client) GetServers(ctx context.Context, count, offset int64, name 
 	}
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("servers?%s", values.Encode()),
 		TokenType: accountToken,
 	}, &res)

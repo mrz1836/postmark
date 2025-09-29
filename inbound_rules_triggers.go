@@ -3,6 +3,7 @@ package postmark
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 )
 
@@ -38,7 +39,7 @@ func (client *Client) GetInboundRuleTriggers(ctx context.Context, count, offset 
 	values.Add("offset", fmt.Sprintf("%d", offset))
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("triggers/inboundrules?%s", values.Encode()),
 		TokenType: serverToken,
 	}, &res)
@@ -55,7 +56,7 @@ func (client *Client) CreateInboundRuleTrigger(ctx context.Context, rule string)
 	}
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "POST",
+		Method:    http.MethodPost,
 		Path:      "triggers/inboundrules",
 		Payload:   requestData,
 		TokenType: serverToken,
@@ -68,7 +69,7 @@ func (client *Client) CreateInboundRuleTrigger(ctx context.Context, rule string)
 func (client *Client) DeleteInboundRuleTrigger(ctx context.Context, triggerID int64) error {
 	res := APIError{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "DELETE",
+		Method:    http.MethodDelete,
 		Path:      fmt.Sprintf("triggers/inboundrules/%d", triggerID),
 		TokenType: serverToken,
 	}, &res)

@@ -111,7 +111,7 @@ func (client *Client) GetDomains(ctx context.Context, count, offset int) (Domain
 	values.Add("offset", fmt.Sprintf("%d", offset))
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("domains?%s", values.Encode()),
 		TokenType: accountToken,
 	}, &res)
