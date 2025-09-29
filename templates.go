@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 )
@@ -63,7 +64,7 @@ type TemplateInfo struct {
 func (client *Client) GetTemplate(ctx context.Context, templateID string) (Template, error) {
 	res := Template{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("templates/%s", templateID),
 		TokenType: serverToken,
 	}, &res)
@@ -101,7 +102,7 @@ func (client *Client) GetTemplatesFiltered(ctx context.Context, count, offset in
 	}
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("templates?%s", values.Encode()),
 		TokenType: serverToken,
 	}, &res)
@@ -112,7 +113,7 @@ func (client *Client) GetTemplatesFiltered(ctx context.Context, count, offset in
 func (client *Client) CreateTemplate(ctx context.Context, template Template) (TemplateInfo, error) {
 	res := TemplateInfo{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "POST",
+		Method:    http.MethodPost,
 		Path:      "templates",
 		Payload:   template,
 		TokenType: serverToken,
@@ -124,7 +125,7 @@ func (client *Client) CreateTemplate(ctx context.Context, template Template) (Te
 func (client *Client) EditTemplate(ctx context.Context, templateID string, template Template) (TemplateInfo, error) {
 	res := TemplateInfo{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "PUT",
+		Method:    http.MethodPut,
 		Path:      fmt.Sprintf("templates/%s", templateID),
 		Payload:   template,
 		TokenType: serverToken,
@@ -136,7 +137,7 @@ func (client *Client) EditTemplate(ctx context.Context, templateID string, templ
 func (client *Client) DeleteTemplate(ctx context.Context, templateID string) error {
 	res := APIError{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "DELETE",
+		Method:    http.MethodDelete,
 		Path:      fmt.Sprintf("templates/%s", templateID),
 		TokenType: serverToken,
 	}, &res)
@@ -184,7 +185,7 @@ type ValidationError struct {
 func (client *Client) ValidateTemplate(ctx context.Context, validateTemplateBody ValidateTemplateBody) (ValidateTemplateResponse, error) {
 	res := ValidateTemplateResponse{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "POST",
+		Method:    http.MethodPost,
 		Path:      "templates/validate",
 		Payload:   validateTemplateBody,
 		TokenType: serverToken,
@@ -237,7 +238,7 @@ func (client *Client) SendTemplatedEmail(ctx context.Context, email TemplatedEma
 
 	res := EmailResponse{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "POST",
+		Method:    http.MethodPost,
 		Path:      "email/withTemplate",
 		Payload:   email,
 		TokenType: serverToken,
@@ -259,7 +260,7 @@ func (client *Client) SendTemplatedEmailBatch(ctx context.Context, emails []Temp
 		"Messages": emails,
 	}
 	err := client.doRequest(ctx, parameters{
-		Method:    "POST",
+		Method:    http.MethodPost,
 		Path:      "email/batchWithTemplates",
 		Payload:   formatEmails,
 		TokenType: serverToken,
@@ -274,7 +275,7 @@ type PushTemplatesRequest struct {
 	// DestinationServerID: ID of the server to push templates to
 	DestinationServerID int64 `json:"DestinationServerId"`
 	// PerformChanges: Whether to actually perform the push (true) or just simulate it (false)
-	PerformChanges bool
+	PerformChanges bool `json:",omitempty"`
 }
 
 // PushedTemplate represents a template that was pushed between servers
@@ -301,7 +302,7 @@ type PushTemplatesResponse struct {
 func (client *Client) PushTemplates(ctx context.Context, request PushTemplatesRequest) (PushTemplatesResponse, error) {
 	res := PushTemplatesResponse{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "PUT",
+		Method:    http.MethodPut,
 		Path:      "templates/push",
 		Payload:   request,
 		TokenType: accountToken,
