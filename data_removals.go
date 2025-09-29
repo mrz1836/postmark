@@ -3,6 +3,7 @@ package postmark
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 )
 
@@ -30,7 +31,7 @@ type DataRemovalResponse struct {
 func (client *Client) CreateDataRemoval(ctx context.Context, request DataRemovalRequest) (DataRemovalResponse, error) {
 	res := DataRemovalResponse{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "POST",
+		Method:    http.MethodPost,
 		Path:      "data-removals",
 		Payload:   request,
 		TokenType: accountToken,
@@ -42,7 +43,7 @@ func (client *Client) CreateDataRemoval(ctx context.Context, request DataRemoval
 func (client *Client) GetDataRemovalStatus(ctx context.Context, id int64) (DataRemovalResponse, error) {
 	res := DataRemovalResponse{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("data-removals/%d", id),
 		TokenType: accountToken,
 	}, &res)

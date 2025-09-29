@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"time"
 )
@@ -32,7 +33,7 @@ func (client *Client) GetDeliveryStats(ctx context.Context) (DeliveryStats, erro
 	res := DeliveryStats{}
 	path := "deliverystats"
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      path,
 		TokenType: serverToken,
 	}, &res)
@@ -99,7 +100,7 @@ func (client *Client) GetBounces(ctx context.Context, count, offset int64, optio
 	path := fmt.Sprintf("bounces?%s", values.Encode())
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      path,
 		TokenType: serverToken,
 	}, &res)
@@ -111,7 +112,7 @@ func (client *Client) GetBounce(ctx context.Context, bounceID int64) (Bounce, er
 	res := Bounce{}
 	path := fmt.Sprintf("bounces/%v", bounceID)
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      path,
 		TokenType: serverToken,
 	}, &res)
@@ -127,7 +128,7 @@ func (client *Client) GetBounceDump(ctx context.Context, bounceID int64) (string
 	res := dumpResponse{}
 	path := fmt.Sprintf("bounces/%v/dump", bounceID)
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      path,
 		TokenType: serverToken,
 	}, &res)
@@ -146,7 +147,7 @@ func (client *Client) ActivateBounce(ctx context.Context, bounceID int64) (Bounc
 	res := activateBounceResponse{}
 	path := fmt.Sprintf("bounces/%v/activate", bounceID)
 	err := client.doRequest(ctx, parameters{
-		Method:    "PUT",
+		Method:    http.MethodPut,
 		Path:      path,
 		TokenType: serverToken,
 	}, &res)
@@ -162,7 +163,7 @@ func (client *Client) GetBouncedTags(ctx context.Context) ([]string, error) {
 	var raw json.RawMessage
 	path := "bounces/tags"
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      path,
 		TokenType: serverToken,
 	}, &raw)

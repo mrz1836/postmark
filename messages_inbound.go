@@ -3,6 +3,7 @@ package postmark
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/mail"
 	"net/url"
 	"time"
@@ -61,7 +62,7 @@ func (x InboundMessage) Time() (time.Time, error) {
 func (client *Client) GetInboundMessage(ctx context.Context, messageID string) (InboundMessage, error) {
 	res := InboundMessage{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("messages/inbound/%s/details", messageID),
 		TokenType: serverToken,
 	}, &res)
@@ -88,7 +89,7 @@ func (client *Client) GetInboundMessages(ctx context.Context, count, offset int6
 	}
 
 	err := client.doRequest(ctx, parameters{
-		Method:    "GET",
+		Method:    http.MethodGet,
 		Path:      fmt.Sprintf("messages/inbound?%s", values.Encode()),
 		TokenType: serverToken,
 	}, &res)
@@ -100,7 +101,7 @@ func (client *Client) GetInboundMessages(ctx context.Context, count, offset int6
 func (client *Client) BypassInboundMessage(ctx context.Context, messageID string) error {
 	res := APIError{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "PUT",
+		Method:    http.MethodPut,
 		Path:      fmt.Sprintf("messages/inbound/%s/bypass", messageID),
 		TokenType: serverToken,
 	}, &res)
@@ -116,7 +117,7 @@ func (client *Client) BypassInboundMessage(ctx context.Context, messageID string
 func (client *Client) RetryInboundMessage(ctx context.Context, messageID string) error {
 	res := APIError{}
 	err := client.doRequest(ctx, parameters{
-		Method:    "PUT",
+		Method:    http.MethodPut,
 		Path:      fmt.Sprintf("messages/inbound/%s/retry", messageID),
 		TokenType: serverToken,
 	}, &res)

@@ -46,7 +46,7 @@ func FuzzDoRequestJSONUnmarshal(f *testing.F) {
 
 		// Test that the function doesn't panic with malformed JSON
 		err := client.doRequest(context.Background(), parameters{
-			Method:    "GET",
+			Method:    http.MethodGet,
 			Path:      "test",
 			TokenType: serverToken,
 		}, &result)
@@ -97,7 +97,7 @@ func FuzzAPIErrorHandling(f *testing.F) {
 		var result map[string]interface{}
 
 		err := client.doRequest(context.Background(), parameters{
-			Method:    "GET",
+			Method:    http.MethodGet,
 			Path:      "test",
 			TokenType: serverToken,
 		}, &result)
@@ -175,7 +175,7 @@ func FuzzJSONPayloadMarshaling(f *testing.F) {
 
 		// Test that marshaling doesn't panic with complex payloads
 		err := client.doRequest(context.Background(), parameters{
-			Method:    "POST",
+			Method:    http.MethodPost,
 			Path:      "test",
 			Payload:   payload,
 			TokenType: serverToken,
