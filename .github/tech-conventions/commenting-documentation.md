@@ -240,7 +240,7 @@ func ProcessBatchWithRetry(ctx context.Context, items []Item, processor ItemProc
 // - Rate limiters do not persist state; limits reset on restart
 // - For distributed rate limiting, see the ratelimit/redis subpackage
 //
-// This package is part of the larger postmark ecosystem and integrates
+// This package is part of the larger ecosystem and integrates
 // with the metrics and logging packages for observability.
 package ratelimit
 ```
