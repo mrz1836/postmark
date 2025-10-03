@@ -3,6 +3,7 @@ package postmark
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -461,70 +462,193 @@ func (s *PostmarkTestSuite) TestGetEmailClientCounts() {
 
 // Benchmark for GetClickCounts
 func BenchmarkGetClickCounts(b *testing.B) {
-	ctx := context.Background()
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"Days": [
+			{
+				"Date": "2014-01-01",
+				"Clicks": 44,
+				"Unique": 4
+			}
+		],
+		"Clicks": 115,
+		"Unique": 15
+	}`
+
+	mux.Get("/stats/outbound/clicks", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	options := map[string]interface{}{
 		"fromdate": "2014-01-01",
 		"todate":   "2014-02-01",
 	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = options
+		_, _ = client.GetClickCounts(context.Background(), options)
 	}
 }
 
 // Benchmark for GetBrowserFamilyCounts
 func BenchmarkGetBrowserFamilyCounts(b *testing.B) {
-	ctx := context.Background()
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"Days": [
+			{
+				"Date": "2014-01-01",
+				"Chrome": 10,
+				"Safari": 5,
+				"Firefox": 3
+			}
+		],
+		"Chrome": 22,
+		"Safari": 5,
+		"Firefox": 3,
+		"InternetExplorer": 2,
+		"Opera": 0,
+		"Unknown": 1
+	}`
+
+	mux.Get("/stats/outbound/clicks/browserfamilies", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	options := map[string]interface{}{
 		"fromdate": "2014-01-01",
 		"todate":   "2014-02-01",
 	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = options
+		_, _ = client.GetBrowserFamilyCounts(context.Background(), options)
 	}
 }
 
 // Benchmark for GetClickLocationCounts
 func BenchmarkGetClickLocationCounts(b *testing.B) {
-	ctx := context.Background()
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"Days": [
+			{
+				"Date": "2014-01-01",
+				"HTML": 30,
+				"Text": 5
+			}
+		],
+		"HTML": 55,
+		"Text": 15
+	}`
+
+	mux.Get("/stats/outbound/clicks/location", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	options := map[string]interface{}{
 		"fromdate": "2014-01-01",
 		"todate":   "2014-02-01",
 	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = options
+		_, _ = client.GetClickLocationCounts(context.Background(), options)
 	}
 }
 
 // Benchmark for GetClickPlatformCounts
 func BenchmarkGetClickPlatformCounts(b *testing.B) {
-	ctx := context.Background()
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"Days": [
+			{
+				"Date": "2014-01-01",
+				"Desktop": 20,
+				"Mobile": 10,
+				"WebMail": 5
+			}
+		],
+		"Desktop": 35,
+		"Mobile": 22,
+		"WebMail": 5,
+		"Unknown": 3
+	}`
+
+	mux.Get("/stats/outbound/clicks/platforms", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	options := map[string]interface{}{
 		"fromdate": "2014-01-01",
 		"todate":   "2014-02-01",
 	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = options
+		_, _ = client.GetClickPlatformCounts(context.Background(), options)
 	}
 }
 
 // Benchmark for GetEmailClientCounts
 func BenchmarkGetEmailClientCounts(b *testing.B) {
-	ctx := context.Background()
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"Days": [
+			{
+				"Date": "2014-01-01",
+				"Outlook": 15,
+				"Gmail": 10,
+				"AppleMail": 8
+			}
+		],
+		"Outlook": 27,
+		"Gmail": 24,
+		"AppleMail": 8,
+		"Yahoo": 3,
+		"Thunderbird": 2,
+		"Unknown": 5
+	}`
+
+	mux.Get("/stats/outbound/opens/emailclients", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	options := map[string]interface{}{
 		"fromdate": "2014-01-01",
 		"todate":   "2014-02-01",
 	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = options
+		_, _ = client.GetEmailClientCounts(context.Background(), options)
 	}
 }

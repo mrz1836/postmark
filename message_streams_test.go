@@ -276,36 +276,88 @@ func (s *PostmarkTestSuite) TestUnarchiveMessageStream() {
 // Benchmarks for Message Streams API
 
 func BenchmarkListMessageStreams(b *testing.B) {
-	ctx := context.Background()
-	messageStreamType := "All"
-	includeArchived := false
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"MessageStreams": [
+			{
+				"ID": "outbound",
+				"ServerID": 123457,
+				"Name": "Transactional Stream",
+				"MessageStreamType": "Transactional",
+				"SubscriptionManagementConfiguration": {
+					"UnsubscribeHandlingType": "none"
+				}
+			}
+		],
+		"TotalCount": 1
+	}`
+
+	mux.Get("/message-streams", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = messageStreamType
-		_ = includeArchived
-		// In a real benchmark, you'd call the actual function
-		// client.ListMessageStreams(ctx, messageStreamType, includeArchived)
+		_, _ = client.ListMessageStreams(context.Background(), "All", false)
 	}
 }
 
 func BenchmarkGetMessageStream(b *testing.B) {
-	ctx := context.Background()
-	streamID := "transactional-dev"
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"ID": "transactional-dev",
+		"ServerID": 123456,
+		"Name": "Dev Stream",
+		"MessageStreamType": "Transactional",
+		"SubscriptionManagementConfiguration": {
+			"UnsubscribeHandlingType": "none"
+		}
+	}`
+
+	mux.Get("/message-streams/transactional-dev", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = streamID
-		// In a real benchmark, you'd call the actual function
-		// client.GetMessageStream(ctx, streamID)
+		_, _ = client.GetMessageStream(context.Background(), "transactional-dev")
 	}
 }
 
 func BenchmarkEditMessageStream(b *testing.B) {
-	ctx := context.Background()
-	streamID := "transactional-dev"
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"ID": "transactional-dev",
+		"ServerID": 123457,
+		"Name": "Benchmark Stream",
+		"MessageStreamType": "Transactional",
+		"SubscriptionManagementConfiguration": {
+			"UnsubscribeHandlingType": "none"
+		}
+	}`
+
+	mux.Patch("/message-streams/transactional-dev", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	editReq := EditMessageStreamRequest{
 		Name: "Benchmark Stream",
 		SubscriptionManagementConfiguration: MessageStreamSubscriptionManagementConfiguration{
@@ -315,20 +367,32 @@ func BenchmarkEditMessageStream(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = streamID
-		req := EditMessageStreamRequest{
-			Name:                                editReq.Name,
-			SubscriptionManagementConfiguration: editReq.SubscriptionManagementConfiguration,
-		}
-		_ = req
-		// In a real benchmark, you'd call the actual function
-		// client.EditMessageStream(ctx, streamID, req)
+		_, _ = client.EditMessageStream(context.Background(), "transactional-dev", editReq)
 	}
 }
 
 func BenchmarkCreateMessageStream(b *testing.B) {
-	ctx := context.Background()
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"ID": "benchmark-stream",
+		"ServerID": 123457,
+		"Name": "Benchmark Stream",
+		"MessageStreamType": "Transactional",
+		"SubscriptionManagementConfiguration": {
+			"UnsubscribeHandlingType": "none"
+		}
+	}`
+
+	mux.Post("/message-streams", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	createReq := CreateMessageStreamRequest{
 		ID:                "benchmark-stream",
 		Name:              "Benchmark Stream",
@@ -340,41 +404,58 @@ func BenchmarkCreateMessageStream(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		req := CreateMessageStreamRequest{
-			ID:                                  createReq.ID,
-			Name:                                createReq.Name,
-			MessageStreamType:                   createReq.MessageStreamType,
-			SubscriptionManagementConfiguration: createReq.SubscriptionManagementConfiguration,
-		}
-		_ = req
-		// In a real benchmark, you'd call the actual function
-		// client.CreateMessageStream(ctx, req)
+		_, _ = client.CreateMessageStream(context.Background(), createReq)
 	}
 }
 
 func BenchmarkArchiveMessageStream(b *testing.B) {
-	ctx := context.Background()
-	streamID := "benchmark-stream"
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"ID": "benchmark-stream",
+		"ServerID": 123457,
+		"ExpectedPurgeDate": "2020-08-30T12:30:00.00-04:00"
+	}`
+
+	mux.Post("/message-streams/benchmark-stream/archive", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = streamID
-		// In a real benchmark, you'd call the actual function
-		// client.ArchiveMessageStream(ctx, streamID)
+		_, _ = client.ArchiveMessageStream(context.Background(), "benchmark-stream")
 	}
 }
 
 func BenchmarkUnarchiveMessageStream(b *testing.B) {
-	ctx := context.Background()
-	streamID := "benchmark-stream"
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"ID": "benchmark-stream",
+		"ServerID": 123457,
+		"Name": "Benchmark Stream",
+		"MessageStreamType": "Transactional",
+		"SubscriptionManagementConfiguration": {
+			"UnsubscribeHandlingType": "none"
+		}
+	}`
+
+	mux.Post("/message-streams/benchmark-stream/unarchive", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = streamID
-		// In a real benchmark, you'd call the actual function
-		// client.UnarchiveMessageStream(ctx, streamID)
+		_, _ = client.UnarchiveMessageStream(context.Background(), "benchmark-stream")
 	}
 }

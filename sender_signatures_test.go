@@ -3,6 +3,7 @@ package postmark
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -232,29 +233,84 @@ func (s *PostmarkTestSuite) TestResendSenderSignatureConfirmation() {
 }
 
 func BenchmarkGetSenderSignatures(b *testing.B) {
-	ctx := context.Background()
-	count := int64(50)
-	offset := int64(0)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"TotalCount": 2,
+		"SenderSignatures": [
+		  {
+			"Domain": "wildbit.com",
+			"EmailAddress": "jp@wildbit.com",
+			"ReplyToEmailAddress": "info@wildbit.com",
+			"Name": "JP Toto",
+			"Confirmed": true,
+			"ID": 36735
+		  }
+		]
+	}`
+
+	mux.Get("/senders", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = count
-		_ = offset
+		_, _ = client.GetSenderSignatures(context.Background(), 50, 0)
 	}
 }
 
 func BenchmarkGetSenderSignature(b *testing.B) {
-	ctx := context.Background()
-	signatureID := int64(1234)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "Domain": "postmarkapp.com",
+	  "EmailAddress": "jp@postmarkapp.com",
+	  "ReplyToEmailAddress": "info@postmarkapp.com",
+	  "Name": "JP Toto",
+	  "Confirmed": true,
+	  "ID": 1234
+	}`
+
+	mux.Get("/senders/:signatureID", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = signatureID
+		_, _ = client.GetSenderSignature(context.Background(), 1234)
 	}
 }
 
 func BenchmarkCreateSenderSignature(b *testing.B) {
-	ctx := context.Background()
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "Domain": "example.com",
+	  "EmailAddress": "john.doe@example.com",
+	  "Name": "John Doe",
+	  "Confirmed": false,
+	  "ID": 1
+	}`
+
+	mux.Post("/senders", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	request := SenderSignatureCreateRequest{
 		FromEmail:                "test@example.com",
 		Name:                     "Test User",
@@ -262,46 +318,88 @@ func BenchmarkCreateSenderSignature(b *testing.B) {
 		ReturnPathDomain:         "bounces.example.com",
 		ConfirmationPersonalNote: "This is a test sender signature.",
 	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = request
+		_, _ = client.CreateSenderSignature(context.Background(), request)
 	}
 }
 
 func BenchmarkEditSenderSignature(b *testing.B) {
-	ctx := context.Background()
-	signatureID := int64(1234)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "Domain": "example.com",
+	  "EmailAddress": "john.doe@example.com",
+	  "Name": "Updated Test User",
+	  "Confirmed": false,
+	  "ID": 1234
+	}`
+
+	mux.Put("/senders/:signatureID", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	request := SenderSignatureEditRequest{
 		Name:                     "Updated Test User",
 		ReplyToEmail:             "support@example.com",
 		ReturnPathDomain:         "new-bounces.example.com",
 		ConfirmationPersonalNote: "Updated test sender signature.",
 	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = signatureID
-		_ = request
+		_, _ = client.EditSenderSignature(context.Background(), 1234, request)
 	}
 }
 
 func BenchmarkDeleteSenderSignature(b *testing.B) {
-	ctx := context.Background()
-	signatureID := int64(1234)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "ErrorCode": 0,
+	  "Message": "SenderSignature 1234 removed."
+	}`
+
+	mux.Delete("/senders/:signatureID", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = signatureID
+		_ = client.DeleteSenderSignature(context.Background(), 1234)
 	}
 }
 
 func BenchmarkResendSenderSignatureConfirmation(b *testing.B) {
-	ctx := context.Background()
-	signatureID := int64(1234)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"ErrorCode": 0,
+		"Message": "Confirmation resent to 'test@example.com'"
+	}`
+
+	mux.Post("/senders/:signatureID/resend", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = signatureID
+		_ = client.ResendSenderSignatureConfirmation(context.Background(), 1234)
 	}
 }

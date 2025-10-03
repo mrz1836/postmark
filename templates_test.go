@@ -561,44 +561,117 @@ func (s *PostmarkTestSuite) TestPushTemplatesMalformedResponse() {
 
 // Benchmark for GetTemplate
 func BenchmarkGetTemplate(b *testing.B) {
-	templateID := "1234"
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"Name": "Onboarding Email",
+		"TemplateId": 1234,
+		"Subject": "Hi there, {{Name}}",
+		"HtmlBody": "Hello dear Postmark user. {{Name}}",
+		"TextBody": "{{Name}} is a {{Occupation}}",
+		"AssociatedServerId": 1,
+		"Active": false
+	}`
+
+	mux.Get("/templates/:templateID", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = templateID
+		_, _ = client.GetTemplate(context.Background(), "1234")
 	}
 }
 
 // Benchmark for GetTemplates
 func BenchmarkGetTemplates(b *testing.B) {
-	count := int64(100)
-	offset := int64(0)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"TotalCount": 2,
+		"Templates": [
+		  {
+			"Active": true,
+			"TemplateId": 1234,
+			"Name": "Account Activation Email"
+		  },
+		  {
+			"Active": true,
+			"TemplateId": 5678,
+			"Name": "Password Recovery Email"
+		  }
+		]
+	}`
+
+	mux.Get("/templates", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = count
-		_ = offset
+		_, _, _ = client.GetTemplates(context.Background(), 100, 0)
 	}
 }
 
 // Benchmark for GetTemplatesFiltered
 func BenchmarkGetTemplatesFiltered(b *testing.B) {
-	count := int64(100)
-	offset := int64(0)
-	templateType := "Standard"
-	layoutTemplate := ""
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"TotalCount": 1,
+		"Templates": [
+		  {
+			"Active": true,
+			"TemplateId": 1234,
+			"Name": "Standard Template"
+		  }
+		]
+	}`
+
+	mux.Get("/templates", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = count
-		_ = offset
-		_ = templateType
-		_ = layoutTemplate
+		_, _, _ = client.GetTemplatesFiltered(context.Background(), 100, 0, "Standard", "")
 	}
 }
 
 // Benchmark for CreateTemplate
 func BenchmarkCreateTemplate(b *testing.B) {
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"TemplateId": 1234,
+		"Name": "Benchmark Template",
+		"Active": true
+	}`
+
+	mux.Post("/templates", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	template := Template{
 		Name:     "Benchmark Template",
 		Subject:  "Benchmark Subject",
@@ -608,18 +681,29 @@ func BenchmarkCreateTemplate(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = Template{
-			Name:     template.Name,
-			Subject:  template.Subject,
-			TextBody: template.TextBody,
-			HTMLBody: template.HTMLBody,
-		}
+		_, _ = client.CreateTemplate(context.Background(), template)
 	}
 }
 
 // Benchmark for EditTemplate
 func BenchmarkEditTemplate(b *testing.B) {
-	templateID := "1234"
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"TemplateId": 1234,
+		"Name": "Updated Template",
+		"Active": true
+	}`
+
+	mux.Put("/templates/:templateID", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	template := Template{
 		Name:     "Updated Template",
 		Subject:  "Updated Subject",
@@ -629,23 +713,66 @@ func BenchmarkEditTemplate(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = templateID
-		_ = template
+		_, _ = client.EditTemplate(context.Background(), "1234", template)
 	}
 }
 
 // Benchmark for DeleteTemplate
 func BenchmarkDeleteTemplate(b *testing.B) {
-	templateID := "1234"
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "ErrorCode": 0,
+	  "Message": "Template 1234 removed."
+	}`
+
+	mux.Delete("/templates/:templateID", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = templateID
+		_ = client.DeleteTemplate(context.Background(), "1234")
 	}
 }
 
 // Benchmark for ValidateTemplate
 func BenchmarkValidateTemplate(b *testing.B) {
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"AllContentIsValid": true,
+		"HtmlBody": {
+			"ContentIsValid": true,
+			"ValidationErrors": [],
+			"RenderedContent": "test"
+		},
+		"TextBody": {
+			"ContentIsValid": true,
+			"ValidationErrors": [],
+			"RenderedContent": "test"
+		},
+		"Subject": {
+			"ContentIsValid": true,
+			"ValidationErrors": [],
+			"RenderedContent": "test"
+		}
+	}`
+
+	mux.Post("/templates/validate", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	validateBody := ValidateTemplateBody{
 		Subject:  "Test Subject {{name}}",
 		TextBody: "Test text body {{name}}",
@@ -658,41 +785,67 @@ func BenchmarkValidateTemplate(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ValidateTemplateBody{
-			Subject:                    validateBody.Subject,
-			TextBody:                   validateBody.TextBody,
-			HTMLBody:                   validateBody.HTMLBody,
-			TestRenderModel:            validateBody.TestRenderModel,
-			InlineCSSForHTMLTestRender: validateBody.InlineCSSForHTMLTestRender,
-		}
+		_, _ = client.ValidateTemplate(context.Background(), validateBody)
 	}
 }
 
 // Benchmark for SendTemplatedEmail
 func BenchmarkSendTemplatedEmail(b *testing.B) {
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"To": "receiver@example.com",
+		"SubmittedAt": "2014-02-17T07:25:01.4178645-05:00",
+		"MessageID": "0a129aee-e1cd-480d-b08d-4f48548ff48d",
+		"ErrorCode": 0,
+		"Message": "OK"
+	}`
+
+	mux.Post("/email/withTemplate", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	email := getTestTemplatedEmail()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = TemplatedEmail{
-			TemplateID:    email.TemplateID,
-			TemplateModel: email.TemplateModel,
-			InlineCSS:     email.InlineCSS,
-			From:          email.From,
-			To:            email.To,
-		}
+		_, _ = client.SendTemplatedEmail(context.Background(), email)
 	}
 }
 
 // Benchmark for SendTemplatedEmailBatch
 func BenchmarkSendTemplatedEmailBatch(b *testing.B) {
-	emails := []TemplatedEmail{getTestTemplatedEmail(), getTestTemplatedEmail()}
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `[
+	  {
+		"To": "receiver@example.com",
+		"SubmittedAt": "2014-02-17T07:25:01.4178645-05:00",
+		"MessageID": "0a129aee-e1cd-480d-b08d-4f48548ff48d",
+		"ErrorCode": 0,
+		"Message": "OK"
+	  }
+	]`
+
+	mux.Post("/email/batchWithTemplates", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
+	emails := []TemplatedEmail{getTestTemplatedEmail()}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		batch := make([]TemplatedEmail, len(emails))
-		copy(batch, emails)
-		_ = batch
+		_, _ = client.SendTemplatedEmailBatch(context.Background(), emails)
 	}
 }
 
