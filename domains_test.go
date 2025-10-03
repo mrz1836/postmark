@@ -3,6 +3,7 @@ package postmark
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -279,90 +280,216 @@ func (s *PostmarkTestSuite) TestRotateDKIM() {
 // Benchmark functions for Domains API
 
 func BenchmarkGetDomains(b *testing.B) {
-	ctx := context.Background()
-	count := 50
-	offset := 0
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "TotalCount": 1,
+	  "Domains": [
+		{
+		  "Name": "postmarkapp.com",
+		  "SPFVerified": true,
+		  "DKIMVerified": false,
+		  "WeakDKIM": false,
+		  "ReturnPathDomainVerified": false,
+		  "ID": 1234
+		}
+	  ]
+	}`
+
+	mux.Get("/domains", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = count
-		_ = offset
+		_, _ = client.GetDomains(context.Background(), 50, 0)
 	}
 }
 
 func BenchmarkGetDomain(b *testing.B) {
-	ctx := context.Background()
-	domainID := int64(1234)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "Name": "postmarkapp.com",
+	  "SPFVerified": true,
+	  "DKIMVerified": false,
+	  "WeakDKIM": false,
+	  "ID": 1234
+	}`
+
+	mux.Get("/domains/:domainID", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = domainID
+		_, _ = client.GetDomain(context.Background(), 1234)
 	}
 }
 
 func BenchmarkCreateDomain(b *testing.B) {
-	ctx := context.Background()
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "Name": "test.com",
+	  "SPFVerified": false,
+	  "DKIMVerified": false,
+	  "ReturnPathDomain": "bounces.test.com",
+	  "ID": 1234
+	}`
+
+	mux.Post("/domains", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	request := DomainCreateRequest{
 		Name:             "test.com",
 		ReturnPathDomain: "bounces.test.com",
 	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = request
+		_, _ = client.CreateDomain(context.Background(), request)
 	}
 }
 
 func BenchmarkEditDomain(b *testing.B) {
-	ctx := context.Background()
-	domainID := int64(1234)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "Name": "test.com",
+	  "ReturnPathDomain": "new-bounces.test.com",
+	  "ID": 1234
+	}`
+
+	mux.Put("/domains/:domainID", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	request := DomainEditRequest{
 		ReturnPathDomain: "new-bounces.test.com",
 	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = domainID
-		_ = request
+		_, _ = client.EditDomain(context.Background(), 1234, request)
 	}
 }
 
 func BenchmarkDeleteDomain(b *testing.B) {
-	ctx := context.Background()
-	domainID := int64(1234)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"ErrorCode": 0,
+		"Message": "Domain removed."
+	}`
+
+	mux.Delete("/domains/:domainID", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = domainID
+		_ = client.DeleteDomain(context.Background(), 1234)
 	}
 }
 
 func BenchmarkVerifyDKIMStatus(b *testing.B) {
-	ctx := context.Background()
-	domainID := int64(1234)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "Name": "postmarkapp.com",
+	  "DKIMVerified": true,
+	  "DKIMUpdateStatus": "Verified",
+	  "ID": 1234
+	}`
+
+	mux.Put("/domains/:domainID/verifyDkim", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = domainID
+		_, _ = client.VerifyDKIMStatus(context.Background(), 1234)
 	}
 }
 
 func BenchmarkVerifyReturnPath(b *testing.B) {
-	ctx := context.Background()
-	domainID := int64(1234)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "Name": "postmarkapp.com",
+	  "ReturnPathDomainVerified": true,
+	  "ID": 1234
+	}`
+
+	mux.Put("/domains/:domainID/verifyReturnPath", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = domainID
+		_, _ = client.VerifyReturnPath(context.Background(), 1234)
 	}
 }
 
 func BenchmarkRotateDKIM(b *testing.B) {
-	ctx := context.Background()
-	domainID := int64(1234)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "Name": "postmarkapp.com",
+	  "DKIMPendingHost": "20131031155228pm._domainkey.postmarkapp.com",
+	  "DKIMPendingTextValue": "k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCFn...",
+	  "DKIMUpdateStatus": "Pending",
+	  "ID": 1234
+	}`
+
+	mux.Post("/domains/:domainID/rotatedkim", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = domainID
+		_, _ = client.RotateDKIM(context.Background(), 1234)
 	}
 }
