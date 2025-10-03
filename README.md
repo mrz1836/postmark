@@ -407,6 +407,151 @@ Run the Go benchmarks:
 magex bench
 ```
 
+### 📊 Performance Results
+
+All benchmarks measure **real API client performance** including HTTP request setup, JSON marshaling/unmarshalling, and response processing against mock servers. Results collected on Apple M1 Max (10 cores).
+
+#### 🎯 Performance Overview
+
+| Metric                | Value           | Description              |
+|-----------------------|-----------------|--------------------------|
+| **Fastest Operation** | 36.7 µs         | Get Bounced Tags         |
+| **Average Latency**   | 41.2 µs         | Across all 47 operations |
+| **Throughput**        | ~24,000 ops/sec | Per operation average    |
+| **Memory Efficiency** | 7.7 KB/op       | Average memory usage     |
+| **Allocations**       | 97 allocs/op    | Average per operation    |
+
+<details>
+<summary><strong>Bounce API Performance</strong></summary>
+<br/>
+
+| Operation          | Latency (µs) | Throughput (ops/sec) | Memory | Allocs |
+|--------------------|--------------|----------------------|--------|--------|
+| Get Delivery Stats | 38.0         | 26,300               | 6.8 KB | 86     |
+| Get Bounces        | 41.6         | 24,000               | 7.8 KB | 110    |
+| Get Bounce         | 40.4         | 24,800               | 7.1 KB | 89     |
+| Get Bounce Dump    | 37.4         | 26,700               | 6.6 KB | 84     |
+| Activate Bounce    | 39.9         | 25,100               | 7.2 KB | 92     |
+| Get Bounced Tags   | 36.7         | 27,200               | 6.6 KB | 85     |
+
+</details>
+
+<details>
+<summary><strong>Data Removal API Performance</strong></summary>
+<br/>
+
+| Operation               | Latency (µs) | Throughput (ops/sec) | Memory | Allocs |
+|-------------------------|--------------|----------------------|--------|--------|
+| Create Data Removal     | 41.5         | 24,100               | 7.6 KB | 100    |
+| Get Data Removal Status | 38.6         | 25,900               | 6.8 KB | 86     |
+
+</details>
+
+<details>
+<summary><strong>Domains API Performance</strong></summary>
+<br/>
+
+| Operation          | Latency (µs) | Throughput (ops/sec) | Memory | Allocs |
+|--------------------|--------------|----------------------|--------|--------|
+| Get Domains        | 40.2         | 24,900               | 7.2 KB | 101    |
+| Get Domain         | 41.9         | 23,900               | 7.3 KB | 89     |
+| Create Domain      | 41.3         | 24,200               | 7.8 KB | 100    |
+| Edit Domain        | 41.7         | 24,000               | 8.3 KB | 107    |
+| Delete Domain      | 38.2         | 26,200               | 7.1 KB | 89     |
+| Verify DKIM Status | 39.6         | 25,200               | 7.4 KB | 91     |
+| Verify Return Path | 39.2         | 25,500               | 7.4 KB | 90     |
+| Rotate DKIM        | 40.2         | 24,900               | 7.6 KB | 93     |
+
+</details>
+
+<details>
+<summary><strong>Inbound Rules Triggers API Performance</strong></summary>
+<br/>
+
+| Operation                   | Latency (µs) | Throughput (ops/sec) | Memory | Allocs |
+|-----------------------------|--------------|----------------------|--------|--------|
+| Get Inbound Rule Triggers   | 39.8         | 25,100               | 7.1 KB | 101    |
+| Create Inbound Rule Trigger | 41.0         | 24,400               | 7.6 KB | 99     |
+| Delete Inbound Rule Trigger | 40.4         | 24,700               | 6.7 KB | 84     |
+
+</details>
+
+<details>
+<summary><strong>Message Streams API Performance</strong></summary>
+<br/>
+
+| Operation                | Latency (µs) | Throughput (ops/sec) | Memory | Allocs |
+|--------------------------|--------------|----------------------|--------|--------|
+| List Message Streams     | 44.4         | 22,500               | 7.4 KB | 93     |
+| Get Message Stream       | 42.6         | 23,500               | 7.0 KB | 89     |
+| Edit Message Stream      | 46.8         | 21,400               | 8.1 KB | 106    |
+| Create Message Stream    | 44.5         | 22,500               | 8.1 KB | 104    |
+| Archive Message Stream   | 40.4         | 24,800               | 6.8 KB | 86     |
+| Unarchive Message Stream | 42.6         | 23,500               | 7.1 KB | 90     |
+
+</details>
+
+<details>
+<summary><strong>Messages API Performance</strong></summary>
+<br/>
+
+| Operation                    | Latency (µs) | Throughput (ops/sec) | Memory | Allocs |
+|------------------------------|--------------|----------------------|--------|--------|
+| Get Outbound Messages Clicks | 47.5         | 21,100               | 8.5 KB | 118    |
+| Get Outbound Message Clicks  | 43.2         | 23,100               | 7.9 KB | 109    |
+
+</details>
+
+<details>
+<summary><strong>Sender Signatures API Performance</strong></summary>
+<br/>
+
+| Operation                     | Latency (µs) | Throughput (ops/sec) | Memory | Allocs |
+|-------------------------------|--------------|----------------------|--------|--------|
+| Get Sender Signatures         | 40.6         | 24,600               | 7.3 KB | 104    |
+| Get Sender Signature          | 40.6         | 24,600               | 7.5 KB | 92     |
+| Create Sender Signature       | 42.2         | 23,700               | 8.1 KB | 101    |
+| Edit Sender Signature         | 47.1         | 21,200               | 8.6 KB | 108    |
+| Delete Sender Signature       | 38.8         | 25,800               | 7.1 KB | 89     |
+| Resend Signature Confirmation | 39.0         | 25,700               | 7.2 KB | 90     |
+
+</details>
+
+<details>
+<summary><strong>Stats API Performance</strong></summary>
+<br/>
+
+| Operation                 | Latency (µs) | Throughput (ops/sec) | Memory | Allocs |
+|---------------------------|--------------|----------------------|--------|--------|
+| Get Click Counts          | 40.3         | 24,800               | 7.4 KB | 103    |
+| Get Browser Family Counts | 42.2         | 23,700               | 7.6 KB | 103    |
+| Get Click Location Counts | 42.8         | 23,400               | 7.4 KB | 103    |
+| Get Click Platform Counts | 42.0         | 23,800               | 7.5 KB | 103    |
+| Get Email Client Counts   | 41.3         | 24,200               | 7.6 KB | 103    |
+
+</details>
+
+<details>
+<summary><strong>Templates API Performance</strong></summary>
+<br/>
+
+| Operation                  | Latency (µs) | Throughput (ops/sec) | Memory | Allocs |
+|----------------------------|--------------|----------------------|--------|--------|
+| Get Template               | 39.9         | 25,100               | 7.5 KB | 92     |
+| Get Templates              | 41.3         | 24,200               | 7.5 KB | 103    |
+| Get Templates Filtered     | 40.0         | 25,000               | 7.4 KB | 103    |
+| Create Template            | 44.7         | 22,400               | 7.9 KB | 99     |
+| Edit Template              | 42.5         | 23,500               | 8.4 KB | 106    |
+| Delete Template            | 39.3         | 25,500               | 7.1 KB | 89     |
+| Validate Template          | 44.9         | 22,300               | 8.5 KB | 110    |
+| Send Templated Email       | 44.2         | 22,600               | 8.8 KB | 110    |
+| Send Templated Email Batch | 46.1         | 21,700               | 9.0 KB | 117    |
+| Push Templates             | 42.9         | 23,300               | 7.9 KB | 105    |
+
+</details>
+
+> **Note:** All benchmarks use mock HTTP servers for consistent, reproducible measurements. Real-world performance will vary based on network latency and Postmark API response times.
+
 <br/>
 
 ## 🛠️ Code Standards

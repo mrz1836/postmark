@@ -3,7 +3,6 @@ package postmark
 import (
 	"context"
 	"fmt"
-	"net/http"
 )
 
 // MessageStreamType is an Enum representing the type of a message stream.
@@ -83,11 +82,7 @@ func (client *Client) ListMessageStreams(ctx context.Context, messageStreamType 
 		MessageStreams []MessageStream
 	}
 
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("message-streams?MessageStreamType=%s&IncludeArchivedStreams=%t", messageStreamType, includeArchived),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, fmt.Sprintf("message-streams?MessageStreamType=%s&IncludeArchivedStreams=%t", messageStreamType, includeArchived), &res)
 
 	return res.MessageStreams, err
 }
@@ -95,11 +90,7 @@ func (client *Client) ListMessageStreams(ctx context.Context, messageStreamType 
 // GetMessageStream retrieves a specific message stream by the message stream's ID.
 func (client *Client) GetMessageStream(ctx context.Context, id string) (MessageStream, error) {
 	var res MessageStream
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("message-streams/%s", id),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, fmt.Sprintf("message-streams/%s", id), &res)
 	return res, err
 }
 
@@ -117,12 +108,7 @@ type EditMessageStreamRequest struct {
 // EditMessageStream updates a message stream.
 func (client *Client) EditMessageStream(ctx context.Context, id string, req EditMessageStreamRequest) (MessageStream, error) {
 	var res MessageStream
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPatch,
-		Path:      fmt.Sprintf("message-streams/%s", id),
-		TokenType: serverToken,
-		Payload:   req,
-	}, &res)
+	err := client.patch(ctx, fmt.Sprintf("message-streams/%s", id), req, &res)
 	return res, err
 }
 
@@ -145,12 +131,7 @@ type CreateMessageStreamRequest struct {
 // server of the token used by this Client.
 func (client *Client) CreateMessageStream(ctx context.Context, req CreateMessageStreamRequest) (MessageStream, error) {
 	var res MessageStream
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      "message-streams",
-		TokenType: serverToken,
-		Payload:   req,
-	}, &res)
+	err := client.post(ctx, "message-streams", req, &res)
 	return res, err
 }
 
@@ -169,11 +150,7 @@ type ArchiveMessageStreamResponse struct {
 // after 45 days, but they can be restored until that point.
 func (client *Client) ArchiveMessageStream(ctx context.Context, id string) (ArchiveMessageStreamResponse, error) {
 	var res ArchiveMessageStreamResponse
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      fmt.Sprintf("message-streams/%s/archive", id),
-		TokenType: serverToken,
-	}, &res)
+	err := client.post(ctx, fmt.Sprintf("message-streams/%s/archive", id), nil, &res)
 	return res, err
 }
 
@@ -181,10 +158,6 @@ func (client *Client) ArchiveMessageStream(ctx context.Context, id string) (Arch
 // The ArchivedAt value will be null after calling this method.
 func (client *Client) UnarchiveMessageStream(ctx context.Context, id string) (MessageStream, error) {
 	var res MessageStream
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      fmt.Sprintf("message-streams/%s/unarchive", id),
-		TokenType: serverToken,
-	}, &res)
+	err := client.post(ctx, fmt.Sprintf("message-streams/%s/unarchive", id), nil, &res)
 	return res, err
 }

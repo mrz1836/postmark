@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strings"
 )
@@ -63,11 +62,7 @@ type TemplateInfo struct {
 // GetTemplate fetches a specific template via TemplateID
 func (client *Client) GetTemplate(ctx context.Context, templateID string) (Template, error) {
 	res := Template{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("templates/%s", templateID),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, fmt.Sprintf("templates/%s", templateID), &res)
 	return res, err
 }
 
@@ -101,52 +96,35 @@ func (client *Client) GetTemplatesFiltered(ctx context.Context, count, offset in
 		values.Add("LayoutTemplate", layoutTemplate)
 	}
 
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("templates?%s", values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, buildURLWithQuery("templates", *values), &res)
 	return res.Templates, res.TotalCount, err
 }
 
 // CreateTemplate saves a new template to the server
 func (client *Client) CreateTemplate(ctx context.Context, template Template) (TemplateInfo, error) {
 	res := TemplateInfo{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      "templates",
-		Payload:   template,
-		TokenType: serverToken,
-	}, &res)
+	err := client.post(ctx, "templates", template, &res)
 	return res, err
 }
 
 // EditTemplate updates details for a specific template with templateID
 func (client *Client) EditTemplate(ctx context.Context, templateID string, template Template) (TemplateInfo, error) {
 	res := TemplateInfo{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPut,
-		Path:      fmt.Sprintf("templates/%s", templateID),
-		Payload:   template,
-		TokenType: serverToken,
-	}, &res)
+	err := client.put(ctx, fmt.Sprintf("templates/%s", templateID), template, &res)
 	return res, err
 }
 
 // DeleteTemplate removes a template (with templateID) from the server
 func (client *Client) DeleteTemplate(ctx context.Context, templateID string) error {
 	res := APIError{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodDelete,
-		Path:      fmt.Sprintf("templates/%s", templateID),
-		TokenType: serverToken,
-	}, &res)
-
+	err := client.delete(ctx, fmt.Sprintf("templates/%s", templateID), &res)
+	if err != nil {
+		return err
+	}
 	if res.ErrorCode != 0 {
 		return res
 	}
-
-	return err
+	return nil
 }
 
 // ValidateTemplateBody contains the template/render model combination to be validated
@@ -184,12 +162,7 @@ type ValidationError struct {
 // ValidateTemplate validates the provided template/render model combination
 func (client *Client) ValidateTemplate(ctx context.Context, validateTemplateBody ValidateTemplateBody) (ValidateTemplateResponse, error) {
 	res := ValidateTemplateResponse{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      "templates/validate",
-		Payload:   validateTemplateBody,
-		TokenType: serverToken,
-	}, &res)
+	err := client.post(ctx, "templates/validate", validateTemplateBody, &res)
 	return res, err
 }
 
@@ -237,12 +210,7 @@ func (client *Client) SendTemplatedEmail(ctx context.Context, email TemplatedEma
 	}
 
 	res := EmailResponse{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      "email/withTemplate",
-		Payload:   email,
-		TokenType: serverToken,
-	}, &res)
+	err := client.post(ctx, "email/withTemplate", email, &res)
 	return res, err
 }
 
@@ -259,12 +227,7 @@ func (client *Client) SendTemplatedEmailBatch(ctx context.Context, emails []Temp
 	formatEmails := map[string]interface{}{
 		"Messages": emails,
 	}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      "email/batchWithTemplates",
-		Payload:   formatEmails,
-		TokenType: serverToken,
-	}, &res)
+	err := client.post(ctx, "email/batchWithTemplates", formatEmails, &res)
 	return res, err
 }
 
@@ -301,11 +264,6 @@ type PushTemplatesResponse struct {
 // PushTemplates pushes templates from one server to another
 func (client *Client) PushTemplates(ctx context.Context, request PushTemplatesRequest) (PushTemplatesResponse, error) {
 	res := PushTemplatesResponse{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPut,
-		Path:      "templates/push",
-		Payload:   request,
-		TokenType: accountToken,
-	}, &res)
+	err := client.putWithAccountToken(ctx, "templates/push", request, &res)
 	return res, err
 }

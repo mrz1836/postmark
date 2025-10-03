@@ -118,15 +118,15 @@ magex help          # View all commands
 
 ## 📁 Key Files
 
-| File | Purpose |
-|------|---------|
-| `postmark.go` | Core client, doRequest method, auth headers |
-| `email.go` | Email sending, batch operations |
-| `templates.go` | Template CRUD, templated email sending |
-| `data_removals.go` | GDPR data removal API |
-| `webhooks.go` | Webhook management |
-| `test_router.go` | Custom HTTP router for testing |
-| `examples/examples.go` | Usage examples for all major features |
+| File                   | Purpose                                     |
+|------------------------|---------------------------------------------|
+| `postmark.go`          | Core client, doRequest method, auth headers |
+| `email.go`             | Email sending, batch operations             |
+| `templates.go`         | Template CRUD, templated email sending      |
+| `data_removals.go`     | GDPR data removal API                       |
+| `webhooks.go`          | Webhook management                          |
+| `test_router.go`       | Custom HTTP router for testing              |
+| `examples/examples.go` | Usage examples for all major features       |
 
 ## ⚠️ Important Notes
 

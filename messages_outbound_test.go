@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -380,34 +381,76 @@ func (s *PostmarkTestSuite) TestGetOutboundMessageClicks() {
 
 // Benchmark for GetOutboundMessagesClicks
 func BenchmarkGetOutboundMessagesClicks(b *testing.B) {
-	ctx := context.Background()
-	count := int64(100)
-	offset := int64(0)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "TotalCount": 1,
+	  "Clicks": [
+		{
+		  "RecordType": "Click",
+		  "ClickLocation": "HTML",
+		  "OriginalLink": "http://example.com/click-me",
+		  "MessageID": "927e56d4-dc66-4c01-a0be-645b4b6f5fd7",
+		  "MessageStream": "outbound",
+		  "ReceivedAt": "2014-02-14T11:13:10.8054242-05:00",
+		  "Tag": "Invitation",
+		  "Recipient": "john.doe@example.com"
+		}
+	  ]
+	}`
+
+	mux.Get("/messages/outbound/clicks", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	options := map[string]interface{}{
 		"tag":       "Invitation",
 		"recipient": "john.doe@example.com",
 		"platform":  "Desktop",
 	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = count
-		_ = offset
-		_ = options
+		_, _, _ = client.GetOutboundMessagesClicks(context.Background(), 100, 0, options)
 	}
 }
 
 // Benchmark for GetOutboundMessageClicks
 func BenchmarkGetOutboundMessageClicks(b *testing.B) {
-	ctx := context.Background()
-	messageID := "927e56d4-dc66-4c01-a0be-645b4b6f5fd7"
-	count := int64(50)
-	offset := int64(0)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "TotalCount": 1,
+	  "Clicks": [
+		{
+		  "RecordType": "Click",
+		  "ClickLocation": "HTML",
+		  "OriginalLink": "http://example.com/click-me",
+		  "MessageID": "927e56d4-dc66-4c01-a0be-645b4b6f5fd7",
+		  "MessageStream": "outbound",
+		  "ReceivedAt": "2014-02-14T11:13:10.8054242-05:00",
+		  "Tag": "Invitation",
+		  "Recipient": "john.doe@example.com"
+		}
+	  ]
+	}`
+
+	mux.Get("/messages/outbound/clicks/927e56d4-dc66-4c01-a0be-645b4b6f5fd7", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = messageID
-		_ = count
-		_ = offset
+		_, _, _ = client.GetOutboundMessageClicks(context.Background(), "927e56d4-dc66-4c01-a0be-645b4b6f5fd7", 50, 0)
 	}
 }

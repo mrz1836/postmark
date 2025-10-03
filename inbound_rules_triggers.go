@@ -3,7 +3,6 @@ package postmark
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"net/url"
 )
 
@@ -38,11 +37,7 @@ func (client *Client) GetInboundRuleTriggers(ctx context.Context, count, offset 
 	values.Add("count", fmt.Sprintf("%d", count))
 	values.Add("offset", fmt.Sprintf("%d", offset))
 
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("triggers/inboundrules?%s", values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, buildURLWithQuery("triggers/inboundrules", *values), &res)
 
 	return res.InboundRules, res.TotalCount, err
 }
@@ -55,12 +50,7 @@ func (client *Client) CreateInboundRuleTrigger(ctx context.Context, rule string)
 		Rule: rule,
 	}
 
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      "triggers/inboundrules",
-		Payload:   requestData,
-		TokenType: serverToken,
-	}, &res)
+	err := client.post(ctx, "triggers/inboundrules", requestData, &res)
 
 	return res, err
 }
@@ -68,15 +58,12 @@ func (client *Client) CreateInboundRuleTrigger(ctx context.Context, rule string)
 // DeleteInboundRuleTrigger deletes an inbound rule trigger by ID
 func (client *Client) DeleteInboundRuleTrigger(ctx context.Context, triggerID int64) error {
 	res := APIError{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodDelete,
-		Path:      fmt.Sprintf("triggers/inboundrules/%d", triggerID),
-		TokenType: serverToken,
-	}, &res)
-
+	err := client.delete(ctx, fmt.Sprintf("triggers/inboundrules/%d", triggerID), &res)
+	if err != nil {
+		return err
+	}
 	if res.ErrorCode != 0 {
 		return res
 	}
-
-	return err
+	return nil
 }

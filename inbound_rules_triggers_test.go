@@ -3,6 +3,7 @@ package postmark
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -86,36 +87,75 @@ func (s *PostmarkTestSuite) TestDeleteInboundRuleTriggerNotFound() {
 // Benchmarks
 
 func BenchmarkGetInboundRuleTriggers(b *testing.B) {
-	ctx := context.Background()
-	count := int64(50)
-	offset := int64(0)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"TotalCount": 2,
+		"InboundRules": [
+			{
+				"ID": 123456,
+				"Rule": "spam@example.com"
+			}
+		]
+	}`
+
+	mux.Get("/triggers/inboundrules", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = count
-		_ = offset
+		_, _, _ = client.GetInboundRuleTriggers(context.Background(), 50, 0)
 	}
 }
 
 func BenchmarkCreateInboundRuleTrigger(b *testing.B) {
-	ctx := context.Background()
-	rule := "benchmark@example.com"
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"ID": 123456,
+		"Rule": "benchmark@example.com"
+	}`
+
+	mux.Post("/triggers/inboundrules", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = rule
+		_, _ = client.CreateInboundRuleTrigger(context.Background(), "benchmark@example.com")
 	}
 }
 
 func BenchmarkDeleteInboundRuleTrigger(b *testing.B) {
-	ctx := context.Background()
-	triggerID := int64(123456)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"ErrorCode": 0,
+		"Message": "Trigger removed"
+	}`
+
+	mux.Delete("/triggers/inboundrules/123456", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = triggerID
+		_ = client.DeleteInboundRuleTrigger(context.Background(), 123456)
 	}
 }
