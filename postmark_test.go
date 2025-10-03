@@ -110,3 +110,72 @@ func (s *PostmarkTestSuite) TestDoRequestInvalidJSON() {
 
 	s.Require().Error(err)
 }
+
+func (s *PostmarkTestSuite) TestDoRequestInvalidURL() {
+	// Create a client with an invalid base URL to trigger request creation error
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = "ht!tp://invalid url with spaces"
+
+	var result map[string]string
+	err := client.doRequest(context.Background(), http.MethodGet, "test", nil, &result, serverToken)
+
+	s.Require().Error(err, "Should fail with invalid URL")
+}
+
+func (s *PostmarkTestSuite) TestDoRequestMarshalError() {
+	// Use a channel as payload which cannot be marshaled to JSON
+	invalidPayload := make(chan int)
+
+	var result map[string]string
+	err := s.client.doRequest(context.Background(), http.MethodPost, "test", invalidPayload, &result, serverToken)
+
+	s.Require().Error(err, "Should fail when payload cannot be marshaled")
+	s.Contains(err.Error(), "json")
+}
+
+func (s *PostmarkTestSuite) TestDoRequestNilDestination() {
+	responseJSON := `{"message": "success"}`
+
+	s.mux.Get("/nil-dest", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
+	// Pass nil as destination - should not error, just skip unmarshaling
+	err := s.client.doRequest(context.Background(), http.MethodGet, "nil-dest", nil, nil, serverToken)
+
+	s.Require().NoError(err, "Should handle nil destination gracefully")
+}
+
+func (s *PostmarkTestSuite) TestDoRequestHTTPErrorInvalidJSON() {
+	// Test error response that has invalid JSON
+	s.mux.Get("/error-invalid-json", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`not valid json`))
+	})
+
+	var result map[string]string
+	err := s.client.doRequest(context.Background(), http.MethodGet, "error-invalid-json", nil, &result, serverToken)
+
+	s.Require().Error(err)
+	s.Contains(err.Error(), "request failed with status")
+}
+
+func (s *PostmarkTestSuite) TestAPIError_Error() {
+	apiErr := APIError{
+		ErrorCode: 401,
+		Message:   "Unauthorized: Missing or incorrect API token",
+	}
+
+	errMsg := apiErr.Error()
+	s.Equal("Unauthorized: Missing or incorrect API token", errMsg)
+}
+
+func (s *PostmarkTestSuite) TestNewClient() {
+	client := NewClient("test-server-token", "test-account-token")
+
+	s.Require().NotNil(client)
+	s.Equal("test-server-token", client.ServerToken)
+	s.Equal("test-account-token", client.AccountToken)
+	s.Equal(postmarkURL, client.BaseURL)
+	s.NotNil(client.HTTPClient)
+}

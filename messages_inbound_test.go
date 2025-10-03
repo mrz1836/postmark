@@ -3,6 +3,7 @@ package postmark
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 )
 
 func (s *PostmarkTestSuite) TestGetInboundMessage() {
@@ -143,57 +144,140 @@ func (s *PostmarkTestSuite) TestGetInboundMessages() {
 	s.Equal(int64(7), total, "GetInboundMessages: wrong total")
 }
 
-func (s *PostmarkTestSuite) TestBypassInboundMessage() {
+func (s *PostmarkTestSuite) TestGetInboundMessagesNilOptions() {
+	// Create separate mux/server to avoid conflicts with TestGetInboundMessages
+	errorMux := NewTestRouter()
+	errorServer := httptest.NewServer(errorMux)
+	defer errorServer.Close()
+
+	errorClient := NewClient("server-token", "account-token")
+	errorClient.BaseURL = errorServer.URL
+
 	responseJSON := `{
-		"ErrorCode": 0,
-		"Message": "Successfully bypassed message: 792a3e9d-0078-40df-a6b0-fc78f87bf277."
+		"TotalCount": 1,
+		"InboundMessages": []
 	}`
 
-	s.mux.Put("/messages/inbound/792a3e9d-0078-40df-a6b0-fc78f87bf277/bypass", func(w http.ResponseWriter, _ *http.Request) {
+	errorMux.Get("/messages/inbound", func(w http.ResponseWriter, req *http.Request) {
+		// Verify count and offset are still in query params even with nil options
+		s.Equal("50", req.URL.Query().Get("count"))
+		s.Equal("0", req.URL.Query().Get("offset"))
 		_, _ = w.Write([]byte(responseJSON))
 	})
 
-	// Success
-	err := s.client.BypassInboundMessage(context.Background(), "792a3e9d-0078-40df-a6b0-fc78f87bf277")
+	_, total, err := errorClient.GetInboundMessages(context.Background(), 50, 0, nil)
 	s.Require().NoError(err)
+	s.Equal(int64(1), total)
+}
 
-	// Failure
-	responseJSON = `{
-		"ErrorCode": 701,
-		"Message": "This message was not found or cannot be bypassed."
-	}`
-	err = s.client.BypassInboundMessage(context.Background(), "792a3e9d-0078-40df-a6b0-fc78f87bf277")
-	if err != nil {
-		s.Equal("This message was not found or cannot be bypassed.", err.Error(), "BypassInboundMessage should have failed with expected error")
-	} else {
-		s.T().Fatal("BypassInboundMessage should have failed")
+func (s *PostmarkTestSuite) TestBypassInboundMessage() {
+	tests := []struct {
+		name         string
+		responseJSON string
+		statusCode   int
+		wantErr      bool
+	}{
+		{
+			name: "success",
+			responseJSON: `{
+				"ErrorCode": 0,
+				"Message": "Successfully bypassed message: 792a3e9d-0078-40df-a6b0-fc78f87bf277."
+			}`,
+			statusCode: http.StatusOK,
+			wantErr:    false,
+		},
+		{
+			name: "api error code",
+			responseJSON: `{
+				"ErrorCode": 701,
+				"Message": "This message was not found or cannot be bypassed."
+			}`,
+			statusCode: http.StatusOK,
+			wantErr:    true,
+		},
+		{
+			name: "http error",
+			responseJSON: `{
+				"ErrorCode": 500,
+				"Message": "Internal Server Error"
+			}`,
+			statusCode: http.StatusInternalServerError,
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			s.mux.Put("/messages/inbound/792a3e9d-0078-40df-a6b0-fc78f87bf277/bypass", func(w http.ResponseWriter, _ *http.Request) {
+				if tt.statusCode != http.StatusOK {
+					w.WriteHeader(tt.statusCode)
+				}
+				_, _ = w.Write([]byte(tt.responseJSON))
+			})
+
+			err := s.client.BypassInboundMessage(context.Background(), "792a3e9d-0078-40df-a6b0-fc78f87bf277")
+
+			if tt.wantErr {
+				s.Require().Error(err)
+			} else {
+				s.Require().NoError(err)
+			}
+		})
 	}
 }
 
 func (s *PostmarkTestSuite) TestRetryInboundMessage() {
-	responseJSON := `{
-	  "ErrorCode": 0,
-	  "Message": "Successfully rescheduled failed message: 041e3d29-737d-491e-9a13-a94d3rjkjka13."
-	}`
+	tests := []struct {
+		name         string
+		responseJSON string
+		statusCode   int
+		wantErr      bool
+	}{
+		{
+			name: "success",
+			responseJSON: `{
+				"ErrorCode": 0,
+				"Message": "Successfully rescheduled failed message: 041e3d29-737d-491e-9a13-a94d3rjkjka13."
+			}`,
+			statusCode: http.StatusOK,
+			wantErr:    false,
+		},
+		{
+			name: "api error code",
+			responseJSON: `{
+				"ErrorCode": 701,
+				"Message": "This message was not found or cannot be retried."
+			}`,
+			statusCode: http.StatusOK,
+			wantErr:    true,
+		},
+		{
+			name: "http error",
+			responseJSON: `{
+				"ErrorCode": 500,
+				"Message": "Internal Server Error"
+			}`,
+			statusCode: http.StatusInternalServerError,
+			wantErr:    true,
+		},
+	}
 
-	s.mux.Put("/messages/inbound/041e3d29-737d-491e-9a13-a94d3rjkjka13/retry", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(responseJSON))
-	})
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			s.mux.Put("/messages/inbound/041e3d29-737d-491e-9a13-a94d3rjkjka13/retry", func(w http.ResponseWriter, _ *http.Request) {
+				if tt.statusCode != http.StatusOK {
+					w.WriteHeader(tt.statusCode)
+				}
+				_, _ = w.Write([]byte(tt.responseJSON))
+			})
 
-	// Success
-	err := s.client.RetryInboundMessage(context.Background(), "041e3d29-737d-491e-9a13-a94d3rjkjka13")
-	s.Require().NoError(err)
+			err := s.client.RetryInboundMessage(context.Background(), "041e3d29-737d-491e-9a13-a94d3rjkjka13")
 
-	// Failure
-	responseJSON = `{
-	  "ErrorCode": 701,
-	  "Message": "This message was not found or cannot be retried."
-	}`
-
-	err = s.client.RetryInboundMessage(context.Background(), "041e3d29-737d-491e-9a13-a94d3rjkjka13")
-	if err != nil {
-		s.Equal("This message was not found or cannot be retried.", err.Error(), "RetryInboundMessage should have failed with expected error")
-	} else {
-		s.T().Fatal("RetryInboundMessage should have failed")
+			if tt.wantErr {
+				s.Require().Error(err)
+			} else {
+				s.Require().NoError(err)
+			}
+		})
 	}
 }
