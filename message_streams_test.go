@@ -101,6 +101,37 @@ func (s *PostmarkTestSuite) TestListMessageStreamsError() {
 	s.Nil(res, "ListMessageStreams should return nil on error")
 }
 
+func (s *PostmarkTestSuite) TestListMessageStreamsSpecificTypes() {
+	// Test each specific message stream type to ensure switch cases are covered
+	types := []string{"Inbound", "Transactional", "Broadcasts"}
+
+	for _, msgType := range types {
+		s.Run(msgType, func() {
+			// Create separate mux/server for each subtest to avoid conflicts
+			testMux := NewTestRouter()
+			testServer := httptest.NewServer(testMux)
+			defer testServer.Close()
+
+			testClient := NewClient("server-token", "account-token")
+			testClient.BaseURL = testServer.URL
+
+			responseJSON := `{
+				"MessageStreams": [],
+				"TotalCount": 0
+			}`
+
+			testMux.Get("/message-streams", func(w http.ResponseWriter, req *http.Request) {
+				s.Equal(msgType, req.URL.Query().Get("MessageStreamType"))
+				_, _ = w.Write([]byte(responseJSON))
+			})
+
+			res, err := testClient.ListMessageStreams(context.Background(), msgType, false)
+			s.Require().NoError(err)
+			s.NotNil(res)
+		})
+	}
+}
+
 func (s *PostmarkTestSuite) TestGetUnknownMessageStream() {
 	responseJSON := `{"ErrorCode":1226,"Message":"The message stream for the provided 'ID' was not found."}`
 

@@ -45,6 +45,7 @@ func (s *PostmarkTestSuite) TestSendEmail() {
 		responseJSON string
 		wantErr      bool
 		expectedID   string
+		statusCode   int
 	}{
 		{
 			name: "successful email send",
@@ -57,6 +58,7 @@ func (s *PostmarkTestSuite) TestSendEmail() {
 			}`,
 			wantErr:    false,
 			expectedID: "0a129aee-e1cd-480d-b08d-4f48548ff48d",
+			statusCode: http.StatusOK,
 		},
 		{
 			name: "email send failure with error code",
@@ -67,13 +69,26 @@ func (s *PostmarkTestSuite) TestSendEmail() {
 				"ErrorCode": 401,
 				"Message": "Sender signature not confirmed"
 			}`,
-			wantErr: true,
+			wantErr:    true,
+			statusCode: http.StatusOK,
+		},
+		{
+			name: "email send HTTP error",
+			responseJSON: `{
+				"ErrorCode": 500,
+				"Message": "Internal Server Error"
+			}`,
+			wantErr:    true,
+			statusCode: http.StatusInternalServerError,
 		},
 	}
 
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
 			s.mux.Post("/email", func(w http.ResponseWriter, _ *http.Request) {
+				if tt.statusCode != http.StatusOK {
+					w.WriteHeader(tt.statusCode)
+				}
 				_, _ = w.Write([]byte(tt.responseJSON))
 			})
 
