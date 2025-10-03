@@ -3,6 +3,7 @@ package postmark
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -93,28 +94,57 @@ func (s *PostmarkTestSuite) TestGetDataRemovalStatus() {
 
 // Benchmark for CreateDataRemoval
 func BenchmarkCreateDataRemoval(b *testing.B) {
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"ID": 12345,
+		"Recipient": "benchmark@example.com",
+		"RequestedAt": "2024-01-15T10:30:00Z",
+		"Status": "Pending"
+	}`
+
+	mux.Post("/data-removals", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	request := DataRemovalRequest{
 		Recipient: "benchmark@example.com",
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		// In a real benchmark, you'd call the actual function
-		// For now, we'll just test the struct creation overhead
-		_ = DataRemovalRequest{
-			Recipient: request.Recipient,
-		}
+		_, _ = client.CreateDataRemoval(context.Background(), request)
 	}
 }
 
 // Benchmark for GetDataRemovalStatus
 func BenchmarkGetDataRemovalStatus(b *testing.B) {
-	id := int64(12345)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"ID": 12345,
+		"Recipient": "test@example.com",
+		"RequestedAt": "2024-01-15T10:30:00Z",
+		"Status": "Completed",
+		"CompletedAt": "2024-01-15T11:00:00Z"
+	}`
+
+	mux.Get("/data-removals/12345", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		// In a real benchmark, you'd call the actual function
-		// For now, we'll just test the ID conversion overhead
-		_ = id
+		_, _ = client.GetDataRemovalStatus(context.Background(), 12345)
 	}
 }

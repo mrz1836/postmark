@@ -3,6 +3,7 @@ package postmark
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -249,68 +250,171 @@ func (s *PostmarkTestSuite) TestGetBouncedTags() {
 
 // Benchmark for GetDeliveryStats
 func BenchmarkGetDeliveryStats(b *testing.B) {
-	ctx := context.Background()
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "InactiveMails": 192,
+	  "Bounces": [
+		{
+		  "Name": "All",
+		  "Count": 253
+		}
+	  ]
+	}`
+
+	mux.Get("/deliverystats", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
+		_, _ = client.GetDeliveryStats(context.Background())
 	}
 }
 
 // Benchmark for GetBounces
 func BenchmarkGetBounces(b *testing.B) {
-	ctx := context.Background()
-	count := int64(100)
-	offset := int64(0)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "TotalCount": 1,
+	  "Bounces": [
+		{
+		  "RecordType": "Bounce",
+		  "ID": 692560173,
+		  "Type": "HardBounce",
+		  "Tag": "Invitation",
+		  "MessageID": "2c1b63fe-43f2-4db5-91b0-8bdfa44a9316",
+		  "MessageStream": "outbound",
+		  "Email": "test@example.com"
+		}
+	  ]
+	}`
+
+	mux.Get("/bounces", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	options := map[string]interface{}{
 		"tag": "Invitation",
 	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = count
-		_ = offset
-		_ = options
+		_, _, _ = client.GetBounces(context.Background(), 100, 0, options)
 	}
 }
 
 // Benchmark for GetBounce
 func BenchmarkGetBounce(b *testing.B) {
-	ctx := context.Background()
-	bounceID := int64(692560173)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "RecordType": "Bounce",
+	  "ID": 692560173,
+	  "Type": "HardBounce",
+	  "Tag": "Invitation",
+	  "MessageID": "2c1b63fe-43f2-4db5-91b0-8bdfa44a9316",
+	  "MessageStream": "outbound",
+	  "Email": "test@example.com"
+	}`
+
+	mux.Get("/bounces/692560173", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = bounceID
+		_, _ = client.GetBounce(context.Background(), 692560173)
 	}
 }
 
 // Benchmark for GetBounceDump
 func BenchmarkGetBounceDump(b *testing.B) {
-	ctx := context.Background()
-	bounceID := int64(692560173)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+	  "Body": "test dump content"
+	}`
+
+	mux.Get("/bounces/692560173/dump", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = bounceID
+		_, _ = client.GetBounceDump(context.Background(), 692560173)
 	}
 }
 
 // Benchmark for ActivateBounce
 func BenchmarkActivateBounce(b *testing.B) {
-	ctx := context.Background()
-	bounceID := int64(692560173)
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `{
+		"Message": "OK",
+		"Bounce": {
+		  "RecordType": "Bounce",
+		  "ID": 692560173,
+		  "Type": "HardBounce",
+		  "MessageID": "2c1b63fe-43f2-4db5-91b0-8bdfa44a9316",
+		  "MessageStream": "outbound",
+		  "Email": "test@example.com"
+		}
+	}`
+
+	mux.Put("/bounces/692560173/activate", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
-		_ = bounceID
+		_, _, _ = client.ActivateBounce(context.Background(), 692560173)
 	}
 }
 
 // Benchmark for GetBouncedTags
 func BenchmarkGetBouncedTags(b *testing.B) {
-	ctx := context.Background()
+	mux := NewTestRouter()
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("server-token", "account-token")
+	client.BaseURL = server.URL
+
+	responseJSON := `["tag1", "tag2", "tag3"]`
+
+	mux.Get("/bounces/tags", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(responseJSON))
+	})
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ctx
+		_, _ = client.GetBouncedTags(context.Background())
 	}
 }
