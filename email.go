@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 )
 
@@ -85,18 +84,16 @@ type EmailResponse struct {
 // SendEmail sends, well, an email.
 func (client *Client) SendEmail(ctx context.Context, email Email) (EmailResponse, error) {
 	res := EmailResponse{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      "email",
-		Payload:   email,
-		TokenType: serverToken,
-	}, &res)
+	err := client.post(ctx, "email", email, &res)
+	if err != nil {
+		return res, err
+	}
 
 	if res.ErrorCode != 0 {
 		return res, fmt.Errorf("%w: %v %s", ErrEmailFailed, res.ErrorCode, res.Message)
 	}
 
-	return res, err
+	return res, nil
 }
 
 // SendEmailBatch sends multiple emails together
@@ -104,11 +101,6 @@ func (client *Client) SendEmail(ctx context.Context, email Email) (EmailResponse
 // range over the responses and sniff for errors
 func (client *Client) SendEmailBatch(ctx context.Context, emails []Email) ([]EmailResponse, error) {
 	var res []EmailResponse
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      "email/batch",
-		Payload:   emails,
-		TokenType: serverToken,
-	}, &res)
+	err := client.post(ctx, "email/batch", emails, &res)
 	return res, err
 }

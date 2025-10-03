@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/url"
 )
 
@@ -169,11 +168,7 @@ func (s Server) MarshalJSON() ([]byte, error) {
 // GetServer fetches a specific server via serverID
 func (client *Client) GetServer(ctx context.Context, serverID int64) (Server, error) {
 	res := Server{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("servers/%d", serverID),
-		TokenType: accountToken,
-	}, &res)
+	err := client.getWithAccountToken(ctx, fmt.Sprintf("servers/%d", serverID), &res)
 	return res, err
 }
 
@@ -191,50 +186,33 @@ func (client *Client) GetServers(ctx context.Context, count, offset int64, name 
 		values.Add("name", name)
 	}
 
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("servers?%s", values.Encode()),
-		TokenType: accountToken,
-	}, &res)
+	err := client.getWithAccountToken(ctx, buildURLWithQuery("servers", *values), &res)
 	return res, err
 }
 
 // EditServer updates details for a specific server with serverID
 func (client *Client) EditServer(ctx context.Context, serverID int64, request ServerEditRequest) (Server, error) {
 	res := Server{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPut,
-		Path:      fmt.Sprintf("servers/%d", serverID),
-		TokenType: accountToken,
-		Payload:   request,
-	}, &res)
+	err := client.putWithAccountToken(ctx, fmt.Sprintf("servers/%d", serverID), request, &res)
 	return res, err
 }
 
 // CreateServer creates a server
 func (client *Client) CreateServer(ctx context.Context, request ServerCreateRequest) (Server, error) {
 	res := Server{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      "servers",
-		TokenType: accountToken,
-		Payload:   request,
-	}, &res)
+	err := client.postWithAccountToken(ctx, "servers", request, &res)
 	return res, err
 }
 
 // DeleteServer removes a server.
 func (client *Client) DeleteServer(ctx context.Context, serverID int64) error {
 	res := APIError{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodDelete,
-		Path:      fmt.Sprintf("servers/%d", serverID),
-		TokenType: accountToken,
-	}, &res)
-
+	err := client.deleteWithAccountToken(ctx, fmt.Sprintf("servers/%d", serverID), &res)
+	if err != nil {
+		return err
+	}
 	if res.ErrorCode != 0 {
 		return res
 	}
-
-	return err
+	return nil
 }

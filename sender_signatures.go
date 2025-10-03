@@ -3,7 +3,6 @@ package postmark
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"net/url"
 )
 
@@ -131,77 +130,53 @@ func (client *Client) GetSenderSignatures(ctx context.Context, count, offset int
 	values.Add("count", fmt.Sprintf("%d", count))
 	values.Add("offset", fmt.Sprintf("%d", offset))
 
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("senders?%s", values.Encode()),
-		TokenType: accountToken,
-	}, &res)
+	err := client.getWithAccountToken(ctx, buildURLWithQuery("senders", *values), &res)
 	return res, err
 }
 
 // GetSenderSignature gets all the details for a specific sender signature.
 func (client *Client) GetSenderSignature(ctx context.Context, signatureID int64) (SenderSignatureDetails, error) {
 	var res SenderSignatureDetails
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("senders/%d", signatureID),
-		TokenType: accountToken,
-	}, &res)
+	err := client.getWithAccountToken(ctx, fmt.Sprintf("senders/%d", signatureID), &res)
 	return res, err
 }
 
 // CreateSenderSignature creates a new sender signature and returns the full details of the new sender signature.
 func (client *Client) CreateSenderSignature(ctx context.Context, request SenderSignatureCreateRequest) (SenderSignatureDetails, error) {
 	var res SenderSignatureDetails
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      "senders",
-		Payload:   request,
-		TokenType: accountToken,
-	}, &res)
+	err := client.postWithAccountToken(ctx, "senders", request, &res)
 	return res, err
 }
 
 // EditSenderSignature updates an existing sender signature and returns the full details of the updated sender signature.
 func (client *Client) EditSenderSignature(ctx context.Context, signatureID int64, request SenderSignatureEditRequest) (SenderSignatureDetails, error) {
 	var res SenderSignatureDetails
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPut,
-		Path:      fmt.Sprintf("senders/%d", signatureID),
-		Payload:   request,
-		TokenType: accountToken,
-	}, &res)
+	err := client.putWithAccountToken(ctx, fmt.Sprintf("senders/%d", signatureID), request, &res)
 	return res, err
 }
 
 // DeleteSenderSignature removes a sender from the server.
 func (client *Client) DeleteSenderSignature(ctx context.Context, signatureID int64) error {
 	res := APIError{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodDelete,
-		Path:      fmt.Sprintf("senders/%d", signatureID),
-		TokenType: accountToken,
-	}, &res)
-
+	err := client.deleteWithAccountToken(ctx, fmt.Sprintf("senders/%d", signatureID), &res)
+	if err != nil {
+		return err
+	}
 	if res.ErrorCode != 0 {
 		return res
 	}
-
-	return err
+	return nil
 }
 
 // ResendSenderSignatureConfirmation resends the confirmation email for a sender signature.
 func (client *Client) ResendSenderSignatureConfirmation(ctx context.Context, signatureID int64) error {
 	res := APIError{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      fmt.Sprintf("senders/%d/resend", signatureID),
-		TokenType: accountToken,
-	}, &res)
-
+	err := client.postWithAccountToken(ctx, fmt.Sprintf("senders/%d/resend", signatureID), nil, &res)
+	if err != nil {
+		return err
+	}
 	if res.ErrorCode != 0 {
 		return res
 	}
-
-	return err
+	return nil
 }

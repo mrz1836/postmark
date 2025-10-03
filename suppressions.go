@@ -3,8 +3,6 @@ package postmark
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"net/url"
 	"time"
 )
 
@@ -105,22 +103,10 @@ func (client *Client) GetSuppressions(
 	streamID string,
 	options map[string]interface{},
 ) ([]Suppression, error) {
-	values := &url.Values{}
-	for k, v := range options {
-		values.Add(k, fmt.Sprintf("%v", v))
-	}
-
 	path := fmt.Sprintf("message-streams/%s/suppressions/dump", streamID)
-	if len(options) != 0 {
-		path = fmt.Sprintf("%s?%s", path, values.Encode())
-	}
 
 	res := suppressionsResponse{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      path,
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, buildURL(path, options), &res)
 	return res.Suppressions, err
 }
 
@@ -131,12 +117,8 @@ func (client *Client) CreateSuppressions(
 	suppressions []Suppression,
 ) ([]SuppressionResponse, error) {
 	res := updateSuppressionsResponse{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      fmt.Sprintf("message-streams/%s/suppressions", streamID),
-		Payload:   suppressionsRequest{Suppressions: suppressions},
-		TokenType: serverToken,
-	}, &res)
+	path := fmt.Sprintf("message-streams/%s/suppressions", streamID)
+	err := client.post(ctx, path, suppressionsRequest{Suppressions: suppressions}, &res)
 	return res.Suppressions, err
 }
 
@@ -148,11 +130,7 @@ func (client *Client) DeleteSuppressions(
 	suppressions []Suppression,
 ) ([]SuppressionResponse, error) {
 	res := updateSuppressionsResponse{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      fmt.Sprintf("message-streams/%s/suppressions/delete", streamID),
-		Payload:   suppressionsRequest{Suppressions: suppressions},
-		TokenType: serverToken,
-	}, &res)
+	path := fmt.Sprintf("message-streams/%s/suppressions/delete", streamID)
+	err := client.post(ctx, path, suppressionsRequest{Suppressions: suppressions}, &res)
 	return res.Suppressions, err
 }

@@ -3,7 +3,6 @@ package postmark
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"time"
 )
 
@@ -30,22 +29,13 @@ type DataRemovalResponse struct {
 // CreateDataRemoval creates a new data removal request
 func (client *Client) CreateDataRemoval(ctx context.Context, request DataRemovalRequest) (DataRemovalResponse, error) {
 	res := DataRemovalResponse{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      "data-removals",
-		Payload:   request,
-		TokenType: accountToken,
-	}, &res)
+	err := client.postWithAccountToken(ctx, "data-removals", request, &res)
 	return res, err
 }
 
 // GetDataRemovalStatus checks the status of a data removal request
 func (client *Client) GetDataRemovalStatus(ctx context.Context, id int64) (DataRemovalResponse, error) {
 	res := DataRemovalResponse{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("data-removals/%d", id),
-		TokenType: accountToken,
-	}, &res)
+	err := client.getWithAccountToken(ctx, fmt.Sprintf("data-removals/%d", id), &res)
 	return res, err
 }

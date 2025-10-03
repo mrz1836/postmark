@@ -3,7 +3,6 @@ package postmark
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"net/url"
 	"time"
 )
@@ -66,22 +65,14 @@ type MessageEvent struct {
 // GetOutboundMessage fetches a specific outbound message via serverID
 func (client *Client) GetOutboundMessage(ctx context.Context, messageID string) (OutboundMessage, error) {
 	res := OutboundMessage{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("messages/outbound/%s/details", messageID),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, fmt.Sprintf("messages/outbound/%s/details", messageID), &res)
 	return res, err
 }
 
 // GetOutboundMessageDump fetches the raw source of message. If no dump is available this will return an empty string.
 func (client *Client) GetOutboundMessageDump(ctx context.Context, messageID string) (string, error) {
 	res := dumpResponse{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("messages/outbound/%s/dump", messageID),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, fmt.Sprintf("messages/outbound/%s/dump", messageID), &res)
 	return res.Body, err
 }
 
@@ -97,19 +88,14 @@ type outboundMessagesResponse struct {
 func (client *Client) GetOutboundMessages(ctx context.Context, count, offset int64, options map[string]interface{}) ([]OutboundMessage, int64, error) {
 	res := outboundMessagesResponse{}
 
-	values := &url.Values{}
-	values.Add("count", fmt.Sprintf("%d", count))
-	values.Add("offset", fmt.Sprintf("%d", offset))
-
-	for k, v := range options {
-		values.Add(k, fmt.Sprintf("%v", v))
+	if options == nil {
+		options = make(map[string]interface{})
 	}
 
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("messages/outbound?%s", values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	options["count"] = count
+	options["offset"] = offset
+
+	err := client.get(ctx, buildURL("messages/outbound", options), &res)
 	return res.Messages, res.TotalCount, err
 }
 
@@ -180,19 +166,14 @@ type outboundMessageClicksResponse struct {
 func (client *Client) GetOutboundMessagesOpens(ctx context.Context, count, offset int64, options map[string]interface{}) ([]Open, int64, error) {
 	res := outboundMessageOpensResponse{}
 
-	values := &url.Values{}
-	values.Add("count", fmt.Sprintf("%d", count))
-	values.Add("offset", fmt.Sprintf("%d", offset))
-
-	for k, v := range options {
-		values.Add(k, fmt.Sprintf("%v", v))
+	if options == nil {
+		options = make(map[string]interface{})
 	}
 
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("messages/outbound/opens?%s", values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	options["count"] = count
+	options["offset"] = offset
+
+	err := client.get(ctx, buildURL("messages/outbound/opens", options), &res)
 	return res.Opens, res.TotalCount, err
 }
 
@@ -205,11 +186,7 @@ func (client *Client) GetOutboundMessageOpens(ctx context.Context, messageID str
 	values.Add("count", fmt.Sprintf("%d", count))
 	values.Add("offset", fmt.Sprintf("%d", offset))
 
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("messages/outbound/opens/%s?%s", messageID, values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, buildURLWithQuery(fmt.Sprintf("messages/outbound/opens/%s", messageID), *values), &res)
 	return res.Opens, res.TotalCount, err
 }
 
@@ -220,19 +197,14 @@ func (client *Client) GetOutboundMessageOpens(ctx context.Context, messageID str
 func (client *Client) GetOutboundMessagesClicks(ctx context.Context, count, offset int64, options map[string]interface{}) ([]Click, int64, error) {
 	res := outboundMessageClicksResponse{}
 
-	values := &url.Values{}
-	values.Add("count", fmt.Sprintf("%d", count))
-	values.Add("offset", fmt.Sprintf("%d", offset))
-
-	for k, v := range options {
-		values.Add(k, fmt.Sprintf("%v", v))
+	if options == nil {
+		options = make(map[string]interface{})
 	}
 
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("messages/outbound/clicks?%s", values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	options["count"] = count
+	options["offset"] = offset
+
+	err := client.get(ctx, buildURL("messages/outbound/clicks", options), &res)
 	return res.Clicks, res.TotalCount, err
 }
 
@@ -245,10 +217,6 @@ func (client *Client) GetOutboundMessageClicks(ctx context.Context, messageID st
 	values.Add("count", fmt.Sprintf("%d", count))
 	values.Add("offset", fmt.Sprintf("%d", offset))
 
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("messages/outbound/clicks/%s?%s", messageID, values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, buildURLWithQuery(fmt.Sprintf("messages/outbound/clicks/%s", messageID), *values), &res)
 	return res.Clicks, res.TotalCount, err
 }

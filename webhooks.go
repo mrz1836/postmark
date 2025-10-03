@@ -3,7 +3,6 @@ package postmark
 import (
 	"context"
 	"fmt"
-	"net/http"
 )
 
 // WebhookHTTPAuth is an optional set of auth configuration to use when calling
@@ -75,30 +74,23 @@ type Webhook struct {
 // is empty it will return all webhooks for the server. A non-existent message
 // stream will result in an error.
 func (client *Client) ListWebhooks(ctx context.Context, messageStream string) ([]Webhook, error) {
-	msgStreamParam := ""
-	if messageStream != "" {
-		msgStreamParam = fmt.Sprintf("?MessageStream=%s", messageStream)
-	}
-
 	var res struct {
 		Webhooks []Webhook
 	}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      "webhooks" + msgStreamParam,
-		TokenType: serverToken,
-	}, &res)
+
+	options := make(map[string]interface{})
+	if messageStream != "" {
+		options["MessageStream"] = messageStream
+	}
+
+	err := client.get(ctx, buildURL("webhooks", options), &res)
 	return res.Webhooks, err
 }
 
 // GetWebhook retrieves a specific webhook by the webhook's ID.
 func (client *Client) GetWebhook(ctx context.Context, id int) (Webhook, error) {
 	var res Webhook
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("webhooks/%d", id),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, fmt.Sprintf("webhooks/%d", id), &res)
 	return res, err
 }
 
@@ -106,12 +98,7 @@ func (client *Client) GetWebhook(ctx context.Context, id int) (Webhook, error) {
 // returned webhook if successful will include the ID of the created webhook.
 func (client *Client) CreateWebhook(ctx context.Context, webhook Webhook) (Webhook, error) {
 	var res Webhook
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      "webhooks",
-		Payload:   webhook,
-		TokenType: serverToken,
-	}, &res)
+	err := client.post(ctx, "webhooks", webhook, &res)
 	return res, err
 }
 
@@ -119,27 +106,19 @@ func (client *Client) CreateWebhook(ctx context.Context, webhook Webhook) (Webho
 // returned webhook if successful will be the resulting state of after the edit.
 func (client *Client) EditWebhook(ctx context.Context, id int, webhook Webhook) (Webhook, error) {
 	var res Webhook
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPut,
-		Path:      fmt.Sprintf("webhooks/%d", id),
-		Payload:   webhook,
-		TokenType: serverToken,
-	}, &res)
+	err := client.put(ctx, fmt.Sprintf("webhooks/%d", id), webhook, &res)
 	return res, err
 }
 
 // DeleteWebhook removes a webhook from the server.
 func (client *Client) DeleteWebhook(ctx context.Context, id int) error {
 	res := APIError{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodDelete,
-		Path:      fmt.Sprintf("webhooks/%d", id),
-		TokenType: serverToken,
-	}, &res)
-
+	err := client.delete(ctx, fmt.Sprintf("webhooks/%d", id), &res)
+	if err != nil {
+		return err
+	}
 	if res.ErrorCode != 0 {
 		return res
 	}
-
-	return err
+	return nil
 }

@@ -55,12 +55,7 @@ func (s *PostmarkTestSuite) TestDoRequestWithPayload() {
 	})
 
 	var result map[string]string
-	err := s.client.doRequest(context.Background(), parameters{
-		Method:    http.MethodPost,
-		Path:      "test",
-		TokenType: serverToken,
-		Payload:   payload,
-	}, &result)
+	err := s.client.doRequest(context.Background(), http.MethodPost, "test", payload, &result, serverToken)
 
 	s.Require().NoError(err)
 	s.Equal("success", result["message"])
@@ -76,11 +71,7 @@ func (s *PostmarkTestSuite) TestDoRequestWithAccountToken() {
 	})
 
 	var result map[string]string
-	err := s.client.doRequest(context.Background(), parameters{
-		Method:    http.MethodGet,
-		Path:      "account-test",
-		TokenType: accountToken,
-	}, &result)
+	err := s.client.doRequest(context.Background(), http.MethodGet, "account-test", nil, &result, accountToken)
 
 	s.Require().NoError(err)
 	s.Equal("success", result["message"])
@@ -93,11 +84,7 @@ func (s *PostmarkTestSuite) TestDoRequestHTTPError() {
 	})
 
 	var result map[string]string
-	err := s.client.doRequest(context.Background(), parameters{
-		Method:    http.MethodGet,
-		Path:      "error-test",
-		TokenType: serverToken,
-	}, &result)
+	err := s.client.doRequest(context.Background(), http.MethodGet, "error-test", nil, &result, serverToken)
 
 	s.Require().Error(err)
 }
@@ -107,11 +94,7 @@ func (s *PostmarkTestSuite) TestDoRequestContextCancellation() {
 	cancel()
 
 	var result map[string]string
-	err := s.client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      "test",
-		TokenType: serverToken,
-	}, &result)
+	err := s.client.doRequest(ctx, http.MethodGet, "test", nil, &result, serverToken)
 
 	s.Require().Error(err)
 	s.Contains(err.Error(), "context canceled")
@@ -123,11 +106,7 @@ func (s *PostmarkTestSuite) TestDoRequestInvalidJSON() {
 	})
 
 	var result map[string]string
-	err := s.client.doRequest(context.Background(), parameters{
-		Method:    http.MethodGet,
-		Path:      "invalid-json",
-		TokenType: serverToken,
-	}, &result)
+	err := s.client.doRequest(context.Background(), http.MethodGet, "invalid-json", nil, &result, serverToken)
 
 	s.Require().Error(err)
 }

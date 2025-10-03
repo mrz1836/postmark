@@ -2,9 +2,6 @@ package postmark
 
 import (
 	"context"
-	"fmt"
-	"net/http"
-	"net/url"
 )
 
 // OutboundStats - a brief overview of statistics for all of your outbound email.
@@ -39,17 +36,7 @@ type OutboundStats struct {
 // Available options: http://developer.postmarkapp.com/developer-api-stats.html#overview
 func (client *Client) GetOutboundStats(ctx context.Context, options map[string]interface{}) (OutboundStats, error) {
 	res := OutboundStats{}
-
-	values := &url.Values{}
-	for k, v := range options {
-		values.Add(k, fmt.Sprintf("%v", v))
-	}
-
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("stats/outbound?%s", values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, buildURL("stats/outbound", options), &res)
 	return res, err
 }
 
@@ -73,16 +60,7 @@ type SendCounts struct {
 // Available options: http://developer.postmarkapp.com/developer-api-stats.html#sent-counts
 func (client *Client) GetSentCounts(ctx context.Context, options map[string]interface{}) (SendCounts, error) {
 	res := SendCounts{}
-	values := &url.Values{}
-	for k, v := range options {
-		values.Add(k, fmt.Sprintf("%v", v))
-	}
-
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("stats/outbound/sends?%s", values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, buildURL("stats/outbound/sends", options), &res)
 	return res, err
 }
 
@@ -118,16 +96,7 @@ type BounceCounts struct {
 // Available options: http://developer.postmarkapp.com/developer-api-stats.html#bounce-counts
 func (client *Client) GetBounceCounts(ctx context.Context, options map[string]interface{}) (BounceCounts, error) {
 	res := BounceCounts{}
-	values := &url.Values{}
-	for k, v := range options {
-		values.Add(k, fmt.Sprintf("%v", v))
-	}
-
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("stats/outbound/bounces?%s", values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, buildURL("stats/outbound/bounces", options), &res)
 	return res, err
 }
 
@@ -152,16 +121,7 @@ type SpamCounts struct {
 // Available options: http://developer.postmarkapp.com/developer-api-stats.html#spam-complaints
 func (client *Client) GetSpamCounts(ctx context.Context, options map[string]interface{}) (SpamCounts, error) {
 	res := SpamCounts{}
-	values := &url.Values{}
-	for k, v := range options {
-		values.Add(k, fmt.Sprintf("%v", v))
-	}
-
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("stats/outbound/spam?%s", values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, buildURL("stats/outbound/spam", options), &res)
 	return res, err
 }
 
@@ -185,16 +145,7 @@ type TrackedCounts struct {
 // Available options: http://developer.postmarkapp.com/developer-api-stats.html#email-tracked-count
 func (client *Client) GetTrackedCounts(ctx context.Context, options map[string]interface{}) (TrackedCounts, error) {
 	res := TrackedCounts{}
-	values := &url.Values{}
-	for k, v := range options {
-		values.Add(k, fmt.Sprintf("%v", v))
-	}
-
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("stats/outbound/tracked?%s", values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, buildURL("stats/outbound/tracked", options), &res)
 	return res, err
 }
 
@@ -222,16 +173,7 @@ type OpenCounts struct {
 // Available options: http://developer.postmarkapp.com/developer-api-stats.html#email-opens-count
 func (client *Client) GetOpenCounts(ctx context.Context, options map[string]interface{}) (OpenCounts, error) {
 	res := OpenCounts{}
-	values := &url.Values{}
-	for k, v := range options {
-		values.Add(k, fmt.Sprintf("%v", v))
-	}
-
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("stats/outbound/opens?%s", values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, buildURL("stats/outbound/opens", options), &res)
 	return res, err
 }
 
@@ -273,16 +215,7 @@ type PlatformDay struct {
 // GetPlatformCounts gets the email platform usage
 func (client *Client) GetPlatformCounts(ctx context.Context, options map[string]interface{}) (PlatformCounts, error) {
 	res := PlatformCounts{}
-	values := &url.Values{}
-	for k, v := range options {
-		values.Add(k, fmt.Sprintf("%v", v))
-	}
-
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("stats/outbound/platform?%s", values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, buildURL("stats/outbound/platform", options), &res)
 	return res, err
 }
 
@@ -310,16 +243,7 @@ type ClickCounts struct {
 // Available options: http://developer.postmarkapp.com/developer-api-stats.html#click-counts
 func (client *Client) GetClickCounts(ctx context.Context, options map[string]interface{}) (ClickCounts, error) {
 	res := ClickCounts{}
-	values := &url.Values{}
-	for k, v := range options {
-		values.Add(k, fmt.Sprintf("%v", v))
-	}
-
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("stats/outbound/clicks?%s", values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, buildURL("stats/outbound/clicks", options), &res)
 	return res, err
 }
 
@@ -363,16 +287,7 @@ type BrowserFamilyCounts struct {
 // Available options: http://developer.postmarkapp.com/developer-api-stats.html#browser-usage
 func (client *Client) GetBrowserFamilyCounts(ctx context.Context, options map[string]interface{}) (BrowserFamilyCounts, error) {
 	res := BrowserFamilyCounts{}
-	values := &url.Values{}
-	for k, v := range options {
-		values.Add(k, fmt.Sprintf("%v", v))
-	}
-
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("stats/outbound/clicks/browserfamilies?%s", values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, buildURL("stats/outbound/clicks/browserfamilies", options), &res)
 	return res, err
 }
 
@@ -400,16 +315,7 @@ type ClickLocationCounts struct {
 // Available options: http://developer.postmarkapp.com/developer-api-stats.html#click-location
 func (client *Client) GetClickLocationCounts(ctx context.Context, options map[string]interface{}) (ClickLocationCounts, error) {
 	res := ClickLocationCounts{}
-	values := &url.Values{}
-	for k, v := range options {
-		values.Add(k, fmt.Sprintf("%v", v))
-	}
-
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("stats/outbound/clicks/location?%s", values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, buildURL("stats/outbound/clicks/location", options), &res)
 	return res, err
 }
 
@@ -445,16 +351,7 @@ type ClickPlatformCounts struct {
 // Available options: http://developer.postmarkapp.com/developer-api-stats.html#browser-platform-usage
 func (client *Client) GetClickPlatformCounts(ctx context.Context, options map[string]interface{}) (ClickPlatformCounts, error) {
 	res := ClickPlatformCounts{}
-	values := &url.Values{}
-	for k, v := range options {
-		values.Add(k, fmt.Sprintf("%v", v))
-	}
-
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("stats/outbound/clicks/platforms?%s", values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, buildURL("stats/outbound/clicks/platforms", options), &res)
 	return res, err
 }
 
@@ -498,15 +395,6 @@ type EmailClientCounts struct {
 // Available options: http://developer.postmarkapp.com/developer-api-stats.html#email-client-usage
 func (client *Client) GetEmailClientCounts(ctx context.Context, options map[string]interface{}) (EmailClientCounts, error) {
 	res := EmailClientCounts{}
-	values := &url.Values{}
-	for k, v := range options {
-		values.Add(k, fmt.Sprintf("%v", v))
-	}
-
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("stats/outbound/opens/emailclients?%s", values.Encode()),
-		TokenType: serverToken,
-	}, &res)
+	err := client.get(ctx, buildURL("stats/outbound/opens/emailclients", options), &res)
 	return res, err
 }

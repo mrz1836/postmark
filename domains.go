@@ -3,7 +3,6 @@ package postmark
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"net/url"
 )
 
@@ -110,84 +109,55 @@ func (client *Client) GetDomains(ctx context.Context, count, offset int) (Domain
 	values.Add("count", fmt.Sprintf("%d", count))
 	values.Add("offset", fmt.Sprintf("%d", offset))
 
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("domains?%s", values.Encode()),
-		TokenType: accountToken,
-	}, &res)
+	err := client.getWithAccountToken(ctx, buildURLWithQuery("domains", *values), &res)
 	return res, err
 }
 
 // GetDomain fetches a specific domain via domainID
 func (client *Client) GetDomain(ctx context.Context, domainID int64) (DomainDetails, error) {
 	res := DomainDetails{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodGet,
-		Path:      fmt.Sprintf("domains/%d", domainID),
-		TokenType: accountToken,
-	}, &res)
+	err := client.getWithAccountToken(ctx, fmt.Sprintf("domains/%d", domainID), &res)
 	return res, err
 }
 
 // EditDomain updates details for a specific domain with domainID
 func (client *Client) EditDomain(ctx context.Context, domainID int64, request DomainEditRequest) (DomainDetails, error) {
 	res := DomainDetails{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPut,
-		Path:      fmt.Sprintf("domains/%d", domainID),
-		TokenType: accountToken,
-		Payload:   request,
-	}, &res)
+	err := client.putWithAccountToken(ctx, fmt.Sprintf("domains/%d", domainID), request, &res)
 	return res, err
 }
 
 // CreateDomain creates a domain
 func (client *Client) CreateDomain(ctx context.Context, request DomainCreateRequest) (DomainDetails, error) {
 	res := DomainDetails{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      "domains",
-		TokenType: accountToken,
-		Payload:   request,
-	}, &res)
+	err := client.postWithAccountToken(ctx, "domains", request, &res)
 	return res, err
 }
 
 // DeleteDomain deletes a specific domain via domainID
 func (client *Client) DeleteDomain(ctx context.Context, domainID int64) error {
 	res := APIError{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodDelete,
-		Path:      fmt.Sprintf("domains/%d", domainID),
-		TokenType: accountToken,
-	}, &res)
-
+	err := client.deleteWithAccountToken(ctx, fmt.Sprintf("domains/%d", domainID), &res)
+	if err != nil {
+		return err
+	}
 	if res.ErrorCode != 0 {
 		return res
 	}
-
-	return err
+	return nil
 }
 
 // VerifyDKIMStatus verifies DKIM keys for the specified domain.
 func (client *Client) VerifyDKIMStatus(ctx context.Context, domainID int64) (DomainDetails, error) {
 	res := DomainDetails{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPut,
-		Path:      fmt.Sprintf("domains/%d/verifyDkim", domainID),
-		TokenType: accountToken,
-	}, &res)
+	err := client.putWithAccountToken(ctx, fmt.Sprintf("domains/%d/verifyDkim", domainID), nil, &res)
 	return res, err
 }
 
 // VerifyReturnPath verifies Return-Path DNS record for the specified domain.
 func (client *Client) VerifyReturnPath(ctx context.Context, domainID int64) (DomainDetails, error) {
 	res := DomainDetails{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPut,
-		Path:      fmt.Sprintf("domains/%d/verifyReturnPath", domainID),
-		TokenType: accountToken,
-	}, &res)
+	err := client.putWithAccountToken(ctx, fmt.Sprintf("domains/%d/verifyReturnPath", domainID), nil, &res)
 	return res, err
 }
 
@@ -197,10 +167,6 @@ func (client *Client) VerifyReturnPath(ctx context.Context, domainID int64) (Dom
 // the new DKIM key.
 func (client *Client) RotateDKIM(ctx context.Context, domainID int64) (DomainDetails, error) {
 	res := DomainDetails{}
-	err := client.doRequest(ctx, parameters{
-		Method:    http.MethodPost,
-		Path:      fmt.Sprintf("domains/%d/rotatedkim", domainID),
-		TokenType: accountToken,
-	}, &res)
+	err := client.postWithAccountToken(ctx, fmt.Sprintf("domains/%d/rotatedkim", domainID), nil, &res)
 	return res, err
 }
