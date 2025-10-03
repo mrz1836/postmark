@@ -7,7 +7,7 @@ import (
 
 // buildURLWithQuery constructs a URL with the given path and query parameters.
 func buildURLWithQuery(path string, queryParams url.Values) string {
-	if queryParams == nil || len(queryParams) == 0 {
+	if len(queryParams) == 0 {
 		return path
 	}
 	return fmt.Sprintf("%s?%s", path, queryParams.Encode())

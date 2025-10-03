@@ -126,7 +126,7 @@ func (client *Client) doRequest(ctx context.Context, method, path string, payloa
 		// If the status code is not a success, attempt to unmarshall the body into the APIError struct.
 		var apiErr APIError
 		if err = json.Unmarshal(body, &apiErr); err != nil {
-			return fmt.Errorf("request failed with status %d: %s", res.StatusCode, string(body))
+			return fmt.Errorf("request failed with status %d: %w", res.StatusCode, err)
 		}
 		return apiErr
 	}
