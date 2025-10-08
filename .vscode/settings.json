@@ -1,4 +1,7 @@
 {
+    // ============================================================
+    // GO LANGUAGE CONFIGURATION
+    // ============================================================
     "[go.mod]": {
         "editor.codeActionsOnSave": {
             "source.organizeImports": "explicit"
@@ -9,20 +12,156 @@
         "editor.codeActionsOnSave": {
             "source.organizeImports": "explicit"
         },
-        "editor.formatOnSave": true
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "golang.go"
     },
     "[go][go.mod]": {
         "editor.codeActionsOnSave": {
             "source.organizeImports": "explicit"
         }
     },
-    "go.lintFlags": [
-        "--verbose"
-    ],
-    "go.lintTool": "golangci-lint",
+
+    // ============================================================
+    // OTHER LANGUAGE CONFIGURATIONS
+    // ============================================================
+    "[yaml]": {
+        "editor.defaultFormatter": "redhat.vscode-yaml"
+    },
+    "files.associations": {
+        "application.yaml": "yaml-cloudformation"
+    },
+
+    // ============================================================
+    // GO TOOLS & LANGUAGE SERVER
+    // ============================================================
     "go.useLanguageServer": true,
+    "go.toolsManagement.autoUpdate": true,
+
+    // ============================================================
+    // LINTING
+    // ============================================================
+    "go.lintTool": "golangci-lint",
+    "go.lintFlags": [
+        "--fast",
+        "--timeout=5m"
+    ],
+    "go.lintOnSave": "package",
+
+    // ============================================================
+    // TESTING
+    // ============================================================
+    "go.testExplorerPackages": ".*",
+    "go.testFlags": [
+        "-v",
+        "-race",
+        "-count=1"
+    ],
+    "go.coverOnSave": false,
+    "go.coverageDecorator": {
+        "type": "gutter",
+        "coveredHighlightColor": "rgba(64,128,64,0.5)",
+        "uncoveredHighlightColor": "rgba(128,64,64,0.25)"
+    },
+
+    // ============================================================
+    // CODE LENS
+    // ============================================================
+    "go.enableCodeLens": {
+        "runtest": true
+    },
+
+    // ============================================================
+    // DEBUGGING (Delve)
+    // ============================================================
+    "go.delveConfig": {
+        "dlvLoadConfig": {
+            "followPointers": true,
+            "maxVariableRecurse": 1,
+            "maxStringLen": 256,
+            "maxArrayValues": 64,
+            "maxStructFields": -1
+        },
+        "showGlobalVariables": false,
+        "debugAdapter": "dlv-dap"
+    },
+
+    // ============================================================
+    // STRUCT TAG MANAGEMENT
+    // ============================================================
+    "go.addTags": {
+        "tags": "json",
+        "options": "json=omitempty",
+        "promptForTags": false,
+        "transform": "snakecase"
+    },
+
+    // ============================================================
+    // GOPLS (LANGUAGE SERVER) CONFIGURATION
+    // ============================================================
     "gopls": {
+        // --------------------------------------------------------
+        // Formatting (gofumpt for stricter formatting)
+        // --------------------------------------------------------
         "formatting.gofumpt": true,
-        "formatting.local": "github.com/mrz1836/postmark"
+
+        // --------------------------------------------------------
+        // IMPORTANT: Project-Specific Module Path
+        // For multi-project use, update this to your module path:
+        // Example: "github.com/yourorg/yourproject"
+        // Or remove this setting to use auto-detection
+        // --------------------------------------------------------
+        "formatting.local": "github.com/mrz1836/postmark",
+
+        // --------------------------------------------------------
+        // UI & Completion Features
+        // --------------------------------------------------------
+        "ui.semanticTokens": true,
+        "ui.completion.completeFunctionCalls": true,
+        "ui.completion.usePlaceholders": true,
+
+        // --------------------------------------------------------
+        // Inlay Hints (Inline Type & Parameter Information)
+        // --------------------------------------------------------
+        "ui.inlayHint.assignVariableTypes": true,
+        "ui.inlayHint.compositeLiteralFields": true,
+        "ui.inlayHint.compositeLiteralTypes": true,
+        "ui.inlayHint.constantValues": true,
+        "ui.inlayHint.functionTypeParameters": true,
+        "ui.inlayHint.parameterNames": true,
+        "ui.inlayHint.rangeVariableTypes": true,
+
+        // --------------------------------------------------------
+        // Symbol Navigation
+        // --------------------------------------------------------
+        "symbolMatcher": "fastfuzzy",
+        "symbolStyle": "full",
+        "ui.navigation.importShortcut": "Definition",
+
+        // --------------------------------------------------------
+        // Enhanced Diagnostics & Static Analysis
+        // Extends the 60+ golangci-lint philosophy into the IDE
+        // --------------------------------------------------------
+        "ui.diagnostic.staticcheck": true,
+        "ui.diagnostic.vulncheck": "Imports",
+        "ui.diagnostic.analyses": {
+            "unusedparams": true,
+            "shadow": true,
+            "unusedwrite": true,
+            "fieldalignment": true,
+            "nilness": true,
+            "unusedvariable": true
+        },
+
+        // --------------------------------------------------------
+        // Build Performance (Exclude directories from analysis)
+        // --------------------------------------------------------
+        "build.directoryFilters": [
+            "-node_modules",
+            "-vendor",
+            "-.git",
+            "-dist",
+            "-build",
+            "-.mage-cache"
+        ]
     }
 }
