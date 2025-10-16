@@ -387,13 +387,12 @@ jobs:
           DEPENDENCY="${{ steps.metadata.outputs.dependency-names }}"
           VERSION_CHANGE="${{ steps.metadata.outputs.previous-version }} → ${{ steps.metadata.outputs.new-version }}"
 
-          # Check token availability
-          if [[ -n "${{ secrets.GH_PAT_TOKEN }}" ]]; then
+          # Check token availability (use env var to avoid expanding secrets in run block)
+          # TOKEN_TYPE is passed as environment variable to indicate which token is being used
+          if [[ "$TOKEN_TYPE" == "PAT" ]]; then
             echo "🔑 Using Personal Access Token for enhanced permissions"
-            TOKEN_TYPE="PAT"
           else
             echo "⚠️ Using default GITHUB_TOKEN - auto-merge may fail for Dependabot PRs"
-            TOKEN_TYPE="GITHUB_TOKEN"
           fi
 
           # Determine approval message based on action type
@@ -439,6 +438,7 @@ jobs:
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          TOKEN_TYPE: ${{ secrets.GH_PAT_TOKEN && 'PAT' || 'GITHUB_TOKEN' }}
 
       # --------------------------------------------------------------------
       # Add tracking labels

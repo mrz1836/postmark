@@ -492,15 +492,20 @@ runs:
     - name: 🔍 Detect test failures
       id: detect-failures
       shell: bash
+      env:
+        INPUT_OUTPUT_FILE: ${{ inputs.output-file }}
+        INPUT_EXIT_CODE: ${{ inputs.exit-code }}
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_FAILURES_FILE: ${{ inputs.failures-file }}
       run: |
         # Source the functions
         source test-failure-functions.sh
 
         # Run detection with provided inputs
-        OUTPUT_FILE="${{ inputs.output-file }}"
-        EXIT_CODE="${{ inputs.exit-code }}"
-        MODE="${{ inputs.mode }}"
-        FAILURES_FILE="${{ inputs.failures-file }}"
+        OUTPUT_FILE="$INPUT_OUTPUT_FILE"
+        EXIT_CODE="$INPUT_EXIT_CODE"
+        MODE="$INPUT_MODE"
+        FAILURES_FILE="$INPUT_FAILURES_FILE"
 
         # Detect failures
         detect_test_failures "$OUTPUT_FILE" "$EXIT_CODE" "$MODE" "$FAILURES_FILE"

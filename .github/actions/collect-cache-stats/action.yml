@@ -96,8 +96,22 @@ runs:
     - name: 📊 Collect cache statistics
       id: collect
       shell: bash
+      env:
+        INPUT_WORKFLOW_NAME: ${{ inputs.workflow-name }}
+        INPUT_CACHE_PREFIX: ${{ inputs.cache-prefix }}
+        INPUT_JOB_NAME: ${{ inputs.job-name }}
+        INPUT_OS: ${{ inputs.os }}
+        INPUT_GO_VERSION: ${{ inputs.go-version }}
+        INPUT_GOMOD_CACHE_HIT: ${{ inputs.gomod-cache-hit }}
+        INPUT_GOBUILD_CACHE_HIT: ${{ inputs.gobuild-cache-hit }}
+        INPUT_GOLANGCI_CACHE_HIT: ${{ inputs.golangci-cache-hit }}
+        INPUT_INCLUDE_GOLANGCI: ${{ inputs.include-golangci }}
+        INPUT_REDIS_ENABLED: ${{ inputs.redis-enabled }}
+        INPUT_REDIS_CACHE_HIT: ${{ inputs.redis-cache-hit }}
+        INPUT_REDIS_IMAGE_SIZE: ${{ inputs.redis-image-size }}
+        INPUT_REDIS_OPERATION_TIME: ${{ inputs.redis-operation-time }}
       run: |
-        echo "📊 Collecting cache statistics for ${{ inputs.workflow-name }} job..."
+        echo "📊 Collecting cache statistics for $INPUT_WORKFLOW_NAME job..."
 
         # Get cache sizes using the exact pattern from existing workflows
         GOMOD_SIZE="0B"
@@ -115,37 +129,37 @@ runs:
         fi
 
         # Calculate golangci-lint cache size (if requested)
-        if [[ "${{ inputs.include-golangci }}" == "true" ]] && [ -d "$HOME/.cache/golangci-lint" ]; then
+        if [[ "$INPUT_INCLUDE_GOLANGCI" == "true" ]] && [ -d "$HOME/.cache/golangci-lint" ]; then
           GOLANGCI_SIZE=$(du -sh "$HOME/.cache/golangci-lint" 2>/dev/null | cut -f1 || echo "0B")
         fi
 
         # Create cache statistics JSON file with new prefix-based naming
-        OUTPUT_FILE="${{ inputs.cache-prefix }}-${{ inputs.workflow-name }}.json"
+        OUTPUT_FILE="${INPUT_CACHE_PREFIX}-${INPUT_WORKFLOW_NAME}.json"
 
         echo '{' > "$OUTPUT_FILE"
-        echo '  "os": "${{ inputs.os }}",' >> "$OUTPUT_FILE"
-        echo '  "go_version": "${{ inputs.go-version }}",' >> "$OUTPUT_FILE"
-        echo "  \"gomod_cache_hit\": \"${{ inputs.gomod-cache-hit }}\"," >> "$OUTPUT_FILE"
-        echo "  \"gobuild_cache_hit\": \"${{ inputs.gobuild-cache-hit }}\"," >> "$OUTPUT_FILE"
+        echo "  \"os\": \"$INPUT_OS\"," >> "$OUTPUT_FILE"
+        echo "  \"go_version\": \"$INPUT_GO_VERSION\"," >> "$OUTPUT_FILE"
+        echo "  \"gomod_cache_hit\": \"$INPUT_GOMOD_CACHE_HIT\"," >> "$OUTPUT_FILE"
+        echo "  \"gobuild_cache_hit\": \"$INPUT_GOBUILD_CACHE_HIT\"," >> "$OUTPUT_FILE"
         echo "  \"cache_size_gomod\": \"$GOMOD_SIZE\"," >> "$OUTPUT_FILE"
         echo "  \"cache_size_gobuild\": \"$GOBUILD_SIZE\"," >> "$OUTPUT_FILE"
 
         # Include golangci-lint cache statistics if requested
-        if [[ "${{ inputs.include-golangci }}" == "true" ]]; then
-          echo "  \"golangci_cache_hit\": \"${{ inputs.golangci-cache-hit }}\"," >> "$OUTPUT_FILE"
+        if [[ "$INPUT_INCLUDE_GOLANGCI" == "true" ]]; then
+          echo "  \"golangci_cache_hit\": \"$INPUT_GOLANGCI_CACHE_HIT\"," >> "$OUTPUT_FILE"
           echo "  \"cache_size_golangci_lint\": \"$GOLANGCI_SIZE\"," >> "$OUTPUT_FILE"
         fi
 
         # Include Redis cache statistics if requested
-        if [[ "${{ inputs.redis-enabled }}" == "true" ]]; then
-          echo "  \"redis_enabled\": \"${{ inputs.redis-enabled }}\"," >> "$OUTPUT_FILE"
-          echo "  \"redis_cache_hit\": \"${{ inputs.redis-cache-hit }}\"," >> "$OUTPUT_FILE"
-          echo "  \"redis_image_size_mb\": \"${{ inputs.redis-image-size }}\"," >> "$OUTPUT_FILE"
-          echo "  \"redis_operation_time_s\": \"${{ inputs.redis-operation-time }}\"," >> "$OUTPUT_FILE"
+        if [[ "$INPUT_REDIS_ENABLED" == "true" ]]; then
+          echo "  \"redis_enabled\": \"$INPUT_REDIS_ENABLED\"," >> "$OUTPUT_FILE"
+          echo "  \"redis_cache_hit\": \"$INPUT_REDIS_CACHE_HIT\"," >> "$OUTPUT_FILE"
+          echo "  \"redis_image_size_mb\": \"$INPUT_REDIS_IMAGE_SIZE\"," >> "$OUTPUT_FILE"
+          echo "  \"redis_operation_time_s\": \"$INPUT_REDIS_OPERATION_TIME\"," >> "$OUTPUT_FILE"
         fi
 
-        echo '  "workflow": "${{ inputs.workflow-name }}",' >> "$OUTPUT_FILE"
-        echo '  "job_name": "${{ inputs.job-name }}",' >> "$OUTPUT_FILE"
+        echo "  \"workflow\": \"$INPUT_WORKFLOW_NAME\"," >> "$OUTPUT_FILE"
+        echo "  \"job_name\": \"$INPUT_JOB_NAME\"," >> "$OUTPUT_FILE"
         echo "  \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"" >> "$OUTPUT_FILE"
         echo '}' >> "$OUTPUT_FILE"
 
@@ -155,15 +169,15 @@ runs:
         echo "$STATS_JSON" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
 
-        echo "📊 Cache statistics collected for ${{ inputs.workflow-name }} job"
+        echo "📊 Cache statistics collected for $INPUT_WORKFLOW_NAME job"
 
         # Log summary for transparency (matching existing workflow patterns)
         echo "📋 Cache Summary:"
-        echo "   - Go modules: $GOMOD_SIZE (hit: ${{ inputs.gomod-cache-hit }})"
-        echo "   - Go build: $GOBUILD_SIZE (hit: ${{ inputs.gobuild-cache-hit }})"
-        if [[ "${{ inputs.include-golangci }}" == "true" ]]; then
-          echo "   - golangci-lint: $GOLANGCI_SIZE (hit: ${{ inputs.golangci-cache-hit }})"
+        echo "   - Go modules: $GOMOD_SIZE (hit: $INPUT_GOMOD_CACHE_HIT)"
+        echo "   - Go build: $GOBUILD_SIZE (hit: $INPUT_GOBUILD_CACHE_HIT)"
+        if [[ "$INPUT_INCLUDE_GOLANGCI" == "true" ]]; then
+          echo "   - golangci-lint: $GOLANGCI_SIZE (hit: $INPUT_GOLANGCI_CACHE_HIT)"
         fi
-        if [[ "${{ inputs.redis-enabled }}" == "true" ]]; then
-          echo "   - Redis: ${{ inputs.redis-image-size }}MB (hit: ${{ inputs.redis-cache-hit }}, ${{ inputs.redis-operation-time }}s)"
+        if [[ "$INPUT_REDIS_ENABLED" == "true" ]]; then
+          echo "   - Redis: ${INPUT_REDIS_IMAGE_SIZE}MB (hit: $INPUT_REDIS_CACHE_HIT, ${INPUT_REDIS_OPERATION_TIME}s)"
         fi
