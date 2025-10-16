@@ -1,695 +1,790 @@
 {
-    "version": "2.0.0",
     "inputs": [
         {
-            "id": "versionBump",
-            "type": "pickString",
+            "default": "patch",
             "description": "Select version bump type",
-            "options": ["patch", "minor"],
-            "default": "patch"
+            "id": "versionBump",
+            "options": [
+                "patch",
+                "minor"
+            ],
+            "type": "pickString"
         },
         {
-            "id": "targetBranch",
-            "type": "promptString",
+            "default": "master",
             "description": "Target branch for version bump",
-            "default": "master"
+            "id": "targetBranch",
+            "type": "promptString"
         },
         {
-            "id": "majorConfirm",
-            "type": "pickString",
+            "default": "cancel",
             "description": "⚠️  MAJOR version bump - are you sure? This is a breaking change!",
-            "options": ["major-confirm", "cancel"],
-            "default": "cancel"
+            "id": "majorConfirm",
+            "options": [
+                "major-confirm",
+                "cancel"
+            ],
+            "type": "pickString"
         }
     ],
     "tasks": [
-        // ============================================================
-        // BUILD TASKS
-        // ============================================================
         {
-            "label": "magex: lint",
-            "type": "shell",
             "command": "magex lint",
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
             "detail": "Run comprehensive linting with golangci-lint (all enabled linters)",
-            "problemMatcher": [
-                "$go",
-                {
-                    "owner": "golangci-lint",
-                    "source": "golangci-lint",
-                    "fileLocation": ["relative", "${workspaceFolder}"],
-                    "pattern": [
-                        {
-                            "regexp": "^(.+?):(\\d+):(\\d+):\\s+(.+?)\\s+\\((.+?)\\)$",
-                            "file": 1,
-                            "line": 2,
-                            "column": 3,
-                            "message": 4,
-                            "code": 5
-                        }
-                    ]
-                }
-            ],
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared",
-                "focus": false,
-                "clear": true
-            }
-        },
-        {
-            "label": "magex: lint:fast",
-            "type": "shell",
-            "command": "magex lint:fast",
-            "group": "build",
-            "detail": "Run fast linting (skip slow linters, ideal for quick checks)",
-            "problemMatcher": [
-                "$go",
-                {
-                    "owner": "golangci-lint",
-                    "source": "golangci-lint",
-                    "fileLocation": ["relative", "${workspaceFolder}"],
-                    "pattern": [
-                        {
-                            "regexp": "^(.+?):(\\d+):(\\d+):\\s+(.+?)\\s+\\((.+?)\\)$",
-                            "file": 1,
-                            "line": 2,
-                            "column": 3,
-                            "message": 4,
-                            "code": 5
-                        }
-                    ]
-                }
-            ],
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared",
-                "focus": false,
-                "clear": true
-            }
-        },
-        {
-            "label": "magex: lint:fix",
-            "type": "shell",
-            "command": "magex lint:fix",
-            "group": "build",
-            "detail": "Run linting and auto-fix issues where possible",
-            "problemMatcher": [
-                "$go",
-                {
-                    "owner": "golangci-lint",
-                    "source": "golangci-lint",
-                    "fileLocation": ["relative", "${workspaceFolder}"],
-                    "pattern": [
-                        {
-                            "regexp": "^(.+?):(\\d+):(\\d+):\\s+(.+?)\\s+\\((.+?)\\)$",
-                            "file": 1,
-                            "line": 2,
-                            "column": 3,
-                            "message": 4,
-                            "code": 5
-                        }
-                    ]
-                }
-            ],
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared",
-                "focus": false,
-                "clear": true
-            }
-        },
-        {
-            "label": "magex: lint:ci",
-            "type": "shell",
-            "command": "magex lint:ci",
-            "group": "build",
-            "detail": "Run linting as CI would (strict mode, no caching)",
-            "problemMatcher": [
-                "$go",
-                {
-                    "owner": "golangci-lint",
-                    "source": "golangci-lint",
-                    "fileLocation": ["relative", "${workspaceFolder}"],
-                    "pattern": [
-                        {
-                            "regexp": "^(.+?):(\\d+):(\\d+):\\s+(.+?)\\s+\\((.+?)\\)$",
-                            "file": 1,
-                            "line": 2,
-                            "column": 3,
-                            "message": 4,
-                            "code": 5
-                        }
-                    ]
-                }
-            ],
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared",
-                "focus": false,
-                "clear": true
-            }
-        },
-        {
-            "label": "magex: build",
-            "type": "shell",
-            "command": "magex build",
-            "group": "build",
-            "detail": "Build the project (production build)",
-            "problemMatcher": ["$go"],
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared",
-                "focus": false,
-                "clear": true
-            }
-        },
-        {
-            "label": "magex: build:dev",
-            "type": "shell",
-            "command": "magex build:dev",
-            "group": "build",
-            "detail": "Build the project in development mode (faster, with debug info)",
-            "problemMatcher": ["$go"],
-            "presentation": {
-                "reveal": "always",
-                "panel": "shared",
-                "focus": false,
-                "clear": true
-            }
-        },
-        // ============================================================
-        // TEST TASKS
-        // ============================================================
-        {
-            "label": "magex: test",
-            "type": "shell",
-            "command": "magex test",
             "group": {
-                "kind": "test",
-                "isDefault": true
+                "isDefault": true,
+                "kind": "build"
             },
+            "label": "magex: lint",
+            "presentation": {
+                "clear": true,
+                "focus": false,
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go",
+                {
+                    "fileLocation": [
+                        "relative",
+                        "${workspaceFolder}"
+                    ],
+                    "owner": "golangci-lint",
+                    "pattern": [
+                        {
+                            "code": 5,
+                            "column": 3,
+                            "file": 1,
+                            "line": 2,
+                            "message": 4,
+                            "regexp": "^(.+?):(\\d+):(\\d+):\\s+(.+?)\\s+\\((.+?)\\)$"
+                        }
+                    ],
+                    "source": "golangci-lint"
+                }
+            ],
+            "type": "shell"
+        },
+        {
+            "command": "magex lint:fast",
+            "detail": "Run fast linting (skip slow linters, ideal for quick checks)",
+            "group": "build",
+            "label": "magex: lint:fast",
+            "presentation": {
+                "clear": true,
+                "focus": false,
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go",
+                {
+                    "fileLocation": [
+                        "relative",
+                        "${workspaceFolder}"
+                    ],
+                    "owner": "golangci-lint",
+                    "pattern": [
+                        {
+                            "code": 5,
+                            "column": 3,
+                            "file": 1,
+                            "line": 2,
+                            "message": 4,
+                            "regexp": "^(.+?):(\\d+):(\\d+):\\s+(.+?)\\s+\\((.+?)\\)$"
+                        }
+                    ],
+                    "source": "golangci-lint"
+                }
+            ],
+            "type": "shell"
+        },
+        {
+            "command": "magex lint:fix",
+            "detail": "Run linting and auto-fix issues where possible",
+            "group": "build",
+            "label": "magex: lint:fix",
+            "presentation": {
+                "clear": true,
+                "focus": false,
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go",
+                {
+                    "fileLocation": [
+                        "relative",
+                        "${workspaceFolder}"
+                    ],
+                    "owner": "golangci-lint",
+                    "pattern": [
+                        {
+                            "code": 5,
+                            "column": 3,
+                            "file": 1,
+                            "line": 2,
+                            "message": 4,
+                            "regexp": "^(.+?):(\\d+):(\\d+):\\s+(.+?)\\s+\\((.+?)\\)$"
+                        }
+                    ],
+                    "source": "golangci-lint"
+                }
+            ],
+            "type": "shell"
+        },
+        {
+            "command": "magex lint:ci",
+            "detail": "Run linting as CI would (strict mode, no caching)",
+            "group": "build",
+            "label": "magex: lint:ci",
+            "presentation": {
+                "clear": true,
+                "focus": false,
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go",
+                {
+                    "fileLocation": [
+                        "relative",
+                        "${workspaceFolder}"
+                    ],
+                    "owner": "golangci-lint",
+                    "pattern": [
+                        {
+                            "code": 5,
+                            "column": 3,
+                            "file": 1,
+                            "line": 2,
+                            "message": 4,
+                            "regexp": "^(.+?):(\\d+):(\\d+):\\s+(.+?)\\s+\\((.+?)\\)$"
+                        }
+                    ],
+                    "source": "golangci-lint"
+                }
+            ],
+            "type": "shell"
+        },
+        {
+            "command": "magex build",
+            "detail": "Build the project (production build)",
+            "group": "build",
+            "label": "magex: build",
+            "presentation": {
+                "clear": true,
+                "focus": false,
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
+        },
+        {
+            "command": "magex build:dev",
+            "detail": "Build the project in development mode (faster, with debug info)",
+            "group": "build",
+            "label": "magex: build:dev",
+            "presentation": {
+                "clear": true,
+                "focus": false,
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
+        },
+        {
+            "command": "magex test",
             "detail": "Run standard test suite (unit tests)",
-            "problemMatcher": ["$go"],
+            "group": {
+                "isDefault": true,
+                "kind": "test"
+            },
+            "label": "magex: test",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: test:quick",
-            "type": "shell",
             "command": "magex testQuick",
-            "group": "test",
             "detail": "Run fast unit tests with -short flag (excludes slow tests)",
-            "problemMatcher": ["$go"],
+            "group": "test",
+            "label": "magex: test:quick",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: test:perf",
-            "type": "shell",
             "command": "magex testPerf",
-            "group": "test",
             "detail": "Run performance regression tests (may take 30+ minutes)",
-            "problemMatcher": ["$go"],
+            "group": "test",
+            "label": "magex: test:perf",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: test:all",
-            "type": "shell",
             "command": "magex testAll",
-            "group": "test",
             "detail": "Run all tests including performance tests (comprehensive)",
-            "problemMatcher": ["$go"],
+            "group": "test",
+            "label": "magex: test:all",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: test:cover",
-            "type": "shell",
             "command": "magex test:cover",
-            "group": "test",
             "detail": "Run tests with coverage analysis",
-            "problemMatcher": ["$go"],
+            "group": "test",
+            "label": "magex: test:cover",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: test:coverhtml",
-            "type": "shell",
             "command": "magex test:coverhtml",
-            "group": "test",
             "detail": "Generate and open HTML coverage report in browser",
-            "problemMatcher": ["$go"],
+            "group": "test",
+            "label": "magex: test:coverhtml",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": false,
                 "focus": false,
-                "clear": false
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: test:race",
-            "type": "shell",
             "command": "magex test:coverrace",
-            "group": "test",
             "detail": "Run tests with race detector (slower but catches concurrency issues)",
-            "problemMatcher": ["$go"],
+            "group": "test",
+            "label": "magex: test:race",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: test:ci",
-            "type": "shell",
             "command": "magex test:ci",
-            "group": "test",
             "detail": "Run tests as CI would (includes race detector and verbose output)",
-            "problemMatcher": ["$go"],
+            "group": "test",
+            "label": "magex: test:ci",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: test:integration",
-            "type": "shell",
             "command": "magex test:integration",
-            "group": "test",
             "detail": "Run integration tests (may require external dependencies)",
-            "problemMatcher": ["$go"],
+            "group": "test",
+            "label": "magex: test:integration",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: test:fuzz",
-            "type": "shell",
             "command": "magex test:fuzz",
-            "group": "test",
             "detail": "Run fuzz tests (Go 1.18+ fuzzing for edge case discovery)",
-            "problemMatcher": ["$go"],
+            "group": "test",
+            "label": "magex: test:fuzz",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
-        // ============================================================
-        // BENCHMARK TASKS
-        // ============================================================
         {
-            "label": "magex: bench",
-            "type": "shell",
             "command": "magex bench",
-            "group": "test",
             "detail": "Run standard benchmarks (quick benchmarks only)",
-            "problemMatcher": ["$go"],
+            "group": "test",
+            "label": "magex: bench",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: bench:quick",
-            "type": "shell",
             "command": "magex benchQuick",
-            "group": "test",
             "detail": "Run only quick benchmarks (~5-10 minutes)",
-            "problemMatcher": ["$go"],
+            "group": "test",
+            "label": "magex: bench:quick",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: bench:heavy",
-            "type": "shell",
             "command": "magex benchHeavy",
-            "group": "test",
             "detail": "Run intensive benchmarks (10-30 minutes: stress tests, large datasets)",
-            "problemMatcher": ["$go"],
+            "group": "test",
+            "label": "magex: bench:heavy",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: bench:all",
-            "type": "shell",
             "command": "magex benchAll",
-            "group": "test",
             "detail": "Run all benchmarks including heavy ones (30-60 minutes total)",
-            "problemMatcher": ["$go"],
+            "group": "test",
+            "label": "magex: bench:all",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: bench:cpu",
-            "type": "shell",
             "command": "magex bench:cpu",
-            "group": "test",
             "detail": "Run benchmarks with CPU profiling",
-            "problemMatcher": ["$go"],
+            "group": "test",
+            "label": "magex: bench:cpu",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": false,
                 "focus": false,
-                "clear": false
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: bench:mem",
-            "type": "shell",
             "command": "magex bench:mem",
-            "group": "test",
             "detail": "Run benchmarks with memory profiling",
-            "problemMatcher": ["$go"],
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
-                "focus": false,
-                "clear": false
-            }
-        },
-        {
-            "label": "magex: bench:compare",
-            "type": "shell",
-            "command": "magex bench:compare",
             "group": "test",
+            "label": "magex: bench:mem",
+            "presentation": {
+                "clear": false,
+                "focus": false,
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
+        },
+        {
+            "command": "magex bench:compare",
             "detail": "Compare benchmark results (requires saved baseline)",
-            "problemMatcher": ["$go"],
+            "group": "test",
+            "label": "magex: bench:compare",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
-        // ============================================================
-        // FORMAT TASKS
-        // ============================================================
         {
-            "label": "magex: format",
-            "type": "shell",
             "command": "magex format",
-            "group": "none",
             "detail": "Check code formatting (reports issues without fixing)",
-            "problemMatcher": ["$go"],
+            "group": "none",
+            "label": "magex: format",
             "presentation": {
-                "reveal": "always",
-                "panel": "shared",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: format:check",
-            "type": "shell",
             "command": "magex format:check",
-            "group": "none",
             "detail": "Verify formatting without making changes (CI-friendly)",
-            "problemMatcher": ["$go"],
+            "group": "none",
+            "label": "magex: format:check",
             "presentation": {
-                "reveal": "always",
-                "panel": "shared",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: format:fix",
-            "type": "shell",
             "command": "magex format:fix",
-            "group": "none",
             "detail": "Auto-fix code formatting (gofmt + goimports + gofumpt)",
-            "problemMatcher": ["$go"],
+            "group": "none",
+            "label": "magex: format:fix",
             "presentation": {
-                "reveal": "silent",
-                "panel": "shared",
+                "clear": false,
                 "focus": false,
-                "clear": false
-            }
+                "panel": "shared",
+                "reveal": "silent"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
-        // ============================================================
-        // DEPENDENCY TASKS
-        // ============================================================
         {
-            "label": "magex: deps:tidy",
-            "type": "shell",
+            "command": "go-pre-commit install",
+            "detail": "Install go-pre-commit hooks",
+            "group": "none",
+            "label": "go-pre-commit: install",
+            "presentation": {
+                "clear": true,
+                "focus": false,
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [],
+            "type": "shell"
+        },
+        {
+            "command": "go-pre-commit run --all-files",
+            "detail": "Run pre-commit hooks on all files",
+            "group": "none",
+            "label": "go-pre-commit: run",
+            "presentation": {
+                "clear": true,
+                "focus": false,
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
+        },
+        {
             "command": "magex deps:tidy",
-            "group": "none",
             "detail": "Tidy go.mod and go.sum (removes unused dependencies)",
-            "problemMatcher": ["$go"],
+            "group": "none",
+            "label": "magex: deps:tidy",
             "presentation": {
-                "reveal": "always",
-                "panel": "shared",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: deps:update",
-            "type": "shell",
             "command": "magex deps:update",
-            "group": "none",
             "detail": "Update all dependencies to latest compatible versions",
-            "problemMatcher": ["$go"],
+            "group": "none",
+            "label": "magex: deps:update",
             "presentation": {
-                "reveal": "always",
-                "panel": "shared",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: deps:audit",
-            "type": "shell",
             "command": "magex deps:audit",
-            "group": "none",
             "detail": "Audit dependencies for known security vulnerabilities",
-            "problemMatcher": ["$go"],
+            "group": "none",
+            "label": "magex: deps:audit",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: deps:outdated",
-            "type": "shell",
             "command": "magex deps:outdated",
-            "group": "none",
             "detail": "List outdated dependencies with available updates",
-            "problemMatcher": [],
+            "group": "none",
+            "label": "magex: deps:outdated",
             "presentation": {
-                "reveal": "always",
-                "panel": "shared",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [],
+            "type": "shell"
         },
-        // ============================================================
-        // DOCUMENTATION TASKS
-        // ============================================================
         {
-            "label": "magex: docs:godocs",
-            "type": "shell",
             "command": "magex docs:godocs",
-            "group": "none",
             "detail": "Generate Go documentation",
-            "problemMatcher": [],
+            "group": "none",
+            "label": "magex: docs:godocs",
             "presentation": {
-                "reveal": "always",
-                "panel": "shared",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [],
+            "type": "shell"
         },
         {
-            "label": "magex: docs:serve",
-            "type": "shell",
             "command": "magex docs:serve",
-            "group": "none",
             "detail": "Start local documentation server",
+            "group": "none",
             "isBackground": true,
-            "problemMatcher": [],
+            "label": "magex: docs:serve",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [],
+            "type": "shell"
         },
         {
-            "label": "magex: metrics:loc",
-            "type": "shell",
             "command": "magex metrics:loc",
-            "group": "none",
             "detail": "Calculate lines of code metrics",
+            "group": "none",
             "isBackground": true,
-            "problemMatcher": [],
+            "label": "magex: metrics:loc",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [],
+            "type": "shell"
         },
-        // ============================================================
-        // VERSION/RELEASE TASKS
-        // ============================================================
         {
-            "label": "magex: version:bump",
-            "type": "shell",
             "command": "magex version:bump push=true bump=${input:versionBump} branch=${input:targetBranch}",
-            "group": "none",
             "detail": "Interactive version bump (patch/minor)",
-            "problemMatcher": ["$go"],
+            "group": "none",
+            "label": "magex: version:bump",
             "presentation": {
-                "reveal": "always",
-                "panel": "shared",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: version:bump:major",
-            "type": "shell",
             "command": "magex version:bump push=true bump=major branch=${input:targetBranch} confirm=${input:majorConfirm}",
-            "group": "none",
             "detail": "Bump major version (X.0.0) and push to remote - requires confirmation",
-            "problemMatcher": ["$go"],
+            "group": "none",
+            "label": "magex: version:bump:major",
             "presentation": {
-                "reveal": "always",
-                "panel": "shared",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
         },
         {
-            "label": "magex: release:snapshot",
-            "type": "shell",
             "command": "magex release:snapshot",
-            "group": "none",
             "detail": "Create snapshot release (testing goreleaser config)",
-            "problemMatcher": [],
+            "group": "none",
+            "label": "magex: release:snapshot",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [],
+            "type": "shell"
         },
-        // ============================================================
-        // COMPOUND/WORKFLOW TASKS
-        // ============================================================
         {
-            "label": "workflow: quick-check",
-            "type": "shell",
             "command": "echo 'Running quick-check workflow...'",
-            "group": "none",
+            "dependsOn": [
+                "magex: format:fix",
+                "magex: lint:fast",
+                "magex: test:quick"
+            ],
+            "dependsOrder": "sequence",
             "detail": "Quick pre-commit check: format → lint:fast → test:quick",
-            "dependsOn": ["magex: format:fix", "magex: lint:fast", "magex: test:quick"],
-            "dependsOrder": "sequence",
-            "problemMatcher": [],
+            "group": "none",
+            "label": "workflow: quick-check",
             "presentation": {
-                "reveal": "always",
-                "panel": "shared",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [],
+            "type": "shell"
         },
         {
-            "label": "workflow: full-check",
-            "type": "shell",
             "command": "echo 'Running full-check workflow...'",
-            "group": "none",
+            "dependsOn": [
+                "magex: format:fix",
+                "magex: lint",
+                "magex: test",
+                "magex: test:race"
+            ],
+            "dependsOrder": "sequence",
             "detail": "Comprehensive check: format → lint → test → test:race",
-            "dependsOn": ["magex: format:fix", "magex: lint", "magex: test", "magex: test:race"],
-            "dependsOrder": "sequence",
-            "problemMatcher": [],
+            "group": "none",
+            "label": "workflow: full-check",
             "presentation": {
-                "reveal": "always",
+                "clear": true,
+                "focus": false,
                 "panel": "shared",
-                "focus": false,
-                "clear": true
-            }
+                "reveal": "always"
+            },
+            "problemMatcher": [],
+            "type": "shell"
         },
         {
-            "label": "workflow: ci-local",
-            "type": "shell",
             "command": "echo 'Running CI workflow locally...'",
-            "group": "none",
-            "detail": "Simulate CI pipeline: lint:ci → test:ci → build",
-            "dependsOn": ["magex: lint:ci", "magex: test:ci", "magex: build"],
+            "dependsOn": [
+                "magex: lint:ci",
+                "magex: test:ci",
+                "magex: build"
+            ],
             "dependsOrder": "sequence",
-            "problemMatcher": [],
+            "detail": "Simulate CI pipeline: lint:ci → test:ci → build",
+            "group": "none",
+            "label": "workflow: ci-local",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [],
+            "type": "shell"
         },
         {
-            "label": "workflow: pre-release",
-            "type": "shell",
             "command": "echo 'Running pre-release checks...'",
-            "group": "none",
-            "detail": "Pre-release validation: full-check → deps:audit → bench:quick",
-            "dependsOn": ["workflow: full-check", "magex: deps:audit", "magex: bench:quick"],
+            "dependsOn": [
+                "workflow: full-check",
+                "magex: deps:audit",
+                "magex: bench:quick"
+            ],
             "dependsOrder": "sequence",
-            "problemMatcher": [],
+            "detail": "Pre-release validation: full-check → deps:audit → bench:quick",
+            "group": "none",
+            "label": "workflow: pre-release",
             "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
+                "clear": true,
                 "focus": false,
-                "clear": true
-            }
+                "panel": "dedicated",
+                "reveal": "always"
+            },
+            "problemMatcher": [],
+            "type": "shell"
         }
-    ]
+    ],
+    "version": "2.0.0"
 }

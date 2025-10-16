@@ -108,9 +108,6 @@ jobs:
     if: needs.check-provider.outputs.should-run-internal == 'true'
     runs-on: ${{ inputs.primary-runner }}
     timeout-minutes: 10
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     permissions:
       contents: write # Required: Push coverage data to gh-pages branch
       pages: write # Required: Deploy to GitHub Pages

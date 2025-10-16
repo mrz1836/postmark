@@ -111,20 +111,46 @@ jobs:
           runner-os: ${{ inputs.primary-runner }}
 
       # --------------------------------------------------------------------
-      # Run go vet with parallel execution
+      # Run go vet with sequential execution to avoid memory issues
       # --------------------------------------------------------------------
-      - name: 🔍 Go vet (parallel)
+      - name: 🔍 Go vet (sequential)
         run: |
-          echo "🚀 Running static analysis with go vet (parallel mode)..."
+          echo "🚀 Running static analysis with go vet (sequential mode)..."
           GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
 
+          # Run go vet on packages sequentially to reduce memory usage
           if [ -n "$GO_MODULE_DIR" ]; then
-            echo "🔧 Running magex vet from directory: $GO_MODULE_DIR"
-            (cd "$GO_MODULE_DIR" && magex vet)
+            echo "🔧 Running go vet from directory: $GO_MODULE_DIR"
+            cd "$GO_MODULE_DIR"
           else
-            echo "🔧 Running magex vet from repository root"
-            magex vet
+            echo "🔧 Running go vet from repository root"
           fi
+
+          # Get all packages and vet them one at a time
+          # Capture go list output and check for errors
+          if ! PACKAGES=$(go list ./... 2>&1 | grep -v /vendor/); then
+            echo "❌ go list command failed"
+            exit 1
+          fi
+
+          TOTAL=$(echo "$PACKAGES" | grep -c . || echo 0)
+          CURRENT=0
+
+          echo "📦 Found $TOTAL packages to vet"
+
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "⚠️ No packages found to vet"
+            exit 1
+          fi
+
+          for pkg in $PACKAGES; do
+            CURRENT=$((CURRENT + 1))
+            echo "[$CURRENT/$TOTAL] Vetting $pkg..."
+            if ! go vet "$pkg"; then
+              echo "❌ go vet failed on package: $pkg"
+              exit 1
+            fi
+          done
 
           echo "✅ Static analysis completed successfully"
 
@@ -138,7 +164,7 @@ jobs:
           echo "| Analysis Details | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **Tool** | go vet (Official Go Static Analyzer) |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Execution** | Project packages only |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Execution** | Sequential (memory-optimized) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Scope** | ./... (excludes dependencies) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Result** | ✅ No issues found |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

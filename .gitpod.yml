@@ -2,8 +2,7 @@
 # Uses magex for build automation and development tasks
 # This creates a one-click development environment for contributors
 
-image:
-  name: gitpod/workspace-go:latest
+image: gitpod/workspace-go:latest
 
 tasks:
   - name: setup-and-test
@@ -29,7 +28,7 @@ tasks:
       echo "🛠️  Available magex commands:"
       echo "  magex test       - Run all tests"
       echo "  magex lint       - Run linters"
-      echo "  magex format:fix - Format code"
+      echo "  magex format:fix - Format the code"
       echo "  magex build      - Build the project"
       echo "  magex help       - List all available commands"
       echo ""

@@ -32,6 +32,8 @@ ignore:
   - ".vscode/**"
   - "bin/**"
   - "examples/**"
+  - "mocks/**"
+  - "testing/**"
 
 # Parsers
 # --------------

@@ -8,7 +8,7 @@
             ],
             "settings": {
                 "editor.codeActionsOnSave": {
-                    "source.organizeImports": true
+                    "source.organizeImports": "explicit"
                 },
                 "editor.formatOnSave": true,
                 "go.lintTool": "golangci-lint",
@@ -30,6 +30,7 @@
     ],
     "name": "postmark dev container",
     "postCreateCommand": "magex lint && magex vet && magex test",
+    "postStartCommand": "go install github.com/mrz1836/mage-x/cmd/magex@latest",
     "remoteUser": "vscode",
     "runArgs": [
         "--cap-drop=ALL",
