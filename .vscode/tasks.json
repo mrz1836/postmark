@@ -675,7 +675,7 @@
             "type": "shell"
         },
         {
-            "command": "magex version:bump push=true bump=major branch=${input:targetBranch} confirm=${input:majorConfirm}",
+            "command": "magex version:bump push=true bump=major branch=${input:targetBranch} ${input:majorConfirm}",
             "detail": "Bump major version (X.0.0) and push to remote - requires confirmation",
             "group": "none",
             "label": "magex: version:bump:major",

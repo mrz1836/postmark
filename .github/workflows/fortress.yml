@@ -36,7 +36,8 @@ name: GoFortress
 on:
   push:
     branches:
-      - master # Main branch for production
+      - master # (Default) Main branch for production
+      - main # (Secondary) Main branch for production
     tags:
       - "v*" # Tags starting with 'v' (e.g., v1.0.0) trigger the workflow
   pull_request:
