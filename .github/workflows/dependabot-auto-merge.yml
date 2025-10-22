@@ -101,6 +101,7 @@ jobs:
         id: config
         env:
           ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+          GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
         run: |
           echo "📋 Extracting Dependabot configuration from environment..."
 
@@ -145,7 +146,7 @@ jobs:
           echo "  🏷️ Manual review label: $MANUAL_REVIEW_LABEL"
           echo "  🏷️ Auto-merge labels: $AUTO_MERGE_LABELS"
 
-          if [[ "$PREFERRED_TOKEN" == "GH_PAT_TOKEN" && -n "${{ secrets.GH_PAT_TOKEN }}" ]]; then
+          if [[ "$PREFERRED_TOKEN" == "GH_PAT_TOKEN" && -n "$GH_PAT_TOKEN" ]]; then
             echo "  🔑 Token: Personal Access Token (PAT)"
           else
             echo "  🔑 Token: Default GITHUB_TOKEN"

@@ -20,7 +20,7 @@ name: Sync Labels
 # --------------------------------------------------------------------
 on:
   push:
-    branches: [master]
+    branches: [master, main] # Trigger on pushes to both master and main branches
     paths:
       - .github/labels.yml # Runs *only* when this file changes
   workflow_dispatch: # Allow manual triggering
@@ -110,10 +110,11 @@ jobs:
       - name: 🔑 Log token configuration
         env:
           ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+          GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
         run: |
           PREFERRED_TOKEN=$(echo "$ENV_JSON" | jq -r '.PREFERRED_GITHUB_TOKEN')
 
-          if [[ "$PREFERRED_TOKEN" == "GH_PAT_TOKEN" && -n "${{ secrets.GH_PAT_TOKEN }}" ]]; then
+          if [[ "$PREFERRED_TOKEN" == "GH_PAT_TOKEN" && -n "$GH_PAT_TOKEN" ]]; then
             echo "✅ Using Personal Access Token (PAT) for label operations"
           else
             echo "✅ Using default GITHUB_TOKEN for label operations"
@@ -211,6 +212,7 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+          GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
         with:
           github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -220,7 +222,7 @@ jobs:
             const labelsCount = '${{ steps.parse_labels.outputs.labels_count }}';
             const envJson = JSON.parse(process.env.ENV_JSON);
             const preferredToken = envJson.PREFERRED_GITHUB_TOKEN;
-            const isUsingPAT = preferredToken === 'GH_PAT_TOKEN' && '${{ secrets.GH_PAT_TOKEN }}' !== '';
+            const isUsingPAT = preferredToken === 'GH_PAT_TOKEN' && process.env.GH_PAT_TOKEN !== '';
 
             console.log('🏷️ === Label Sync Configuration ===');
             console.log(`📊 Labels count: ${labelsCount}`);

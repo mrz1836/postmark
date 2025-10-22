@@ -12,7 +12,7 @@ on:
   schedule:
     - cron: "0 8 * * 1" # Every Monday at 08:00 UTC
   push:
-    branches: ["master"]
+    branches: ["master","main"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

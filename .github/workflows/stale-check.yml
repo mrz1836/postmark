@@ -84,10 +84,11 @@ jobs:
       - name: 🔑 Log token configuration
         env:
           ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+          GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
         run: |
           PREFERRED_TOKEN=$(echo "$ENV_JSON" | jq -r '.PREFERRED_GITHUB_TOKEN')
 
-          if [[ "$PREFERRED_TOKEN" == "GH_PAT_TOKEN" && -n "${{ secrets.GH_PAT_TOKEN }}" ]]; then
+          if [[ "$PREFERRED_TOKEN" == "GH_PAT_TOKEN" && -n "$GH_PAT_TOKEN" ]]; then
             echo "✅ Using Personal Access Token (PAT) for stale check operations"
           else
             echo "✅ Using default GITHUB_TOKEN for stale check operations"
@@ -153,6 +154,7 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+          GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
         with:
           github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -164,7 +166,7 @@ jobs:
             const daysBeforeClose = parseInt('${{ steps.config.outputs.days-before-close }}');
             const envJson = JSON.parse(process.env.ENV_JSON);
             const preferredToken = envJson.PREFERRED_GITHUB_TOKEN;
-            const isUsingPAT = preferredToken === 'GH_PAT_TOKEN' && '${{ secrets.GH_PAT_TOKEN }}' !== '';
+            const isUsingPAT = preferredToken === 'GH_PAT_TOKEN' && process.env.GH_PAT_TOKEN !== '';
 
             console.log('📋 === Processing Issues ===');
             console.log(`🏷️ Exempt labels: ${exemptLabels.join(', ')}`);
@@ -536,12 +538,13 @@ jobs:
       - name: 📊 Generate workflow summary
         env:
           ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+          GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
         run: |
           echo "🚀 Generating workflow summary..."
 
           # Determine which token was used
           PREFERRED_TOKEN=$(echo "$ENV_JSON" | jq -r '.PREFERRED_GITHUB_TOKEN')
-          if [[ "$PREFERRED_TOKEN" == "GH_PAT_TOKEN" && -n "${{ secrets.GH_PAT_TOKEN }}" ]]; then
+          if [[ "$PREFERRED_TOKEN" == "GH_PAT_TOKEN" && -n "$GH_PAT_TOKEN" ]]; then
             TOKEN_TYPE="🔑 Personal Access Token (PAT)"
           else
             TOKEN_TYPE="🔑 Default GITHUB_TOKEN"
