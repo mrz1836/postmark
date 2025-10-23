@@ -2,7 +2,7 @@
 
 > Labels serve as shared vocabulary for categorizing issues, pull requests, and discussions. Proper labeling improves triage, prioritization, automation, and clarity across the engineering lifecycle.
 
-Current labels are located in `.github/labels.yml` and automatically synced into GitHub upon updating the `master` branch.
+Current labels are located in `.github/labels.yml` and automatically synced into GitHub upon updating the `main/master` branch.
 
 <br><br>
 

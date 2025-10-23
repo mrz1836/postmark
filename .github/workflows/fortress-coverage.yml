@@ -365,12 +365,17 @@ jobs:
             --jq ".workflow_runs[] | select(.status == \"completed\" and (.conclusion == \"success\" or .conclusion == \"failure\") and .head_branch == \"$CURRENT_BRANCH\") | .id" \
             --paginate 2>/dev/null | head -8 || echo "")
 
-          # If no runs found for current branch and it's not master, also get master branch history
-          if [[ -z "$WORKFLOW_RUNS" ]] && [[ "$CURRENT_BRANCH" != "master" ]]; then
-            echo "ℹ️ No history found for branch '$CURRENT_BRANCH', checking master branch..."
-            WORKFLOW_RUNS=$(gh api repos/${{ github.repository }}/actions/runs \
-              --jq '.workflow_runs[] | select(.status == "completed" and (.conclusion == "success" or .conclusion == "failure") and .head_branch == "master") | .id' \
-              --paginate 2>/dev/null | head -5 || echo "")
+          # If no runs found for current branch and it's not the default branch, check default branch history
+          if [[ -z "$WORKFLOW_RUNS" ]]; then
+            # Detect the default branch dynamically
+            DEFAULT_BRANCH=$(gh api repos/${{ github.repository }} --jq '.default_branch' 2>/dev/null || echo "")
+
+            if [[ -n "$DEFAULT_BRANCH" ]] && [[ "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]]; then
+              echo "ℹ️ No history found for branch '$CURRENT_BRANCH', checking $DEFAULT_BRANCH branch..."
+              WORKFLOW_RUNS=$(gh api repos/${{ github.repository }}/actions/runs \
+                --jq ".workflow_runs[] | select(.status == \"completed\" and (.conclusion == \"success\" or .conclusion == \"failure\") and .head_branch == \"$DEFAULT_BRANCH\") | .id" \
+                --paginate 2>/dev/null | head -5 || echo "")
+            fi
           fi
 
           if [[ -z "$WORKFLOW_RUNS" ]]; then
@@ -922,7 +927,7 @@ jobs:
           GITHUB_SHA: ${{ inputs.commit-sha || github.event.pull_request.head.sha }}
           GITHUB_REF_NAME: ${{ inputs.branch-name || github.event.pull_request.head.ref }}
           GITHUB_HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref || 'master' }}
+          GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
           COVERAGE_PR_COMMENT_BEHAVIOR: ${{ env.COVERAGE_PR_COMMENT_BEHAVIOR }}
           COVERAGE_LOG_LEVEL: debug
         run: |
