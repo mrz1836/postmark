@@ -5,11 +5,7 @@ Security is a priority. We maintain a proactive stance to identify and fix vulne
 <br/>
 
 ## 🛠️ Supported & Maintained Versions
-
-| Version | Status               |
-|---------|----------------------|
-| 0.x.x   | ✅ Supported & Active |
-| 1.x.x   | ✅ Supported & Active |
+Any released version of **postmark** that is not marked as deprecated is actively supported and maintained.
 
 <br/>
 
@@ -70,7 +66,7 @@ We follow the [OpenSSF](https://openssf.org) best practices to ensure this repos
 
 To proactively protect this repository, we use several automated GitHub workflows:
 
-- **[CodeQL Analysis](./workflows/codeql-analysis.yml)**: Scans the codebase for security vulnerabilities and coding errors using GitHub's CodeQL engine on every push and pull request to the `master` branch.
-- **[OpenSSF Scorecard](./workflows/scorecard.yml)**: Periodically evaluates the repository against OpenSSF Scorecard checks, providing insights and recommendations for improving supply chain security and best practices.
+- **[CodeQL Analysis](./.github/workflows/codeql-analysis.yml)**: Scans the codebase for security vulnerabilities and coding errors using GitHub's CodeQL engine on every push and pull request to the `main/master` branch.
+- **[OpenSSF Scorecard](./.github/workflows/scorecard.yml)**: Periodically evaluates the repository against OpenSSF Scorecard checks, providing insights and recommendations for improving supply chain security and best practices.
 
-These workflows help us identify, remediate, and prevent security issues as early as possible in the development lifecycle. For more details, see the workflow files in the [`.github/workflows/`](https://github.com/mrz1836/postmark/tree/master/.github/workflows) directory.
+These workflows help us identify, remediate, and prevent security issues as early as possible in the development lifecycle. For more details, see the workflow files in the [`.github/workflows/`](.github/workflows) directory.

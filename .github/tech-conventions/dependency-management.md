@@ -42,7 +42,7 @@ brew install gitleaks
 gitleaks detect --source . --log-opts="--all" --verbose
 ```
 
-* Address critical advisories before merging changes into `master`
+* Address critical advisories before merging changes into `main/master`
 
 * Document any intentionally ignored vulnerabilities with clear justification and issue tracking
 

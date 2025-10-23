@@ -14,7 +14,11 @@
             "default": "master",
             "description": "Target branch for version bump",
             "id": "targetBranch",
-            "type": "promptString"
+            "options": [
+                "master",
+                "main"
+            ],
+            "type": "pickString"
         },
         {
             "default": "cancel",
