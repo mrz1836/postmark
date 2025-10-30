@@ -223,14 +223,14 @@ runs:
         if [ -n "$GO_MODULE_DIR" ]; then
           echo "🔧 Running build commands from directory: $GO_MODULE_DIR"
           # Use configured parallelism to avoid OOM on GitHub Actions runners
-          (cd "$GO_MODULE_DIR" && magex build:prebuild p="$PARALLEL_JOBS" strategy=smart)
+          (cd "$GO_MODULE_DIR" && magex build:prebuild p="$PARALLEL_JOBS" strategy="${MAGE_X_BUILD_STRATEGY:-smart}" batch_size="${MAGE_X_BUILD_BATCH_SIZE:-20}" batch_delay="${MAGE_X_BUILD_BATCH_DELAY_MS:-0}" exclude="${MAGE_X_BUILD_EXCLUDE_PATTERN:-}")
 
           echo "🏗️ Building stdlib for host platform..."
           (cd "$GO_MODULE_DIR" && magex install:stdlib)
         else
           echo "🔧 Running build commands from repository root"
           # Use configured parallelism to avoid OOM on GitHub Actions runners
-          magex build:prebuild p="$PARALLEL_JOBS" strategy=smart
+          magex build:prebuild p="$PARALLEL_JOBS" strategy="${MAGE_X_BUILD_STRATEGY:-smart}" batch_size="${MAGE_X_BUILD_BATCH_SIZE:-20}" batch_delay="${MAGE_X_BUILD_BATCH_DELAY_MS:-0}" exclude="${MAGE_X_BUILD_EXCLUDE_PATTERN:-}"
 
           echo "🏗️ Building stdlib for host platform..."
           magex install:stdlib

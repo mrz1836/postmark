@@ -204,12 +204,14 @@ jobs:
 
       # --------------------------------------------------------------------
       # Setup Go with caching and version management
+      # Uses GOVULNCHECK_GO_VERSION if set, otherwise falls back to primary version
+      # This allows govulncheck to use a newer Go version for accurate stdlib vulnerability detection
       # --------------------------------------------------------------------
       - name: 🏗️ Setup Go with Cache
         id: setup-govulncheck
         uses: ./.github/actions/setup-go-with-cache
         with:
-          go-version: ${{ inputs.go-primary-version }}
+          go-version: ${{ env.GOVULNCHECK_GO_VERSION || inputs.go-primary-version }}
           matrix-os: ${{ inputs.primary-runner }}
           go-primary-version: ${{ inputs.go-primary-version }}
           go-secondary-version: ${{ inputs.go-primary-version }}
@@ -231,6 +233,7 @@ jobs:
         with:
           magex-version: ${{ env.MAGE_X_VERSION }}
           runner-os: ${{ inputs.primary-runner }}
+          use-local: ${{ env.MAGE_X_USE_LOCAL }}
 
       # --------------------------------------------------------------------
       # Restore (and later save) a compact cache for the govulncheck binary
@@ -242,7 +245,7 @@ jobs:
         with:
           path: |
             ~/.cache/govulncheck-bin
-          key: ${{ inputs.primary-runner }}-govulncheck-${{ env.GOVULNCHECK_VERSION }}
+          key: ${{ inputs.primary-runner }}-govulncheck-${{ env.GOVULNCHECK_VERSION }}-go${{ env.GOVULNCHECK_GO_VERSION }}
 
       - name: 🛠️ Make cached govulncheck usable
         run: |

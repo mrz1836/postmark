@@ -62,6 +62,9 @@ on:
       coverage-provider:
         description: "Coverage service provider (internal or codecov)"
         value: ${{ jobs.setup-config.outputs.coverage-provider }}
+      cache-warming-enabled:
+        description: "Whether cache warming is enabled"
+        value: ${{ jobs.setup-config.outputs.cache-warming-enabled }}
       fuzz-testing-enabled:
         description: "Whether fuzz testing is enabled"
         value: ${{ jobs.setup-config.outputs.fuzz-testing-enabled }}
@@ -179,6 +182,7 @@ jobs:
       benchmark-matrix: ${{ steps.matrix.outputs.matrix }}
       code-coverage-enabled: ${{ steps.config.outputs.code-coverage-enabled }}
       coverage-provider: ${{ steps.config.outputs.coverage-provider }}
+      cache-warming-enabled: ${{ steps.config.outputs.cache-warming-enabled }}
       fuzz-testing-enabled: ${{ steps.config.outputs.fuzz-testing-enabled }}
       go-primary-version: ${{ steps.config.outputs.go-primary-version }}
       go-secondary-version: ${{ steps.config.outputs.go-secondary-version }}
@@ -421,6 +425,7 @@ jobs:
 
           # Feature flags
           echo "benchmarks-enabled=${{ env.ENABLE_BENCHMARKS }}" >> $GITHUB_OUTPUT
+          echo "cache-warming-enabled=${{ env.ENABLE_CACHE_WARMING }}" >> $GITHUB_OUTPUT
           echo "code-coverage-enabled=${{ env.ENABLE_CODE_COVERAGE }}" >> $GITHUB_OUTPUT
           echo "coverage-provider=${{ env.GO_COVERAGE_PROVIDER }}" >> $GITHUB_OUTPUT
 
@@ -592,6 +597,7 @@ jobs:
           echo "| Feature | Status | Impact |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|--------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| **Benchmarks** | $([ "${{ env.ENABLE_BENCHMARKS }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Performance benchmarks will $([ "${{ env.ENABLE_BENCHMARKS }}" == "true" ] && echo "run in **${{ env.BENCHMARK_MODE }}** mode" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cache Warming** | $([ "${{ env.ENABLE_CACHE_WARMING }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Go module and build caches will $([ "${{ env.ENABLE_CACHE_WARMING }}" == "true" ] && echo "be pre-warmed for faster test execution" || echo "not be pre-warmed (saves memory)") |" >> $GITHUB_STEP_SUMMARY
           echo "| **Code Coverage** | $([ "${{ env.ENABLE_CODE_COVERAGE }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Coverage will $([ "${{ env.ENABLE_CODE_COVERAGE }}" == "true" ] && echo "use $([ "${{ env.GO_COVERAGE_PROVIDER }}" == "codecov" ] && echo "**Codecov**" || echo "**go-coverage**") (${{ env.GO_COVERAGE_THRESHOLD }}% threshold)" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
           echo "| **Fuzz Testing** | $([ "${{ env.ENABLE_FUZZ_TESTING }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Fuzz tests will $([ "${{ env.ENABLE_FUZZ_TESTING }}" == "true" ] && echo "run in parallel job on Linux with primary Go version" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
           echo "| **Gitleaks (Secret Scan)** | $([ "${{ env.ENABLE_SECURITY_SCAN_GITLEAKS }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Gitleaks will $([ "${{ env.ENABLE_SECURITY_SCAN_GITLEAKS }}" == "true" ] && echo "scan for leaked secrets" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY

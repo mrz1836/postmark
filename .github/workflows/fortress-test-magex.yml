@@ -47,9 +47,18 @@ jobs:
           done
 
       # --------------------------------------------------------------------
-      # Checkout code (sparse checkout)
+      # Checkout code (conditional: full or sparse based on MAGE_X_USE_LOCAL)
       # --------------------------------------------------------------------
-      - name: 📥 Checkout (sparse)
+      # Full checkout when using local build (needs cmd/magex directory)
+      - name: 📥 Checkout (full - local build)
+        if: env.MAGE_X_USE_LOCAL == 'true'
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+
+      # Sparse checkout when using remote build (optimization)
+      - name: 📥 Checkout (sparse - remote build)
+        if: env.MAGE_X_USE_LOCAL == 'false'
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           fetch-depth: 0 # Required for sparse checkout
@@ -69,6 +78,7 @@ jobs:
         with:
           magex-version: ${{ env.MAGE_X_VERSION }}
           runner-os: ${{ inputs.primary-runner }}
+          use-local: ${{ env.MAGE_X_USE_LOCAL }}
 
       # --------------------------------------------------------------------
       # Validate MAGE-X version matches requested version
@@ -81,29 +91,46 @@ jobs:
           # Get the actual version from the binary
           ACTUAL_VERSION=$(magex --version 2>/dev/null | grep -E '^\s+Version:' | awk '{print $2}' || echo "unknown")
           REQUESTED_VERSION="${{ env.MAGE_X_VERSION }}"
+          USE_LOCAL="${{ env.MAGE_X_USE_LOCAL }}"
 
+          echo "📋 Build mode: $([ "$USE_LOCAL" == "true" ] && echo "local (development)" || echo "remote (release)")"
           echo "📋 Requested version: $REQUESTED_VERSION"
           echo "📋 Actual version: $ACTUAL_VERSION"
-
-          # Strip 'v' prefix from both versions for comparison
-          REQUESTED_CLEAN=$(echo "$REQUESTED_VERSION" | sed 's/^v//')
-          ACTUAL_CLEAN=$(echo "$ACTUAL_VERSION" | sed 's/^v//')
 
           if [[ "$ACTUAL_VERSION" == "unknown" ]]; then
             echo "❌ Failed: Could not determine magex version from binary"
             echo "❌ This indicates a problem with version detection or binary corruption"
             echo "validation-result=failed" >> $GITHUB_OUTPUT
             exit 1
-          elif [[ "$ACTUAL_CLEAN" == "$REQUESTED_CLEAN" ]]; then
-            echo "✅ Version validation passed: $ACTUAL_VERSION matches $REQUESTED_VERSION"
-            echo "validation-result=success" >> $GITHUB_OUTPUT
+          fi
+
+          # Local builds should have "dev" version
+          if [[ "$USE_LOCAL" == "true" ]]; then
+            if [[ "$ACTUAL_VERSION" == "dev" ]]; then
+              echo "✅ Version validation passed: local build has expected 'dev' version"
+              echo "validation-result=success" >> $GITHUB_OUTPUT
+            else
+              echo "⚠️  Warning: Local build has version '$ACTUAL_VERSION', expected 'dev'"
+              echo "⚠️  This might indicate the version file hasn't been updated"
+              echo "✅ Accepting anyway since this is a local development build"
+              echo "validation-result=success-with-warning" >> $GITHUB_OUTPUT
+            fi
           else
-            echo "❌ Version mismatch detected!"
-            echo "❌ Requested: $REQUESTED_VERSION (clean: $REQUESTED_CLEAN)"
-            echo "❌ Actual: $ACTUAL_VERSION (clean: $ACTUAL_CLEAN)"
-            echo "❌ This indicates a cache corruption or installation failure"
-            echo "validation-result=failed" >> $GITHUB_OUTPUT
-            exit 1
+            # Remote builds should match the requested version
+            REQUESTED_CLEAN=$(echo "$REQUESTED_VERSION" | sed 's/^v//')
+            ACTUAL_CLEAN=$(echo "$ACTUAL_VERSION" | sed 's/^v//')
+
+            if [[ "$ACTUAL_CLEAN" == "$REQUESTED_CLEAN" ]]; then
+              echo "✅ Version validation passed: $ACTUAL_VERSION matches $REQUESTED_VERSION"
+              echo "validation-result=success" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Version mismatch detected!"
+              echo "❌ Requested: $REQUESTED_VERSION (clean: $REQUESTED_CLEAN)"
+              echo "❌ Actual: $ACTUAL_VERSION (clean: $ACTUAL_CLEAN)"
+              echo "❌ This indicates a cache corruption or installation failure"
+              echo "validation-result=failed" >> $GITHUB_OUTPUT
+              exit 1
+            fi
           fi
 
       # --------------------------------------------------------------------
