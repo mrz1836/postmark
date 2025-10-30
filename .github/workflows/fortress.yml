@@ -126,74 +126,33 @@ jobs:
   # Warm Go Caches
   # ----------------------------------------------------------------------------------
   warm-cache:
-    name: 💾 Warm Cache (${{ matrix.name }})
+    name: 💾 Warm Cache
     needs: [load-env, setup, test-magex]
+    if: needs.setup.outputs.cache-warming-enabled == 'true'
     permissions:
       contents: read # Read repository content for cache warming
-    strategy:
-      fail-fast: true
-      matrix: ${{ fromJSON(needs.setup.outputs.warm-cache-matrix) }}
-    runs-on: ${{ matrix.os }}
-    steps:
-      # --------------------------------------------------------------------
-      # Parse environment variables
-      # --------------------------------------------------------------------
-      - name: 🔧 Parse environment variables
-        env:
-          ENV_JSON: ${{ needs.load-env.outputs.env-json }}
-        run: |
-          echo "📋 Setting environment variables..."
-          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
-            echo "$key=$value" >> $GITHUB_ENV
-          done
-
-      # --------------------------------------------------------------------
-      # Checkout code to access local action
-      # --------------------------------------------------------------------
-      - name: 📥 Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          sparse-checkout: |
-            .github/actions/warm-cache
-            .github/actions/warm-redis-cache
-            .github/actions/cache-redis-image
-            .github/.env.base
-            go.mod
-            ${{ env.GO_SUM_FILE }}
-            .mage.yaml
-
-      # --------------------------------------------------------------------
-      # Extract verbose flag from env-json
-      # --------------------------------------------------------------------
-      - name: 🔁 Extract ENABLE_VERBOSE
-        id: extract
-        run: |
-          echo "enable_verbose=$(echo '${{ needs.load-env.outputs.env-json }}' | jq -r '.ENABLE_VERBOSE_TEST_OUTPUT')" >> "$GITHUB_OUTPUT"
-
-      # --------------------------------------------------------------------
-      # Warm the Go and Redis caches using local action
-      # --------------------------------------------------------------------
-      - name: 🔥 Warm Go and Redis Caches
-        uses: ./.github/actions/warm-cache # Might not resolve as it's a composite action
-        with:
-          go-version: ${{ matrix.go-version }}
-          matrix-os: ${{ matrix.os }}
-          matrix-name: ${{ matrix.name }}
-          enable-verbose: ${{ steps.extract.outputs.enable_verbose }}
-          go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
-          go-secondary-version: ${{ needs.setup.outputs.go-secondary-version }}
-          env-json: ${{ needs.load-env.outputs.env-json }}
-          redis-enabled: ${{ needs.setup.outputs.redis-enabled }}
-          redis-versions: ${{ needs.setup.outputs.redis-version }}
-          redis-cache-force-pull: ${{ needs.setup.outputs.redis-cache-force-pull }}
-          go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
+    uses: ./.github/workflows/fortress-warm-cache.yml
+    with:
+      env-json: ${{ needs.load-env.outputs.env-json }}
+      warm-cache-matrix: ${{ needs.setup.outputs.warm-cache-matrix }}
+      go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
+      go-secondary-version: ${{ needs.setup.outputs.go-secondary-version }}
+      redis-enabled: ${{ needs.setup.outputs.redis-enabled }}
+      redis-version: ${{ needs.setup.outputs.redis-version }}
+      redis-cache-force-pull: ${{ needs.setup.outputs.redis-cache-force-pull }}
+      go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
   # ----------------------------------------------------------------------------------
   # Security Scans
   # ----------------------------------------------------------------------------------
   security:
     name: 🔒 Security Scans
-    needs: [load-env, setup, warm-cache, test-magex]
-    if: needs.setup.outputs.security-scans-enabled == 'true'
+    needs: [load-env, setup, test-magex, warm-cache]
+    if: |
+      !cancelled() &&
+      needs.setup.result == 'success' &&
+      needs.test-magex.result == 'success' &&
+      (needs.warm-cache.result == 'success' || needs.warm-cache.result == 'skipped') &&
+      needs.setup.outputs.security-scans-enabled == 'true'
     permissions:
       contents: read # Read repository content for security scanning
     uses: ./.github/workflows/fortress-security-scans.yml
@@ -215,7 +174,12 @@ jobs:
   # ----------------------------------------------------------------------------------
   code-quality:
     name: 📊 Code Quality
-    needs: [load-env, setup, warm-cache, test-magex]
+    needs: [load-env, setup, test-magex, warm-cache]
+    if: |
+      !cancelled() &&
+      needs.setup.result == 'success' &&
+      needs.test-magex.result == 'success' &&
+      (needs.warm-cache.result == 'success' || needs.warm-cache.result == 'skipped')
     permissions:
       contents: read # Read repository content for code quality checks
     uses: ./.github/workflows/fortress-code-quality.yml
@@ -234,8 +198,13 @@ jobs:
   # ----------------------------------------------------------------------------------
   pre-commit:
     name: 🪝 Pre-commit Checks
-    needs: [load-env, setup, warm-cache, test-magex]
-    if: needs.setup.outputs.pre-commit-enabled == 'true'
+    needs: [load-env, setup, test-magex, warm-cache]
+    if: |
+      !cancelled() &&
+      needs.setup.result == 'success' &&
+      needs.test-magex.result == 'success' &&
+      (needs.warm-cache.result == 'success' || needs.warm-cache.result == 'skipped') &&
+      needs.setup.outputs.pre-commit-enabled == 'true'
     permissions:
       contents: read # Read repository content for pre-commit checks
     uses: ./.github/workflows/fortress-pre-commit.yml
@@ -250,7 +219,12 @@ jobs:
   # ----------------------------------------------------------------------------------
   test-suite:
     name: 🧪 Test Suite
-    needs: [load-env, setup, warm-cache, test-magex]
+    needs: [load-env, setup, test-magex, warm-cache]
+    if: |
+      !cancelled() &&
+      needs.setup.result == 'success' &&
+      needs.test-magex.result == 'success' &&
+      (needs.warm-cache.result == 'success' || needs.warm-cache.result == 'skipped')
     permissions:
       contents: write # Write repository content and push to gh-pages branch for test execution
       pull-requests: write # Required: Coverage workflow needs to create PR comments
@@ -286,8 +260,13 @@ jobs:
   # ----------------------------------------------------------------------------------
   benchmarks:
     name: 🏃 Benchmarks
-    needs: [load-env, setup, warm-cache, test-magex]
-    if: needs.setup.outputs.benchmarks-enabled == 'true'
+    needs: [load-env, setup, test-magex, warm-cache]
+    if: |
+      !cancelled() &&
+      needs.setup.result == 'success' &&
+      needs.test-magex.result == 'success' &&
+      (needs.warm-cache.result == 'success' || needs.warm-cache.result == 'skipped') &&
+      needs.setup.outputs.benchmarks-enabled == 'true'
     permissions:
       contents: read # Read repository content for benchmarking
     uses: ./.github/workflows/fortress-benchmarks.yml
@@ -315,7 +294,7 @@ jobs:
   status-check:
     name: 🎯 All Tests Passed
     if: ${{ always() }}
-    needs: [setup, test-magex, security, code-quality, pre-commit, test-suite, benchmarks]
+    needs: [setup, test-magex, warm-cache, security, code-quality, pre-commit, test-suite, benchmarks]
     permissions:
       contents: read # Read repository content for status checking
     runs-on: ${{ needs.setup.outputs.primary-runner }}
@@ -332,6 +311,7 @@ jobs:
             echo "|-----------|--------|--------|"
             echo "| 🎯 Setup | ${{ needs.setup.result }} | Required |"
             echo "| 🪄 MAGE-X | ${{ needs.test-magex.result }} | Required |"
+            echo "| 💾 Warm Cache | ${{ needs.warm-cache.result }} | ${{ needs.setup.outputs.cache-warming-enabled == 'true' && 'Optional' || 'Skipped' }} |"
             echo "| 🔒 Security | ${{ needs.security.result }} | Required |"
             echo "| 📊 Code Quality | ${{ needs.code-quality.result }} | Required |"
             echo "| 🪝 Pre-commit | ${{ needs.pre-commit.result }} | ${{ needs.setup.outputs.pre-commit-enabled == 'true' && 'Required' || 'Skipped' }} |"

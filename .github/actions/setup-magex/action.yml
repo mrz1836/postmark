@@ -31,6 +31,10 @@ inputs:
   runner-os:
     description: "Runner OS for cache key (e.g., ubuntu-latest, windows-latest)"
     required: true
+  use-local:
+    description: "Build from local source instead of downloading release"
+    required: false
+    default: 'false'
 
 outputs:
   cache-hit:
@@ -48,6 +52,7 @@ runs:
     # --------------------------------------------------------------------
     - name: 💾 Restore magex binary cache
       id: magex-cache
+      if: inputs.use-local != 'true'
       uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
       with:
         path: |
@@ -55,30 +60,57 @@ runs:
         key: ${{ inputs.runner-os }}-magex-${{ inputs.magex-version }}
 
     # --------------------------------------------------------------------
-    # Make cached magex usable by copying to GOPATH/bin and adding to PATH
+    # Install cached binary to PATH when remote cache hits
     # --------------------------------------------------------------------
-    - name: 🛠️ Make cached magex usable
+    - name: 📦 Install cached MAGE-X to PATH (remote mode)
+      if: inputs.use-local != 'true' && steps.magex-cache.outputs.cache-hit == 'true'
       shell: bash
       run: |
-        set -euo pipefail
-        BIN_DIR="$HOME/.cache/magex-bin"
-        MAGEX_BIN="$BIN_DIR/magex"
+        echo "📦 Installing cached MAGE-X binary to PATH..."
 
-        # If we restored a cache, copy/link it into GOPATH/bin.
-        if [[ -f "$MAGEX_BIN" ]]; then
-          echo "✅ Using cached magex binary"
-          mkdir -p "$(go env GOPATH)/bin"
-          cp "$MAGEX_BIN" "$(go env GOPATH)/bin/"
-        fi
-
-        # Make sure the binary location is on PATH for *all* subsequent steps.
+        # Copy cached binary to GOPATH and add to PATH
+        mkdir -p "$(go env GOPATH)/bin"
+        cp ~/.cache/magex-bin/magex "$(go env GOPATH)/bin/magex"
+        chmod +x "$(go env GOPATH)/bin/magex"
         echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
+        echo "✅ Cached MAGE-X binary installed to PATH"
+
     # --------------------------------------------------------------------
-    # Detect platform and download MAGE-X binary *only* when the cache was empty.
+    # Restore local build cache (commit-specific for local builds)
     # --------------------------------------------------------------------
-    - name: ✅ Download MAGE-X binary (cache miss)
-      if: steps.magex-cache.outputs.cache-hit != 'true'
+    - name: 💾 Restore magex binary cache (local)
+      id: magex-local-cache
+      if: inputs.use-local == 'true'
+      uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+      with:
+        path: |
+          ~/.cache/magex-local
+        key: ${{ inputs.runner-os }}-local-magex-${{ github.sha }}
+        # No restore-keys: local builds are commit-specific only to prevent stale cache issues
+
+    # --------------------------------------------------------------------
+    # Install cached binary to PATH when local cache hits
+    # --------------------------------------------------------------------
+    - name: 📦 Install cached MAGE-X to PATH (local mode)
+      if: inputs.use-local == 'true' && steps.magex-local-cache.outputs.cache-hit == 'true'
+      shell: bash
+      run: |
+        echo "📦 Installing cached MAGE-X binary to PATH..."
+
+        # Copy cached binary to GOPATH and add to PATH
+        mkdir -p "$(go env GOPATH)/bin"
+        cp ~/.cache/magex-local/magex "$(go env GOPATH)/bin/magex"
+        chmod +x "$(go env GOPATH)/bin/magex"
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+        echo "✅ Cached MAGE-X binary installed to PATH"
+
+    # --------------------------------------------------------------------
+    # Download MAGE-X binary for remote mode when cache misses
+    # --------------------------------------------------------------------
+    - name: ✅ Download MAGE-X binary (remote mode only)
+      if: inputs.use-local != 'true' && steps.magex-cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
         echo "⬇️ Cache miss – downloading MAGE-X binary..."
@@ -142,20 +174,59 @@ runs:
 
         echo "✅ Found magex binary at: $MAGEX_BINARY"
 
-        # Make it executable and copy to GOPATH/bin
+        # Make it executable and copy to cache directory
         chmod +x "$MAGEX_BINARY"
-        mkdir -p "$(go env GOPATH)/bin"
-        cp "$MAGEX_BINARY" "$(go env GOPATH)/bin/magex"
-
-        # Copy to cache directory for future runs
         mkdir -p ~/.cache/magex-bin
         cp "$MAGEX_BINARY" ~/.cache/magex-bin/magex
+
+        # Copy to GOPATH and add to PATH for subsequent steps
+        mkdir -p "$(go env GOPATH)/bin"
+        cp ~/.cache/magex-bin/magex "$(go env GOPATH)/bin/magex"
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
         # Cleanup
         cd /
         rm -rf "$TEMP_DIR"
 
         echo "✅ MAGE-X binary downloaded and cached"
+
+    # --------------------------------------------------------------------
+    # Build MAGE-X from local source (when use-local is true)
+    # --------------------------------------------------------------------
+    - name: 🔨 Build MAGE-X from local source
+      id: build-local
+      if: inputs.use-local == 'true' && steps.magex-local-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "📦 Building local development version of MAGE-X"
+        cd "$GITHUB_WORKSPACE"
+
+        # Check if source directory exists (we're in mage-x repo with full checkout)
+        if [ ! -d "./cmd/magex" ]; then
+          echo "❌ ERROR: ./cmd/magex directory not found"
+          echo "❌ use-local=true requires mage-x repository with full checkout"
+          echo "❌ Either set use-local=false or ensure full repository checkout"
+          exit 1
+        fi
+
+        # Build from local source
+        echo "🔨 Building magex from ./cmd/magex..."
+        go build -v -o /tmp/magex ./cmd/magex
+        chmod +x /tmp/magex
+
+        # Show version for debugging
+        /tmp/magex --version || echo "⚠️  Version check skipped"
+
+        # Copy to local cache for future runs
+        mkdir -p ~/.cache/magex-local
+        cp /tmp/magex ~/.cache/magex-local/magex
+
+        # Add magex to PATH for subsequent steps
+        mkdir -p "$(go env GOPATH)/bin"
+        cp ~/.cache/magex-local/magex "$(go env GOPATH)/bin/magex"
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+        echo "✅ MAGE-X built from local source and cached"
 
     # --------------------------------------------------------------------
     # Verify MAGE-X installation and set outputs
@@ -167,19 +238,29 @@ runs:
         echo "🔍 Verifying MAGE-X installation..."
 
         # Test that magex is available and working
-        if command -v magex >/dev/null 2>&1; then
-          MAGEX_VERSION=$(magex --version 2>/dev/null | grep -E '^\s+Version:' | awk '{print $2}' || echo "unknown")
-          echo "✅ MAGE-X is available: $MAGEX_VERSION"
-
-          # Determine installation method
-          if [[ "${{ steps.magex-cache.outputs.cache-hit }}" == "true" ]]; then
-            echo "method=cached" >> $GITHUB_OUTPUT
-            echo "📋 Installation method: Restored from cache"
-          else
-            echo "method=fresh" >> $GITHUB_OUTPUT
-            echo "📋 Installation method: Fresh binary download"
-          fi
-        else
+        if ! command -v magex >/dev/null 2>&1; then
           echo "❌ ERROR: MAGE-X is not available in PATH" >&2
           exit 1
+        fi
+
+        MAGEX_VERSION=$(magex --version 2>/dev/null | grep -E '^\s+Version:' | awk '{print $2}' || echo "unknown")
+        echo "✅ MAGE-X $MAGEX_VERSION is available"
+
+        # Determine installation method based on mode and cache status
+        if [[ "${{ inputs.use-local }}" == "true" ]]; then
+          if [[ "${{ steps.magex-local-cache.outputs.cache-hit }}" == "true" ]]; then
+            echo "method=cached" >> $GITHUB_OUTPUT
+            echo "📋 Installation method: Cached (local build)"
+          else
+            echo "method=fresh-build" >> $GITHUB_OUTPUT
+            echo "📋 Installation method: Fresh build from source"
+          fi
+        else
+          if [[ "${{ steps.magex-cache.outputs.cache-hit }}" == "true" ]]; then
+            echo "method=cached" >> $GITHUB_OUTPUT
+            echo "📋 Installation method: Cached (remote download)"
+          else
+            echo "method=fresh-download" >> $GITHUB_OUTPUT
+            echo "📋 Installation method: Fresh download from releases"
+          fi
         fi

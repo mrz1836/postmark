@@ -164,6 +164,7 @@ jobs:
         with:
           magex-version: ${{ env.MAGE_X_VERSION }}
           runner-os: ${{ matrix.os }}
+          use-local: ${{ env.MAGE_X_USE_LOCAL }}
 
       # --------------------------------------------------------------------
       # Start test timer

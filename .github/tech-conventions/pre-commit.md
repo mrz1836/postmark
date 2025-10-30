@@ -392,7 +392,7 @@ go-pre-commit install
 go install github.com/mrz1836/go-pre-commit/cmd/go-pre-commit@latest
 
 # Update tool versions in .env.base
-GO_PRE_COMMIT_GOLANGCI_LINT_VERSION=v2.5.0
+GO_PRE_COMMIT_GOLANGCI_LINT_VERSION=v2.6.0
 GO_PRE_COMMIT_FUMPT_VERSION=v0.9.0
 ```
 
