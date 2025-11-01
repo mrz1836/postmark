@@ -85,6 +85,16 @@ on:
         required: false
         type: string
         default: "unknown"
+      is-fork-pr:
+        description: "Whether this is a fork PR"
+        required: false
+        type: string
+        default: "false"
+      fork-security-mode:
+        description: "Security mode for fork PRs"
+        required: false
+        type: string
+        default: "full"
 
 # Security: Restrictive default permissions with job-level overrides for least privilege access
 permissions:

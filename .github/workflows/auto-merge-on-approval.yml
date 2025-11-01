@@ -100,7 +100,6 @@ jobs:
         id: config
         env:
           ENV_JSON: ${{ needs.load-env.outputs.env-json }}
-          GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
         run: |
           echo "📋 Extracting auto-merge configuration from environment..."
 
@@ -116,6 +115,8 @@ jobs:
           COMMENT_ON_DISABLE=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_COMMENT_ON_DISABLE')
           LABELS_TO_ADD=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_LABELS_TO_ADD')
           SKIP_BOT_PRS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_BOT_PRS')
+          SKIP_FORK_PRS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_FORK_PRS')
+          COMMENT_ON_FORK_SKIP=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_COMMENT_ON_FORK_SKIP')
           PREFERRED_TOKEN=$(echo "$ENV_JSON" | jq -r '.PREFERRED_GITHUB_TOKEN')
 
           # Validate required configuration
@@ -135,6 +136,8 @@ jobs:
           echo "COMMENT_ON_DISABLE=$COMMENT_ON_DISABLE" >> $GITHUB_ENV
           echo "LABELS_TO_ADD=$LABELS_TO_ADD" >> $GITHUB_ENV
           echo "SKIP_BOT_PRS=$SKIP_BOT_PRS" >> $GITHUB_ENV
+          echo "SKIP_FORK_PRS=$SKIP_FORK_PRS" >> $GITHUB_ENV
+          echo "COMMENT_ON_FORK_SKIP=$COMMENT_ON_FORK_SKIP" >> $GITHUB_ENV
 
           # Determine default merge type
           DEFAULT_MERGE_TYPE=$(echo "$MERGE_TYPES" | cut -d',' -f1)
@@ -156,12 +159,9 @@ jobs:
           echo "  💬 Comment on disable: $COMMENT_ON_DISABLE"
           echo "  🏷️ Labels to add: $LABELS_TO_ADD"
           echo "  🤖 Skip bot PRs: $SKIP_BOT_PRS"
-
-          if [[ "$PREFERRED_TOKEN" == "GH_PAT_TOKEN" && -n "$GH_PAT_TOKEN" ]]; then
-            echo "  🔑 Token: Personal Access Token (PAT)"
-          else
-            echo "  🔑 Token: Default GITHUB_TOKEN"
-          fi
+          echo "  🍴 Skip fork PRs: $SKIP_FORK_PRS"
+          echo "  💬 Comment on fork skip: $COMMENT_ON_FORK_SKIP"
+          echo "  🔑 Token: Selected via github-script action"
 
       # --------------------------------------------------------------------
       # Process the PR for auto-merge
@@ -196,6 +196,43 @@ jobs:
               console.log('🤖 Skipping bot PR (handled by separate workflow)');
               core.setOutput('action', 'skip-bot');
               return;
+            }
+
+            // ————————————————————————————————————————————————————————————————
+            // Check if we should skip fork PRs
+            // ————————————————————————————————————————————————————————————————
+
+            // Handle edge case: fork repository deleted/inaccessible (pr.head.repo is null)
+            if (!pr.head.repo) {
+              console.log('⚠️  PR head repository is null (fork may have been deleted)');
+              if (process.env.SKIP_FORK_PRS === 'true') {
+                console.log('🍴 Skipping PR with deleted fork source (security policy)');
+                core.setOutput('action', 'skip-deleted-fork');
+                return;
+              }
+              // If not skipping forks, log and continue (will be treated as same-repo PR)
+              console.log('⚠️  Continuing with auto-merge processing (null repo treated as same-repo)');
+            } else {
+              // Safe to access pr.head.repo.full_name now
+              const headRepoFullName = pr.head.repo.full_name;
+              const baseRepoFullName = `${owner}/${repo}`;
+              const isForkPR = headRepoFullName !== baseRepoFullName;
+
+              if (isForkPR && process.env.SKIP_FORK_PRS === 'true') {
+                console.log('🍴 Skipping fork PR (security policy: fork PRs are not auto-merged)');
+                console.log(`   Fork source: ${headRepoFullName}`);
+                console.log(`   Base repository: ${baseRepoFullName}`);
+                console.log('   Security reason: Fork PRs require manual maintainer review before merge');
+
+                // Note: Comments are not posted to fork PRs due to read-only GITHUB_TOKEN permissions
+                // Fork PR handling is already managed by pull-request-management-fork.yml workflow
+                if (process.env.COMMENT_ON_FORK_SKIP === 'true') {
+                  console.log('   ℹ️  Comment posting skipped for fork PR (handled by fork PR workflow)');
+                }
+
+                core.setOutput('action', 'skip-fork');
+                return;
+              }
             }
 
             // ————————————————————————————————————————————————————————————————
@@ -287,7 +324,7 @@ jobs:
                 execSync(`gh pr merge --disable-auto "${pr.html_url}"`, {
                   env: {
                     ...process.env,
-                    GH_TOKEN: '${{ secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}'
+                    GH_TOKEN: process.env.GITHUB_TOKEN
                   },
                   stdio: 'inherit'
                 });
@@ -304,8 +341,17 @@ jobs:
                 }
 
                 core.setOutput('action', 'disabled-changes-requested');
-              } catch (error) {
-                console.log('ℹ️ Could not disable auto-merge (may not have been enabled)');
+              } catch (disableError) {
+                // Differentiate between "not enabled" and actual failures
+                if (disableError.message && (
+                  disableError.message.includes('not enabled') ||
+                  disableError.message.includes('auto-merge is not enabled')
+                )) {
+                  console.log('ℹ️  Auto-merge was not enabled, no action needed');
+                } else {
+                  console.error(`❌ Failed to disable auto-merge: ${disableError.message}`);
+                  // Don't fail workflow, but log the error properly
+                }
               }
               return;
             }
@@ -342,15 +388,29 @@ jobs:
 
               console.log(`🚀 Enabling auto-merge with command: ${mergeCommand}`);
 
-              execSync(mergeCommand, {
-                env: {
-                  ...process.env,
-                  GH_TOKEN: '${{ secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}'
-                },
-                stdio: 'inherit'
-              });
+              try {
+                execSync(mergeCommand, {
+                  env: {
+                    ...process.env,
+                    GH_TOKEN: process.env.GITHUB_TOKEN
+                  },
+                  stdio: 'inherit'
+                });
 
-              console.log('✅ Auto-merge enabled! PR will merge when all status checks pass.');
+                console.log('✅ Auto-merge enabled! PR will merge when all status checks pass.');
+              } catch (enableError) {
+                // Handle race condition: another workflow run may have enabled auto-merge
+                if (enableError.message && (
+                  enableError.message.includes('already enabled') ||
+                  enableError.message.includes('auto-merge is already enabled')
+                )) {
+                  console.log('ℹ️  Auto-merge already enabled by another workflow run');
+                  core.setOutput('action', 'already-enabled');
+                  return;
+                }
+                // Re-throw other errors to be caught by outer catch block
+                throw enableError;
+              }
 
               // Add comment if configured
               if (process.env.COMMENT_ON_ENABLE === 'true') {
@@ -445,6 +505,12 @@ jobs:
             "skip-bot")
               ACTION_DESC="🤖 Skipped (bot PR)"
               ;;
+            "skip-fork")
+              ACTION_DESC="🍴 Skipped (fork PR - security policy)"
+              ;;
+            "skip-deleted-fork")
+              ACTION_DESC="🍴 Skipped (deleted fork PR)"
+              ;;
             "skip-draft")
               ACTION_DESC="📝 Skipped (draft PR)"
               ;;
@@ -477,6 +543,7 @@ jobs:
           SKIP_DRAFT=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_DRAFT')
           SKIP_WIP=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_WIP')
           SKIP_BOT_PRS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_BOT_PRS')
+          SKIP_FORK_PRS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_FORK_PRS')
 
           echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
@@ -486,6 +553,7 @@ jobs:
           echo "| Skip draft PRs | $SKIP_DRAFT |" >> $GITHUB_STEP_SUMMARY
           echo "| Skip WIP PRs | $SKIP_WIP |" >> $GITHUB_STEP_SUMMARY
           echo "| Skip bot PRs | $SKIP_BOT_PRS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Skip fork PRs | $SKIP_FORK_PRS |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "---" >> $GITHUB_STEP_SUMMARY
           echo "🤖 _Automated by GitHub Actions_" >> $GITHUB_STEP_SUMMARY
@@ -508,6 +576,9 @@ jobs:
               ;;
             disabled-changes-requested)
               echo "🛑 Action: Auto-merge disabled due to changes requested"
+              ;;
+            skip-fork)
+              echo "🍴 Action: Skipped - Fork PR (security policy)"
               ;;
             skip-*)
               echo "⏭️ Action: Skipped - $ACTION"

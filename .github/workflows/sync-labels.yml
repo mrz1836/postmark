@@ -11,6 +11,14 @@
 #
 #  Maintainer: @mrz1836
 #
+#  SECURITY MODEL:
+#  - Fork PRs CANNOT trigger this workflow directly (only push events trigger it)
+#  - Workflow only runs AFTER fork PR is merged to main by maintainer
+#  - Security relies on code review process: maintainer approval = trusted changes
+#  - All label changes are logged with commit source and author for audit trail
+#  - Basic validation prevents reserved label names and enforces schema compliance
+#  - For higher security, protect .github/labels.yml with CODEOWNERS
+#
 # ------------------------------------------------------------------------------------
 
 name: Sync Labels
@@ -102,6 +110,9 @@ jobs:
     permissions:
       contents: read
       issues: write # Required for label management
+    outputs:
+      is-merge: ${{ steps.log_source.outputs.is-merge }}
+      pr-number: ${{ steps.log_source.outputs.pr-number }}
 
     steps:
       # --------------------------------------------------------------------
@@ -125,6 +136,50 @@ jobs:
       # --------------------------------------------------------------------
       - name: 📥 Checkout code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 2 # Fetch enough history to check parent commits
+
+      # --------------------------------------------------------------------
+      # Log commit source for audit trail
+      # --------------------------------------------------------------------
+      - name: 📋 Log commit source
+        id: log_source
+        env:
+          COMMIT_SHA: "${{ github.sha }}"
+          COMMITTER_NAME: "${{ github.event_name == 'workflow_dispatch' && github.actor || github.event.head_commit.committer.name }}"
+          COMMITTER_EMAIL: "${{ github.event_name == 'workflow_dispatch' && format('{0}@users.noreply.github.com', github.actor) || github.event.head_commit.committer.email }}"
+          AUTHOR_NAME: "${{ github.event_name == 'workflow_dispatch' && github.actor || github.event.head_commit.author.name }}"
+          AUTHOR_EMAIL: "${{ github.event_name == 'workflow_dispatch' && format('{0}@users.noreply.github.com', github.actor) || github.event.head_commit.author.email }}"
+          COMMIT_MESSAGE: "${{ github.event_name == 'workflow_dispatch' && format('Manual label sync by {0} (dry-run: {1})', github.actor, github.event.inputs.dry_run) || github.event.head_commit.message }}"
+          COMMIT_TIMESTAMP: "${{ github.event_name == 'workflow_dispatch' && github.event.repository.updated_at || github.event.head_commit.timestamp }}"
+        run: |
+          echo "🔍 === Commit Source Audit ==="
+          echo "Commit SHA: $COMMIT_SHA"
+          echo "Committed by: $COMMITTER_NAME <$COMMITTER_EMAIL>"
+          echo "Author: $AUTHOR_NAME <$AUTHOR_EMAIL>"
+          echo "Message: $COMMIT_MESSAGE"
+          echo "Timestamp: $COMMIT_TIMESTAMP"
+
+          # Check if this is a merge commit (has multiple parents)
+          PARENT_COUNT=$(git rev-list --parents -n 1 HEAD | wc -w)
+          PARENT_COUNT=$((PARENT_COUNT - 1))  # Subtract 1 for the commit itself
+
+          if [ "$PARENT_COUNT" -gt 1 ]; then
+            echo "Type: Merge commit (from PR or branch merge)"
+            echo "is-merge=true" >> $GITHUB_OUTPUT
+
+            # Try to extract PR number from commit message
+            PR_NUM=$(echo "$COMMIT_MESSAGE" | grep -oP '#\K[0-9]+' | head -1)
+            if [ -n "$PR_NUM" ]; then
+              echo "PR Number: #$PR_NUM"
+              echo "pr-number=$PR_NUM" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "Type: Direct commit to main branch"
+            echo "is-merge=false" >> $GITHUB_OUTPUT
+          fi
+
+          echo "✅ Commit source logged for audit trail"
 
       # --------------------------------------------------------------------
       # Validate and parse labels file
@@ -150,6 +205,18 @@ jobs:
           import json
           import sys
           import os
+          import re
+
+          # Security: Reserved and suspicious label names
+          RESERVED_NAMES = [
+              'admin', 'administrator', 'root', 'system', 'owner',
+              'bypass', 'override', 'escalate', 'privilege', 'sudo',
+              'critical-vulnerability', 'exploit', 'backdoor'
+          ]
+
+          # Maximum lengths for GitHub labels
+          MAX_NAME_LENGTH = 50
+          MAX_DESCRIPTION_LENGTH = 100  # GitHub allows 200, but we enforce stricter limit
 
           try:
               with open('${{ needs.load-env.outputs.labels-file }}', 'r') as f:
@@ -163,27 +230,52 @@ jobs:
 
               # Validate all labels
               validation_errors = []
-              for i, label in enumerate(labels):
-                  if not label.get('name'):
-                      validation_errors.append(f'Label {i + 1}: missing "name" field')
+              validation_warnings = []
 
+              for i, label in enumerate(labels):
+                  label_name = label.get('name', '')
+
+                  if not label_name:
+                      validation_errors.append(f'Label {i + 1}: missing "name" field')
+                      continue
+
+                  # Security: Check for reserved/suspicious names
+                  name_lower = label_name.lower()
+                  if name_lower in RESERVED_NAMES:
+                      validation_errors.append(f'Label "{label_name}": reserved name not allowed (security policy)')
+
+                  # Validate name length
+                  if len(label_name) > MAX_NAME_LENGTH:
+                      validation_errors.append(f'Label "{label_name}": name too long ({len(label_name)} > {MAX_NAME_LENGTH} chars)')
+
+                  # Validate color
                   color = label.get('color', '')
                   if not color:
-                      validation_errors.append(f'Label "{label.get("name", "unknown")}": missing "color" field')
+                      validation_errors.append(f'Label "{label_name}": missing "color" field')
                   else:
                       # Normalize and validate color
                       normalized_color = color.replace('#', '').lower()
                       if not (len(normalized_color) == 6 and all(c in '0123456789abcdef' for c in normalized_color)):
-                          validation_errors.append(f'Label "{label.get("name", "unknown")}": invalid color "{color}" (must be 6-digit hex)')
+                          validation_errors.append(f'Label "{label_name}": invalid color "{color}" (must be 6-digit hex)')
 
-                  if not label.get('description'):
-                      validation_errors.append(f'Label "{label.get("name", "unknown")}": missing "description" field')
+                  # Validate description
+                  description = label.get('description', '')
+                  if not description:
+                      validation_errors.append(f'Label "{label_name}": missing "description" field')
+                  elif len(description) > MAX_DESCRIPTION_LENGTH:
+                      validation_warnings.append(f'Label "{label_name}": description very long ({len(description)} chars, consider shortening)')
 
               if validation_errors:
                   print('\n❌ Validation Errors:')
                   for error in validation_errors:
                       print(f'  - {error}')
                   sys.exit(1)
+
+              if validation_warnings:
+                  print('\n⚠️ Validation Warnings:')
+                  for warning in validation_warnings:
+                      print(f'  - {warning}')
+                  print('Note: Warnings do not prevent sync, but consider addressing them')
 
               print('✅ All labels in manifest are valid')
 
@@ -494,6 +586,15 @@ jobs:
       # Generate a workflow summary report
       # --------------------------------------------------------------------
       - name: 📊 Generate workflow summary
+        env:
+          LABELS_FILE: ${{ needs.load-env.outputs.labels-file }}
+          DRY_RUN_MODE: ${{ github.event.inputs.dry_run == 'true' && '🔍 DRY RUN' || '🚀 LIVE' }}
+          TRIGGER_TYPE: ${{ github.event_name == 'workflow_dispatch' && '🔧 Manual' || '📝 File Change' }}
+          COMMIT_SHA: ${{ github.sha }}
+          COMMITTER_NAME: ${{ github.event_name == 'workflow_dispatch' && github.actor || github.event.head_commit.committer.name }}
+          AUTHOR_NAME: ${{ github.event_name == 'workflow_dispatch' && github.actor || github.event.head_commit.author.name }}
+          IS_MERGE: ${{ steps.log_source.outputs.is-merge }}
+          PR_NUMBER: ${{ steps.log_source.outputs.pr-number }}
         run: |
           echo "🚀 Generating workflow summary..."
 
@@ -505,9 +606,25 @@ jobs:
           echo "## ⚙️ Configuration" >> $GITHUB_STEP_SUMMARY
           echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Labels file | \`${{ needs.load-env.outputs.labels-file }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Mode | ${{ github.event.inputs.dry_run == 'true' && '🔍 DRY RUN' || '🚀 LIVE' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Trigger | ${{ github.event_name == 'workflow_dispatch' && '🔧 Manual' || '📝 File Change' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Labels file | \`$LABELS_FILE\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Mode | $DRY_RUN_MODE |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trigger | $TRIGGER_TYPE |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## 📋 Commit Source (Audit Trail)" >> $GITHUB_STEP_SUMMARY
+          echo "| Detail | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit SHA | \`$COMMIT_SHA\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Committer | $COMMITTER_NAME |" >> $GITHUB_STEP_SUMMARY
+          echo "| Author | $AUTHOR_NAME |" >> $GITHUB_STEP_SUMMARY
+          if [ "$IS_MERGE" = "true" ]; then
+            echo "| Type | 🔀 Merge commit (from PR) |" >> $GITHUB_STEP_SUMMARY
+            if [ -n "$PR_NUMBER" ]; then
+              echo "| PR Number | #$PR_NUMBER |" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "| Type | 📝 Direct commit to main |" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
 
           echo "## 📊 Results" >> $GITHUB_STEP_SUMMARY

@@ -134,7 +134,7 @@ jobs:
             echo "| **Workflow** | ${{ github.workflow }} |"
             echo "| **Run Number** | ${{ github.run_number }} |"
             echo "| **Trigger** | ${{ github.event_name }} |"
-            echo "| **Source** | ${{ github.event.pull_request.head.repo.full_name == github.repository && 'Internal' || 'Fork' }} |"
+            echo "| **Source** | ${{ github.event.pull_request.head.repo && github.event.pull_request.head.repo.full_name == github.repository && 'Internal' || 'Fork' }} |"
             echo ""
             echo "<br><br>"
           } > final-report.md
@@ -203,6 +203,41 @@ jobs:
           fi
 
           echo "" >> final-report.md
+
+          # Add fork PR specific information if this is a fork PR
+          if [[ "${{ env.INPUT_is-fork-pr }}" == "true" ]]; then
+            {
+              echo ""
+              echo "## 🔐 Fork PR Security Status"
+              echo ""
+              echo "⚠️ **This workflow ran on a FORK Pull Request**"
+              echo ""
+              echo "**Security Mode:** \`${{ env.INPUT_fork-security-mode }}\`"
+              echo ""
+              echo "### Jobs Status for Fork PR"
+              echo "**✅ Jobs That Ran Successfully:**"
+              echo "- Setup & Configuration"
+              echo "- MAGE-X Testing"
+              echo "- Code Quality Checks"
+              echo "- Pre-Commit System"
+              echo "- $([ "${{ env.INPUT_benchmarks-result }}" != "skipped" ] && echo "Benchmarks" || echo "_(Benchmarks were skipped)_")"
+              echo ""
+              echo "**⛔ Jobs Skipped for Security:**"
+              echo "- **Security Scans** - Requires secrets (\`OSSI_TOKEN\`, \`OSSI_USERNAME\`, \`GITLEAKS_LICENSE\`)"
+              echo "- **Test Suite** - Requires \`CODECOV_TOKEN\` for coverage uploads"
+              echo "- **Release** - PRs cannot trigger releases (tags only)"
+              echo ""
+              echo "### Why Were Jobs Skipped?"
+              echo "Fork PRs have restricted access to repository secrets for security:"
+              echo "- ✅ Prevents credential theft from malicious fork PRs"
+              echo "- ✅ Protects external service tokens (OSSI, Codecov)"
+              echo "- ✅ Prevents unauthorized access through workflow modifications"
+              echo ""
+              echo "**Note for Fork Contributors:**"
+              echo "Repository maintainers will review your PR and can manually run security scans if needed."
+              echo "All code quality checks and tests that don't require secrets have already run successfully!"
+            } >> final-report.md
+          fi
 
           # Add release-specific information if this was a tag push
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then

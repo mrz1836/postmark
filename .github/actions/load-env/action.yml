@@ -73,6 +73,50 @@ runs:
           fi
         }
 
+        # Function to validate environment variable names and values
+        validate_env_vars() {
+          local json="$1"
+          local source="$2"
+
+          echo "🔒 Validating environment variables from $source..."
+
+          # Extract all keys and values
+          local keys=$(echo "$json" | jq -r 'keys[]')
+
+          while IFS= read -r key; do
+            # Skip empty keys
+            [[ -z "$key" ]] && continue
+
+            # Validate key name: must match ^[A-Z_][A-Z0-9_]*$
+            if ! echo "$key" | grep -qE '^[A-Z_][A-Z0-9_]*$'; then
+              echo "❌ ERROR: Invalid environment variable name in $source: '$key'" >&2
+              echo "   Variable names must start with uppercase letter or underscore" >&2
+              echo "   and contain only uppercase letters, numbers, and underscores" >&2
+              exit 1
+            fi
+
+            # Get the value for this key
+            local value=$(echo "$json" | jq -r --arg k "$key" '.[$k]')
+
+            # Validate value length (max 10000 chars to prevent DoS)
+            if [[ ${#value} -gt 10000 ]]; then
+              echo "❌ ERROR: Environment variable value too long in $source: '$key'" >&2
+              echo "   Maximum length is 10000 characters, got ${#value}" >&2
+              exit 1
+            fi
+
+            # Check for suspicious command injection patterns
+            if echo "$value" | grep -qE '`|\$\(|\$\{|;|&|\||<\(|>|<|\\|'"'"'|"|\x00|[[:cntrl:]]'; then
+              echo "⚠️  WARNING: Potentially unsafe characters in $source variable '$key'" >&2
+              echo "   Value contains backticks, command substitution, or shell metacharacters" >&2
+              echo "   Value will be treated as a literal string during extraction" >&2
+            fi
+
+          done <<< "$keys"
+
+          echo "✅ All variables in $source passed validation"
+        }
+
         # Load configuration files in order of precedence
         BASE_JSON="{}"
         CUSTOM_JSON="{}"
@@ -83,6 +127,9 @@ runs:
           BASE_JSON=$(parse_env_file ".github/.env.base")
           BASE_COUNT=$(echo "$BASE_JSON" | jq 'keys | length')
           echo "✅ Loaded $BASE_COUNT base configuration variables"
+
+          # Validate base configuration
+          validate_env_vars "$BASE_JSON" ".env.base"
         else
           echo "❌ ERROR: Required .env.base file not found!" >&2
           exit 1
@@ -94,6 +141,9 @@ runs:
           CUSTOM_JSON=$(parse_env_file ".github/.env.custom")
           CUSTOM_COUNT=$(echo "$CUSTOM_JSON" | jq 'keys | length')
           echo "✅ Loaded $CUSTOM_COUNT custom override variables"
+
+          # Validate custom configuration
+          validate_env_vars "$CUSTOM_JSON" ".env.custom"
         else
           echo "ℹ️  No custom configuration file found (this is optional)"
         fi

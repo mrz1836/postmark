@@ -367,7 +367,7 @@ jobs:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_HEAD_REF: ${{ github.head_ref }}
-          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo && github.event.pull_request.head.repo.full_name || '' }}
         run: |
           echo "🔍 Checking repository security conditions..."
           echo "Event Name: $GITHUB_EVENT_NAME"
@@ -425,7 +425,7 @@ jobs:
           echo "| 🔒 Security Details | ⚠️  Status |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **Tool** | Gitleaks |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Fork Detected** | ${{ github.event.pull_request.head.repo.full_name || 'N/A (not a PR event)' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Fork Detected** | ${{ github.event.pull_request.head.repo && github.event.pull_request.head.repo.full_name || 'N/A (not a PR event)' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Base Repository** | ${{ github.repository }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Result** | ⚠️  Skipped for security (fork cannot access secrets) |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
