@@ -279,12 +279,23 @@ jobs:
               # Store metrics for output
               echo "cache-metrics={\"hit_rate\":$CACHE_HIT_RATE,\"total_hits\":$TOTAL_CACHE_HITS,\"total_attempts\":$TOTAL_CACHE_ATTEMPTS}" >> $GITHUB_OUTPUT
             fi
-          fi
 
-          # Add spacing after cache section
-          if compgen -G "cache-stats-*.json" >/dev/null 2>&1; then
+            # Add spacing after cache section
             echo "" >> statistics-section.md
             echo "<br><br>" >> statistics-section.md
+          else
+            # No cache statistics available
+            {
+              echo ""
+              echo "### 💾 Cache Statistics"
+              echo ""
+              echo "| Status | Details |"
+              echo "|--------|---------|"
+              echo "| **Cache Data** | ⚠️ No cache statistics available |"
+              echo "| **Reason** | Cache stats may not be available for this workflow run |"
+              echo ""
+              echo "<br><br>"
+            } >> statistics-section.md
           fi
 
       # --------------------------------------------------------------------
@@ -365,6 +376,20 @@ jobs:
 
             # Store metrics for output
             echo "benchmark-metrics={\"total_benchmarks\":$TOTAL_BENCHMARKS,\"total_duration\":$TOTAL_DURATION,\"mode\":\"$BENCH_MODE\"}" >> $GITHUB_OUTPUT
+          else
+            # No benchmark statistics available
+            {
+              echo ""
+              echo ""
+              echo "### ⚡ Benchmark Results"
+              echo ""
+              echo "| Status | Details |"
+              echo "|--------|---------|"
+              echo "| **Benchmarks** | ⚠️ No benchmark data available |"
+              echo "| **Reason** | Benchmarks may have been skipped or data not uploaded |"
+              echo ""
+              echo "<br><br>"
+            } >> statistics-section.md
           fi
 
       # --------------------------------------------------------------------

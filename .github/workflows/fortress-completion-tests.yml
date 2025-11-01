@@ -332,6 +332,21 @@ jobs:
               # Store failure metrics
               echo "failure-metrics={\"total_failures\":$TOTAL_FAILURES,\"has_error_output\":$HAS_ERROR_OUTPUT}" >> $GITHUB_OUTPUT
             fi
+          else
+            # No test statistics available - likely fork PR with skipped test suite
+            {
+              echo ""
+              echo ""
+              echo "### 🧪 Test Results Summary"
+              echo ""
+              echo "| Status | Details |"
+              echo "|--------|---------|"
+              echo "| **Test Suite** | ⚠️ Skipped - No test statistics available |"
+              echo "| **Reason** | Tests may have been skipped for fork PR security restrictions |"
+              echo "| **Note** | Repository maintainers can run full tests on merged code |"
+              echo ""
+              echo "_For security reasons, fork PRs do not have access to test execution secrets._"
+            } >> tests-section.md
           fi
 
       # --------------------------------------------------------------------
@@ -383,6 +398,10 @@ jobs:
                 echo "- Estimated output size reduction: ~80-90% for large test suites" >> tests-section.md
               fi
             fi
+          else
+            # No test configuration to display - test stats not available
+            echo "" >> tests-section.md
+            echo "ℹ️ _Test configuration section skipped - no test data available_" >> tests-section.md
           fi
 
       # --------------------------------------------------------------------

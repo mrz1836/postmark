@@ -8,7 +8,7 @@
 #  Configuration: All settings are loaded from .env.base and .env.custom files for
 #  centralized management across all workflows.
 #
-#  Triggers: Pull request events (opened, reopened, ready for review, closed)
+#  Triggers: Pull request events (opened, reopened, ready for review, closed, synchronize)
 #
 #  Features:
 #  - Automatic labeling based on branch prefix and PR title
@@ -20,6 +20,13 @@
 #
 #  Maintainer: @mrz1836
 #
+#  SECURITY MODEL:
+#  - Uses pull_request trigger (runs in PR context with limited permissions)
+#  - Safe to check out PR code as workflow has read-only access by default
+#  - Fork detection uses full_name comparison for accuracy (not owner.login which fails for org members)
+#  - Job-level permissions grant write access only where needed (labels, comments, cache cleanup)
+#  - Mutually exclusive with fork workflow - each PR triggers only ONE workflow
+#
 # ------------------------------------------------------------------------------------
 
 name: PR Management
@@ -29,7 +36,7 @@ name: PR Management
 # --------------------------------------------------------------------
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, closed]
+    types: [opened, reopened, ready_for_review, closed, synchronize]
 
 # Security: Restrictive default permissions with job-level overrides for least privilege access
 permissions:
@@ -76,16 +83,57 @@ jobs:
         id: load-env
 
   # ----------------------------------------------------------------------------------
+  # Detect if this is a same-repository PR with proper null handling
+  # ----------------------------------------------------------------------------------
+  detect-same-repo:
+    name: 🔍 Detect Same-Repo PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      is-same-repo: ${{ steps.detection.outputs.is-same-repo }}
+    steps:
+      - name: 🔍 Same-repo detection with null checks
+        id: detection
+        env:
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo && github.event.pull_request.head.repo.full_name || '' }}
+          BASE_REPO: ${{ github.repository }}
+        run: |
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🔍 Same-Repo PR Detection Debug"
+          echo "════════════════════════════════════════════════════════════════"
+          echo "  PR Head Repo: '${PR_HEAD_REPO}'"
+          echo "  Base Repo: '${BASE_REPO}'"
+          echo "  Event: ${{ github.event_name }}"
+          echo "════════════════════════════════════════════════════════════════"
+
+          # Check if this is a same-repo PR with proper null/empty handling
+          # A same-repo PR is when:
+          # 1. PR_HEAD_REPO is not empty (not null/undefined)
+          # 2. PR_HEAD_REPO == BASE_REPO (same repository)
+          if [[ -n "$PR_HEAD_REPO" ]] && [[ "$PR_HEAD_REPO" == "$BASE_REPO" ]]; then
+            echo "✅ SAME-REPO PR DETECTED"
+            echo "is-same-repo=true" >> $GITHUB_OUTPUT
+          else
+            echo "🚨 NOT A SAME-REPO PR (Fork or invalid head repo)"
+            echo "is-same-repo=false" >> $GITHUB_OUTPUT
+          fi
+          echo "════════════════════════════════════════════════════════════════"
+
+  # ----------------------------------------------------------------------------------
   # Apply Labels Based on Branch and Title
   # ----------------------------------------------------------------------------------
   apply-labels:
     name: 🏷️ Apply Labels
-    needs: [load-env]
+    needs: [load-env, detect-same-repo]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
-    if: github.event.action != 'closed'
+    # Only run for non-fork PRs (same repository) - using detection output
+    if: |
+      github.event.action != 'closed' &&
+      needs.detect-same-repo.outputs.is-same-repo == 'true'
     outputs:
       labels-applied: ${{ steps.apply-labels.outputs.labels-applied }}
 
@@ -248,14 +296,15 @@ jobs:
   # ----------------------------------------------------------------------------------
   assign-assignee:
     name: 👤 Assign Default Assignee
-    needs: [load-env]
+    needs: [load-env, detect-same-repo]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
+    # Only run for non-fork PRs (same repository) - using detection output
     if: |
       github.event.action != 'closed' &&
-      github.event.pull_request.head.repo.owner.login == github.repository_owner
+      needs.detect-same-repo.outputs.is-same-repo == 'true'
     outputs:
       assignee-added: ${{ steps.assign.outputs.assignee-added }}
 
@@ -333,7 +382,7 @@ jobs:
   # ----------------------------------------------------------------------------------
   welcome-contributor:
     name: 👋 Welcome New Contributor
-    needs: [load-env]
+    needs: [load-env, detect-same-repo]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -341,7 +390,7 @@ jobs:
     if: |
       github.event.action == 'opened' &&
       contains(fromJSON('["FIRST_TIMER", "FIRST_TIME_CONTRIBUTOR"]'), github.event.pull_request.author_association) &&
-      github.event.pull_request.head.repo.owner.login == github.repository_owner
+      needs.detect-same-repo.outputs.is-same-repo == 'true'
     outputs:
       welcomed: ${{ steps.welcome.outputs.welcomed }}
 
@@ -426,12 +475,14 @@ jobs:
   # ----------------------------------------------------------------------------------
   analyze-size:
     name: 📏 Analyze PR Size
-    needs: [load-env]
+    needs: [load-env, detect-same-repo]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
-    if: github.event.action == 'opened'
+    if: |
+      github.event.action == 'opened' &&
+      needs.detect-same-repo.outputs.is-same-repo == 'true'
     outputs:
       size-label: ${{ steps.analyze.outputs.size-label }}
       total-changes: ${{ steps.analyze.outputs.total-changes }}
@@ -530,7 +581,7 @@ jobs:
   # ----------------------------------------------------------------------------------
   clean-cache:
     name: 🧹 Clean Runner Cache
-    needs: [load-env]
+    needs: [load-env, detect-same-repo]
     runs-on: ubuntu-latest
     permissions:
       actions: write # Required: Delete GitHub Actions caches for closed PRs
@@ -633,14 +684,15 @@ jobs:
   # ----------------------------------------------------------------------------------
   delete-branch:
     name: 🌿 Delete Merged Branch
-    needs: [load-env]
+    needs: [load-env, detect-same-repo]
     runs-on: ubuntu-latest
     permissions:
       contents: write # Required: Delete branches after PR merge
+    # Only run for non-fork PRs (same repository) that were merged - using detection output
     if: |
       github.event.action == 'closed' &&
       github.event.pull_request.merged == true &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      needs.detect-same-repo.outputs.is-same-repo == 'true'
     outputs:
       branch-deleted: ${{ steps.delete.outputs.branch-deleted }}
 
@@ -732,7 +784,7 @@ jobs:
   summary:
     name: 📊 Generate Summary
     if: always()
-    needs: [load-env, apply-labels, assign-assignee, welcome-contributor, analyze-size, clean-cache, delete-branch]
+    needs: [load-env, detect-same-repo, apply-labels, assign-assignee, welcome-contributor, analyze-size, clean-cache, delete-branch]
     runs-on: ubuntu-latest
     steps:
       # --------------------------------------------------------------------
@@ -746,6 +798,9 @@ jobs:
           PR_ACTION: ${{ github.event.action }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_MERGED: ${{ github.event.pull_request.merged }}
+          IS_SAME_REPO: ${{ needs.detect-same-repo.outputs.is-same-repo }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo && github.event.pull_request.head.repo.full_name || '' }}
+          BASE_REPO: ${{ github.repository }}
         run: |
           echo "📊 Generating workflow summary..."
 
@@ -755,8 +810,63 @@ jobs:
           echo "**📋 PR:** #$PR_NUMBER - $PR_TITLE" >> $GITHUB_STEP_SUMMARY
           echo "**🎬 Action:** $PR_ACTION" >> $GITHUB_STEP_SUMMARY
           echo "**👤 Author:** @$PR_AUTHOR" >> $GITHUB_STEP_SUMMARY
-          echo "**🔗 Source:** ${{ github.event.pull_request.head.repo.full_name == github.repository && 'Internal' || 'Fork' }}" >> $GITHUB_STEP_SUMMARY
+
+          # Show repo detection results
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔍 Repository Detection" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| PR Head Repo | \`$PR_HEAD_REPO\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Base Repo | \`$BASE_REPO\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Is Same Repo? | **$IS_SAME_REPO** |" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$IS_SAME_REPO" = "true" ]; then
+            echo "| Status | ✅ Same-repo PR - Full automation enabled |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Status | ⚠️ **NOT a same-repo PR** - This workflow should not have processed this PR |" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Add fork PR specific information if this is a fork PR
+          if [ "$IS_SAME_REPO" = "false" ]; then
+            echo "---" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## 🔐 Fork PR Status" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **This is a FORK Pull Request** - Some automated actions are restricted for security." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            if [ "$PR_ACTION" != "closed" ]; then
+              echo "### ✅ Actions Completed for Fork PR:" >> $GITHUB_STEP_SUMMARY
+              echo "- **Labels Applied** - Automated based on branch prefix and PR title" >> $GITHUB_STEP_SUMMARY
+              echo "- **Type Detection** - PR type classification" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### ⛔ Actions Skipped (Fork Restrictions):" >> $GITHUB_STEP_SUMMARY
+              echo "- **Default Assignee** - Fork PRs are not auto-assigned" >> $GITHUB_STEP_SUMMARY
+              echo "- **Size Analysis** - Only available for internal PRs" >> $GITHUB_STEP_SUMMARY
+              echo "- **Branch Operations** - Fork branches cannot be deleted from base repo" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### 📝 Why Are Actions Restricted?" >> $GITHUB_STEP_SUMMARY
+              echo "Fork PRs have limited permissions to protect repository security:" >> $GITHUB_STEP_SUMMARY
+              echo "- Prevents unauthorized repository modifications" >> $GITHUB_STEP_SUMMARY
+              echo "- Protects branch management operations" >> $GITHUB_STEP_SUMMARY
+              echo "- Ensures only repository members can perform sensitive actions" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Note for Contributors:** Repository maintainers will review your PR and can manually" >> $GITHUB_STEP_SUMMARY
+              echo "apply additional labels, assignees, or other management actions as needed." >> $GITHUB_STEP_SUMMARY
+            else
+              echo "### 🧹 Cleanup Status for Fork PR:" >> $GITHUB_STEP_SUMMARY
+              echo "- **Cache Cleanup** - Runner caches cleaned" >> $GITHUB_STEP_SUMMARY
+              echo "- **Branch Deletion** - Fork branches remain in fork repository" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "_Fork PR branches are managed by the contributor in their forked repository._" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "---" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
 
           # Show results based on action type
           if [ "$PR_ACTION" != "closed" ]; then
@@ -782,6 +892,12 @@ jobs:
               else
                 echo "| 👤 Default Assignee | Already assigned |" >> $GITHUB_STEP_SUMMARY
               fi
+            elif [ "${{ needs.assign-assignee.result }}" = "skipped" ]; then
+              if [ "$IS_SAME_REPO" = "false" ]; then
+                echo "| 👤 Default Assignee | ⛔ Skipped (Fork PR) |" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "| 👤 Default Assignee | Skipped |" >> $GITHUB_STEP_SUMMARY
+              fi
             fi
 
             # Welcome message
@@ -798,6 +914,12 @@ jobs:
               if [ -n "$SIZE_LABEL" ]; then
                 echo "| 📏 Size Analysis | $SIZE_LABEL ($TOTAL_CHANGES changes) |" >> $GITHUB_STEP_SUMMARY
               fi
+            elif [ "${{ needs.analyze-size.result }}" = "skipped" ]; then
+              if [ "$IS_SAME_REPO" = "false" ]; then
+                echo "| 📏 Size Analysis | ⛔ Skipped (Fork PR) |" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "| 📏 Size Analysis | Skipped |" >> $GITHUB_STEP_SUMMARY
+              fi
             fi
 
           else
@@ -813,14 +935,22 @@ jobs:
             fi
 
             # Branch deletion
-            if [ "$PR_MERGED" = "true" ] && [ "${{ needs.delete-branch.result }}" = "success" ]; then
-              DELETED="${{ needs.delete-branch.outputs.branch-deleted }}"
-              if [ "$DELETED" = "true" ]; then
-                echo "| 🌿 Branch Deletion | Deleted |" >> $GITHUB_STEP_SUMMARY
-              elif [ "$DELETED" = "skip" ]; then
-                echo "| 🌿 Branch Deletion | Skipped (protected) |" >> $GITHUB_STEP_SUMMARY
-              else
-                echo "| 🌿 Branch Deletion | Already deleted |" >> $GITHUB_STEP_SUMMARY
+            if [ "$PR_MERGED" = "true" ]; then
+              if [ "${{ needs.delete-branch.result }}" = "success" ]; then
+                DELETED="${{ needs.delete-branch.outputs.branch-deleted }}"
+                if [ "$DELETED" = "true" ]; then
+                  echo "| 🌿 Branch Deletion | Deleted |" >> $GITHUB_STEP_SUMMARY
+                elif [ "$DELETED" = "skip" ]; then
+                  echo "| 🌿 Branch Deletion | Skipped (protected) |" >> $GITHUB_STEP_SUMMARY
+                else
+                  echo "| 🌿 Branch Deletion | Already deleted |" >> $GITHUB_STEP_SUMMARY
+                fi
+              elif [ "${{ needs.delete-branch.result }}" = "skipped" ]; then
+                if [ "$IS_SAME_REPO" = "false" ]; then
+                  echo "| 🌿 Branch Deletion | ⛔ Skipped (Fork PR - managed by contributor) |" >> $GITHUB_STEP_SUMMARY
+                else
+                  echo "| 🌿 Branch Deletion | Skipped |" >> $GITHUB_STEP_SUMMARY
+                fi
               fi
             fi
           fi

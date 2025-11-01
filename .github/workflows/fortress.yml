@@ -26,6 +26,21 @@
 #  This file is licensed under the MIT License.
 #  Attribution is requested if reused: Created by @mrz1836
 #
+#  FORK PR HANDLING:
+#  This workflow intelligently handles fork PRs by detecting fork status during setup
+#  and conditionally skipping jobs that require repository secrets. Jobs are categorized:
+#
+#  FORK-SAFE (Always run - no secrets required):
+#    ✅ setup, test-magex, warm-cache, code-quality, pre-commit, benchmarks, status-check
+#
+#  FORK-UNSAFE (Skipped on fork PRs - require secrets):
+#    ⛔ security (OSSI_TOKEN, OSSI_USERNAME, GITLEAKS_LICENSE)
+#    ⛔ test-suite (CODECOV_TOKEN for coverage uploads)
+#    ⛔ release (already tag-only, but extra safety for forks)
+#
+#  Fork contributors see clear messaging in setup summary explaining which jobs run.
+#  This provides security without workflow duplication or maintenance overhead.
+#
 # ------------------------------------------------------------------------------------
 
 name: GoFortress
@@ -123,7 +138,7 @@ jobs:
       env-json: ${{ needs.load-env.outputs.env-json }}
       primary-runner: ${{ needs.setup.outputs.primary-runner }}
   # ----------------------------------------------------------------------------------
-  # Warm Go Caches
+  # Warm Go Caches (FORK-SAFE: No secrets required)
   # ----------------------------------------------------------------------------------
   warm-cache:
     name: 💾 Warm Cache
@@ -142,7 +157,7 @@ jobs:
       redis-cache-force-pull: ${{ needs.setup.outputs.redis-cache-force-pull }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
   # ----------------------------------------------------------------------------------
-  # Security Scans
+  # Security Scans (FORK-UNSAFE: Requires secrets - skipped on fork PRs)
   # ----------------------------------------------------------------------------------
   security:
     name: 🔒 Security Scans
@@ -152,7 +167,8 @@ jobs:
       needs.setup.result == 'success' &&
       needs.test-magex.result == 'success' &&
       (needs.warm-cache.result == 'success' || needs.warm-cache.result == 'skipped') &&
-      needs.setup.outputs.security-scans-enabled == 'true'
+      needs.setup.outputs.security-scans-enabled == 'true' &&
+      needs.setup.outputs.is-fork-pr != 'true'
     permissions:
       contents: read # Read repository content for security scanning
     uses: ./.github/workflows/fortress-security-scans.yml
@@ -170,7 +186,7 @@ jobs:
       ossi-token: ${{ secrets.OSSI_TOKEN }}
       ossi-username: ${{ secrets.OSSI_USERNAME }}
   # ----------------------------------------------------------------------------------
-  # Code Quality Checks
+  # Code Quality Checks (FORK-SAFE: No secrets required)
   # ----------------------------------------------------------------------------------
   code-quality:
     name: 📊 Code Quality
@@ -194,7 +210,7 @@ jobs:
     secrets:
       github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
   # ----------------------------------------------------------------------------------
-  # Pre-commit Checks
+  # Pre-commit Checks (FORK-SAFE: No secrets required)
   # ----------------------------------------------------------------------------------
   pre-commit:
     name: 🪝 Pre-commit Checks
@@ -215,7 +231,7 @@ jobs:
       pre-commit-enabled: ${{ needs.setup.outputs.pre-commit-enabled }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
   # ----------------------------------------------------------------------------------
-  # Test Suite
+  # Test Suite (FORK-UNSAFE: Requires CODECOV_TOKEN for coverage - skipped on fork PRs)
   # ----------------------------------------------------------------------------------
   test-suite:
     name: 🧪 Test Suite
@@ -224,7 +240,8 @@ jobs:
       !cancelled() &&
       needs.setup.result == 'success' &&
       needs.test-magex.result == 'success' &&
-      (needs.warm-cache.result == 'success' || needs.warm-cache.result == 'skipped')
+      (needs.warm-cache.result == 'success' || needs.warm-cache.result == 'skipped') &&
+      needs.setup.outputs.is-fork-pr != 'true'
     permissions:
       contents: write # Write repository content and push to gh-pages branch for test execution
       pull-requests: write # Required: Coverage workflow needs to create PR comments
@@ -256,7 +273,7 @@ jobs:
       github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
   # ----------------------------------------------------------------------------------
-  # Benchmark Suite
+  # Benchmark Suite (FORK-SAFE: No secrets required)
   # ----------------------------------------------------------------------------------
   benchmarks:
     name: 🏃 Benchmarks
@@ -383,13 +400,15 @@ jobs:
           echo "🎉 All required checks passed (skipped jobs are considered OK)."
 
   # ----------------------------------------------------------------------------------
-  # Release Version
+  # Release Version (FORK-UNSAFE: PRs never trigger this, but extra fork safety included)
   # ----------------------------------------------------------------------------------
   release:
     name: 🚀 Release Version
-    needs: [load-env, setup, test-suite, security, code-quality, pre-commit]
-    # Only run on successful tag pushes
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [load-env, setup, test-magex, test-suite, security, code-quality, pre-commit]
+    # Only run on successful tag pushes from same repository (not forks)
+    if: |
+      startsWith(github.ref, 'refs/tags/v') &&
+      needs.setup.outputs.is-fork-pr != 'true'
     uses: ./.github/workflows/fortress-release.yml
     with:
       env-json: ${{ needs.load-env.outputs.env-json }}
@@ -407,7 +426,7 @@ jobs:
   # ----------------------------------------------------------------------------------
   completion-report:
     name: 📊 Workflow Completion Report
-    if: always()
+    if: always() && !contains(fromJSON('["failure", "cancelled"]'), needs.setup.result) && !contains(fromJSON('["failure", "cancelled"]'), needs.test-magex.result)
     needs: [load-env, setup, test-magex, pre-commit, security, code-quality, test-suite, benchmarks, release, status-check]
     permissions:
       contents: read # Read repository content for completion report
@@ -430,3 +449,5 @@ jobs:
       test-suite-result: ${{ needs.test-suite.result }}
       gofortress-version: ${{ needs.setup.outputs.gofortress-version }}
       gofortress-released: ${{ needs.setup.outputs.gofortress-released }}
+      is-fork-pr: ${{ needs.setup.outputs.is-fork-pr }}
+      fork-security-mode: ${{ needs.setup.outputs.fork-security-mode }}

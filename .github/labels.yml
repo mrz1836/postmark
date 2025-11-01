@@ -43,6 +43,9 @@
 - name: "feature"
   description: "Any new significant addition"
   color: 0e8a16
+- name: "fork-pr"
+  description: "PR originated from a forked repository"
+  color: 5319e7
 - name: "github-actions"
   description: "Used for referencing GitHub Actions"
   color: 006b75
