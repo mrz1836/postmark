@@ -100,7 +100,7 @@ jobs:
       # Download specific artifacts needed for statistics processing
       # --------------------------------------------------------------------
       - name: 📥 Download test statistics
-        if: always()
+        if: always() && env.ENABLE_GO_TESTS == 'true'
         uses: ./.github/actions/download-artifact-resilient
         with:
           pattern: "test-stats-*"
@@ -136,7 +136,7 @@ jobs:
           continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
 
       - name: 📥 Download internal coverage statistics
-        if: always() && env.GO_COVERAGE_PROVIDER == 'internal'
+        if: always() && env.ENABLE_GO_TESTS == 'true' && env.GO_COVERAGE_PROVIDER == 'internal'
         uses: ./.github/actions/download-artifact-resilient
         with:
           pattern: "coverage-stats-internal"
@@ -148,7 +148,7 @@ jobs:
           continue-on-error: true
 
       - name: 📥 Download codecov coverage statistics
-        if: always() && env.GO_COVERAGE_PROVIDER == 'codecov'
+        if: always() && env.ENABLE_GO_TESTS == 'true' && env.GO_COVERAGE_PROVIDER == 'codecov'
         uses: ./.github/actions/download-artifact-resilient
         with:
           pattern: "coverage-stats-codecov"

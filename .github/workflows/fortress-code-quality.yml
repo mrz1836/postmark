@@ -206,6 +206,7 @@ jobs:
   # ----------------------------------------------------------------------------------
   lint:
     name: ✨ Lint Code
+    timeout-minutes: 20
     if: ${{ inputs.go-lint-enabled == 'true' }}
     runs-on: ${{ inputs.primary-runner }}
     outputs:
