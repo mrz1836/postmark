@@ -68,6 +68,9 @@ on:
       fuzz-testing-enabled:
         description: "Whether fuzz testing is enabled"
         value: ${{ jobs.setup-config.outputs.fuzz-testing-enabled }}
+      go-tests-enabled:
+        description: "Whether Go tests are enabled"
+        value: ${{ jobs.setup-config.outputs.go-tests-enabled }}
       go-primary-version:
         description: "Primary Go version"
         value: ${{ jobs.setup-config.outputs.go-primary-version }}
@@ -190,6 +193,7 @@ jobs:
       coverage-provider: ${{ steps.config.outputs.coverage-provider }}
       cache-warming-enabled: ${{ steps.config.outputs.cache-warming-enabled }}
       fuzz-testing-enabled: ${{ steps.config.outputs.fuzz-testing-enabled }}
+      go-tests-enabled: ${{ steps.config.outputs.go-tests-enabled }}
       go-primary-version: ${{ steps.config.outputs.go-primary-version }}
       go-secondary-version: ${{ steps.config.outputs.go-secondary-version }}
       go-sum-file: ${{ steps.config.outputs.go-sum-file }}
@@ -510,6 +514,7 @@ jobs:
           echo "gitleaks-enabled=${{ env.ENABLE_SECURITY_SCAN_GITLEAKS }}" >> $GITHUB_OUTPUT
           echo "static-analysis-enabled=${{ env.ENABLE_STATIC_ANALYSIS }}" >> $GITHUB_OUTPUT
           echo "fuzz-testing-enabled=${{ env.ENABLE_FUZZ_TESTING }}" >> $GITHUB_OUTPUT
+          echo "go-tests-enabled=${{ env.ENABLE_GO_TESTS }}" >> $GITHUB_OUTPUT
           echo "pre-commit-enabled=${{ env.ENABLE_GO_PRE_COMMIT }}" >> $GITHUB_OUTPUT
 
           # Detect if this is a release run
@@ -680,6 +685,7 @@ jobs:
           echo "| **Cache Warming** | $([ "${{ env.ENABLE_CACHE_WARMING }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Go module and build caches will $([ "${{ env.ENABLE_CACHE_WARMING }}" == "true" ] && echo "be pre-warmed for faster test execution" || echo "not be pre-warmed (saves memory)") |" >> $GITHUB_STEP_SUMMARY
           echo "| **Code Coverage** | $([ "${{ env.ENABLE_CODE_COVERAGE }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Coverage will $([ "${{ env.ENABLE_CODE_COVERAGE }}" == "true" ] && echo "use $([ "${{ env.GO_COVERAGE_PROVIDER }}" == "codecov" ] && echo "**Codecov**" || echo "**go-coverage**") (${{ env.GO_COVERAGE_THRESHOLD }}% threshold)" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
           echo "| **Fuzz Testing** | $([ "${{ env.ENABLE_FUZZ_TESTING }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Fuzz tests will $([ "${{ env.ENABLE_FUZZ_TESTING }}" == "true" ] && echo "run in parallel job on Linux with primary Go version" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Go Tests** | $([ "${{ env.ENABLE_GO_TESTS }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Test suite will $([ "${{ env.ENABLE_GO_TESTS }}" == "true" ] && echo "run across matrix configurations" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
           echo "| **Gitleaks (Secret Scan)** | $([ "${{ env.ENABLE_SECURITY_SCAN_GITLEAKS }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | Gitleaks will $([ "${{ env.ENABLE_SECURITY_SCAN_GITLEAKS }}" == "true" ] && echo "scan for leaked secrets" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
           echo "| **Go Linting** | $([ "${{ env.ENABLE_GO_LINT }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | golangci-lint via MAGE-X will $([ "${{ env.ENABLE_GO_LINT }}" == "true" ] && echo "analyze code quality" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY
           echo "| **Govulncheck** | $([ "${{ env.ENABLE_SECURITY_SCAN_GOVULNCHECK }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | govulncheck via MAGE-X will $([ "${{ env.ENABLE_SECURITY_SCAN_GOVULNCHECK }}" == "true" ] && echo "scan for Go vulnerabilities" || echo "be skipped") |" >> $GITHUB_STEP_SUMMARY

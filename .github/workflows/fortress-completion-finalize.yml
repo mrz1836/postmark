@@ -186,7 +186,7 @@ jobs:
             echo "| 🪝 Pre-commit Checks | ${{ env.INPUT_pre-commit-result }} | $([ "${{ env.INPUT_pre-commit-result }}" = "success" ] && echo "✅" || echo "❌") |"
             echo "| 🔒 Security Scans | ${{ env.INPUT_security-result }} | $([ "${{ env.INPUT_security-result }}" = "success" ] && echo "✅" || echo "❌") |"
             echo "| 📊 Code Quality | ${{ env.INPUT_code-quality-result }} | $([ "${{ env.INPUT_code-quality-result }}" = "success" ] && echo "✅" || echo "❌") |"
-            echo "| 🧪 Test Suite | ${{ env.INPUT_test-suite-result }} | $([ "${{ env.INPUT_test-suite-result }}" = "success" ] && echo "✅" || echo "❌") |"
+            echo "| 🧪 Test Suite | ${{ env.INPUT_test-suite-result }} | $([ "${{ env.INPUT_test-suite-result }}" = "success" ] && echo "✅" || ([ "${{ env.INPUT_test-suite-result }}" = "skipped" ] && echo "⏭️" || echo "❌")) |"
           } >> final-report.md
 
           # Only show benchmarks row if it was attempted

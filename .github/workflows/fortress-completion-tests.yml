@@ -78,7 +78,7 @@ jobs:
       # Download specific artifacts needed for test analysis
       # --------------------------------------------------------------------
       - name: 📥 Download test statistics
-        if: always()
+        if: always() && env.ENABLE_GO_TESTS == 'true'
         uses: ./.github/actions/download-artifact-resilient
         with:
           pattern: "test-stats-*"
@@ -114,7 +114,7 @@ jobs:
           continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
 
       - name: 📥 Download test failure artifacts
-        if: always()
+        if: always() && env.ENABLE_GO_TESTS == 'true'
         uses: ./.github/actions/download-artifact-resilient
         with:
           pattern: "test-results-unit-*"
@@ -126,7 +126,7 @@ jobs:
           continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
 
       - name: 📥 Download fuzz test failure artifacts
-        if: always()
+        if: always() && env.ENABLE_GO_TESTS == 'true' && env.ENABLE_FUZZ_TESTING == 'true'
         uses: ./.github/actions/download-artifact-resilient
         with:
           pattern: "test-results-fuzz-*"
@@ -333,7 +333,7 @@ jobs:
               echo "failure-metrics={\"total_failures\":$TOTAL_FAILURES,\"has_error_output\":$HAS_ERROR_OUTPUT}" >> $GITHUB_OUTPUT
             fi
           else
-            # No test statistics available - likely fork PR with skipped test suite
+            # No test statistics available - check if tests were disabled or fork PR
             {
               echo ""
               echo ""
@@ -341,11 +341,17 @@ jobs:
               echo ""
               echo "| Status | Details |"
               echo "|--------|---------|"
-              echo "| **Test Suite** | ⚠️ Skipped - No test statistics available |"
-              echo "| **Reason** | Tests may have been skipped for fork PR security restrictions |"
-              echo "| **Note** | Repository maintainers can run full tests on merged code |"
-              echo ""
-              echo "_For security reasons, fork PRs do not have access to test execution secrets._"
+              if [[ "${{ env.ENABLE_GO_TESTS }}" == "false" ]]; then
+                echo "| **Test Suite** | ❌ Disabled - Set ENABLE_GO_TESTS=true to enable |"
+                echo "| **Reason** | Tests are disabled via configuration flag |"
+                echo "| **Note** | Enable ENABLE_GO_TESTS in .env.custom or .env.base to run tests |"
+              else
+                echo "| **Test Suite** | ⚠️ Skipped - No test statistics available |"
+                echo "| **Reason** | Tests may have been skipped for fork PR security restrictions |"
+                echo "| **Note** | Repository maintainers can run full tests on merged code |"
+                echo ""
+                echo "_For security reasons, fork PRs do not have access to test execution secrets._"
+              fi
             } >> tests-section.md
           fi
 

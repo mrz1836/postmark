@@ -241,7 +241,8 @@ jobs:
       needs.setup.result == 'success' &&
       needs.test-magex.result == 'success' &&
       (needs.warm-cache.result == 'success' || needs.warm-cache.result == 'skipped') &&
-      needs.setup.outputs.is-fork-pr != 'true'
+      needs.setup.outputs.is-fork-pr != 'true' &&
+      needs.setup.outputs.go-tests-enabled == 'true'
     permissions:
       contents: write # Write repository content and push to gh-pages branch for test execution
       pull-requests: write # Required: Coverage workflow needs to create PR comments
@@ -255,6 +256,7 @@ jobs:
       coverage-provider: ${{ needs.setup.outputs.coverage-provider }}
       env-json: ${{ needs.load-env.outputs.env-json }}
       fuzz-testing-enabled: ${{ needs.setup.outputs.fuzz-testing-enabled }}
+      go-tests-enabled: ${{ needs.setup.outputs.go-tests-enabled }}
       go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
       go-secondary-version: ${{ needs.setup.outputs.go-secondary-version }}
       primary-runner: ${{ needs.setup.outputs.primary-runner }}
@@ -332,7 +334,7 @@ jobs:
             echo "| 🔒 Security | ${{ needs.security.result }} | Required |"
             echo "| 📊 Code Quality | ${{ needs.code-quality.result }} | Required |"
             echo "| 🪝 Pre-commit | ${{ needs.pre-commit.result }} | ${{ needs.setup.outputs.pre-commit-enabled == 'true' && 'Required' || 'Skipped' }} |"
-            echo "| 🧪 Test Suite | ${{ needs.test-suite.result }} | Required |"
+            echo "| 🧪 Test Suite | ${{ needs.test-suite.result }} | ${{ needs.setup.outputs.go-tests-enabled == 'true' && 'Required' || 'Skipped' }} |"
             echo "| 🏃 Benchmarks | ${{ needs.benchmarks.result }} | Optional ⚠️ |"
             echo ""
             if [[ "${{ needs.benchmarks.result }}" == "failure" ]]; then
@@ -376,9 +378,12 @@ jobs:
             FAILED=true
           fi
 
-          if [[ "${{ needs.test-suite.result }}" == "failure" || "${{ needs.test-suite.result }}" == "cancelled" ]]; then
-            echo "❌ Test suite failed or was cancelled" >&2
-            FAILED=true
+          # Only check test-suite if it was enabled
+          if [[ "${{ needs.setup.outputs.go-tests-enabled }}" == "true" ]]; then
+            if [[ "${{ needs.test-suite.result }}" == "failure" || "${{ needs.test-suite.result }}" == "cancelled" ]]; then
+              echo "❌ Test suite failed or was cancelled" >&2
+              FAILED=true
+            fi
           fi
 
           # Check benchmarks (currently optional - just warn if they fail)
