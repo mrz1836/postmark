@@ -92,7 +92,7 @@ jobs:
       # Check out code to access env file
       # --------------------------------------------------------------------
       - name: 📥 Checkout code (sparse)
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           sparse-checkout: |
             .github/.env.base
@@ -411,9 +411,17 @@ jobs:
     name: 🚀 Release Version
     needs: [load-env, setup, test-magex, test-suite, security, code-quality, pre-commit]
     # Only run on successful tag pushes from same repository (not forks)
+    # Allow release even if test-suite was skipped (when ENABLE_GO_TESTS=false)
     if: |
+      !cancelled() &&
       startsWith(github.ref, 'refs/tags/v') &&
-      needs.setup.outputs.is-fork-pr != 'true'
+      needs.setup.outputs.is-fork-pr != 'true' &&
+      needs.setup.result == 'success' &&
+      needs.test-magex.result == 'success' &&
+      (needs.test-suite.result == 'success' || needs.test-suite.result == 'skipped') &&
+      needs.security.result == 'success' &&
+      needs.code-quality.result == 'success' &&
+      needs.pre-commit.result == 'success'
     uses: ./.github/workflows/fortress-release.yml
     with:
       env-json: ${{ needs.load-env.outputs.env-json }}
