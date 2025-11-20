@@ -88,6 +88,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write # Required: Update PR status and enable auto-merge
+      issues: write # Required: Add labels and create comments
     outputs:
       action-taken: ${{ steps.process.outputs.action }}
       pr-number: ${{ github.event.pull_request.number }}
@@ -117,6 +118,8 @@ jobs:
           SKIP_BOT_PRS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_BOT_PRS')
           SKIP_FORK_PRS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_FORK_PRS')
           COMMENT_ON_FORK_SKIP=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_COMMENT_ON_FORK_SKIP')
+          AUTO_MERGE_REQUIRE_LABEL=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_REQUIRE_LABEL')
+          AUTO_MERGE_LABEL=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_LABEL')
           PREFERRED_TOKEN=$(echo "$ENV_JSON" | jq -r '.PREFERRED_GITHUB_TOKEN')
 
           # Validate required configuration
@@ -138,6 +141,8 @@ jobs:
           echo "SKIP_BOT_PRS=$SKIP_BOT_PRS" >> $GITHUB_ENV
           echo "SKIP_FORK_PRS=$SKIP_FORK_PRS" >> $GITHUB_ENV
           echo "COMMENT_ON_FORK_SKIP=$COMMENT_ON_FORK_SKIP" >> $GITHUB_ENV
+          echo "AUTO_MERGE_REQUIRE_LABEL=$AUTO_MERGE_REQUIRE_LABEL" >> $GITHUB_ENV
+          echo "AUTO_MERGE_LABEL=$AUTO_MERGE_LABEL" >> $GITHUB_ENV
 
           # Determine default merge type
           DEFAULT_MERGE_TYPE=$(echo "$MERGE_TYPES" | cut -d',' -f1)
@@ -161,6 +166,8 @@ jobs:
           echo "  🤖 Skip bot PRs: $SKIP_BOT_PRS"
           echo "  🍴 Skip fork PRs: $SKIP_FORK_PRS"
           echo "  💬 Comment on fork skip: $COMMENT_ON_FORK_SKIP"
+          echo "  🏷️ Require automerge label: $AUTO_MERGE_REQUIRE_LABEL"
+          echo "  🏷️ Automerge label name: $AUTO_MERGE_LABEL"
           echo "  🔑 Token: Selected via github-script action"
 
       # --------------------------------------------------------------------
@@ -259,6 +266,21 @@ jobs:
                 core.setOutput('action', 'skip-wip');
                 return;
               }
+            }
+
+            // ————————————————————————————————————————————————————————————————
+            // Check for automerge label requirement
+            // ————————————————————————————————————————————————————————————————
+            if (process.env.AUTO_MERGE_REQUIRE_LABEL === 'true') {
+              const automergeLabel = process.env.AUTO_MERGE_LABEL || 'automerge';
+              const hasAutomergeLabel = labels.includes(automergeLabel);
+
+              if (!hasAutomergeLabel) {
+                console.log(`🏷️  Missing required label "${automergeLabel}" - skipping auto-merge`);
+                core.setOutput('action', 'skip-missing-automerge-label');
+                return;
+              }
+              console.log(`✅ Has required automerge label: "${automergeLabel}"`);
             }
 
             // ————————————————————————————————————————————————————————————————
@@ -517,6 +539,9 @@ jobs:
             "skip-wip")
               ACTION_DESC="🚧 Skipped (work in progress)"
               ;;
+            "skip-missing-automerge-label")
+              ACTION_DESC="🏷️ Skipped (missing automerge label)"
+              ;;
             "conditions-not-met")
               ACTION_DESC="⏳ Conditions not met"
               ;;
@@ -579,6 +604,9 @@ jobs:
               ;;
             skip-fork)
               echo "🍴 Action: Skipped - Fork PR (security policy)"
+              ;;
+            skip-missing-automerge-label)
+              echo "🏷️ Action: Skipped - Missing automerge label"
               ;;
             skip-*)
               echo "⏭️ Action: Skipped - $ACTION"

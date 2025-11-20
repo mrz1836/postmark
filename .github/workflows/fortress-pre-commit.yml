@@ -131,7 +131,9 @@ jobs:
 
       # --------------------------------------------------------------------
       # Restore (and later save) a compact cache for go-pre-commit tools
-      # (golangci-lint, gofumpt) to avoid reinstalling on every run
+      # Primary: gitleaks (installed as binary by go-pre-commit)
+      # Note: golangci-lint, gofumpt, goimports are managed by MAGE-X/other workflows
+      # Cache key includes all versions to invalidate when any tool version changes
       # --------------------------------------------------------------------
       - name: 💾 Restore go-pre-commit tools cache
         id: go-pre-commit-tools-cache
@@ -157,12 +159,13 @@ jobs:
           if [[ -f "$GO_PRE_COMMIT_BIN" ]]; then
             echo "✅ Using cached go-pre-commit binary"
             cp "$GO_PRE_COMMIT_BIN" "$GOPATH_BIN/"
+            chmod +x "$GOPATH_BIN/go-pre-commit"
           fi
 
           # If we restored tools cache, copy them to GOPATH/bin
           if [[ -d "$TOOLS_DIR" ]]; then
             echo "✅ Using cached go-pre-commit tools"
-            for tool in golangci-lint gofumpt; do
+            for tool in golangci-lint gofumpt gitleaks goimports; do
               if [[ -f "$TOOLS_DIR/$tool" ]]; then
                 echo "  • Restoring cached $tool"
                 cp "$TOOLS_DIR/$tool" "$GOPATH_BIN/"
@@ -536,6 +539,53 @@ jobs:
           fi
 
       # --------------------------------------------------------------------
+      # Debug: Show tool locations before go-pre-commit runs
+      # Only runs when GO_PRE_COMMIT_DEBUG=true
+      # --------------------------------------------------------------------
+      - name: 🔍 Debug tool locations (before execution)
+        if: steps.install-pre-commit.outputs.install_success == 'true' || steps.install-pre-commit-cached.outputs.install_success == 'true'
+        run: |
+          # Skip debug output unless explicitly enabled
+          if [[ "${{ env.GO_PRE_COMMIT_DEBUG }}" != "true" ]]; then
+            echo "🔍 Debug mode disabled (set GO_PRE_COMMIT_DEBUG=true to enable)"
+            exit 0
+          fi
+
+          echo "🔍 Checking tool locations BEFORE go-pre-commit execution..."
+          echo "============================================================"
+          GOPATH_BIN="$(go env GOPATH)/bin"
+          echo ""
+          echo "📂 GOPATH/bin contents ($GOPATH_BIN):"
+          if [[ -d "$GOPATH_BIN" ]]; then
+            for tool in golangci-lint gofumpt gitleaks goimports go-pre-commit; do
+              if [[ -f "$GOPATH_BIN/$tool" ]]; then
+                SIZE=$(du -h "$GOPATH_BIN/$tool" 2>/dev/null | cut -f1)
+                echo "  ✅ $tool: $SIZE"
+              else
+                echo "  ❌ $tool: NOT FOUND"
+              fi
+            done
+          else
+            echo "  ❌ Directory does not exist"
+          fi
+          echo ""
+          echo "📂 ~/.cache/go-pre-commit contents:"
+          if [[ -d "$HOME/.cache/go-pre-commit" ]]; then
+            echo "  Directory exists"
+            find "$HOME/.cache/go-pre-commit" -type f \( -name "golangci-lint" -o -name "gofumpt" -o -name "gitleaks" -o -name "goimports" \) 2>/dev/null || echo "  No tools found"
+          else
+            echo "  ❌ Directory does not exist"
+          fi
+          echo ""
+          echo "📂 ~/.cache/go-pre-commit-tools contents:"
+          if [[ -d "$HOME/.cache/go-pre-commit-tools" ]]; then
+            ls -lah "$HOME/.cache/go-pre-commit-tools" 2>/dev/null || echo "  Empty"
+          else
+            echo "  ❌ Directory does not exist"
+          fi
+          echo "============================================================"
+
+      # --------------------------------------------------------------------
       # Run pre-commit checks
       # --------------------------------------------------------------------
       - name: 🚀 Run pre-commit checks
@@ -645,8 +695,70 @@ jobs:
           echo "✅ All pre-commit checks passed successfully"
 
       # --------------------------------------------------------------------
+      # Debug: Show tool locations after go-pre-commit runs
+      # Only runs when GO_PRE_COMMIT_DEBUG=true
+      # --------------------------------------------------------------------
+      - name: 🔍 Debug tool locations (after execution)
+        if: always() && (steps.install-pre-commit.outputs.install_success == 'true' || steps.install-pre-commit-cached.outputs.install_success == 'true')
+        run: |
+          # Skip debug output unless explicitly enabled
+          if [[ "${{ env.GO_PRE_COMMIT_DEBUG }}" != "true" ]]; then
+            echo "🔍 Debug mode disabled (set GO_PRE_COMMIT_DEBUG=true to enable)"
+            exit 0
+          fi
+
+          echo "🔍 Checking tool locations AFTER go-pre-commit execution..."
+          echo "==========================================================="
+          GOPATH_BIN="$(go env GOPATH)/bin"
+          echo ""
+          echo "📂 GOPATH/bin contents ($GOPATH_BIN):"
+          if [[ -d "$GOPATH_BIN" ]]; then
+            for tool in golangci-lint gofumpt gitleaks goimports go-pre-commit; do
+              if [[ -f "$GOPATH_BIN/$tool" ]]; then
+                SIZE=$(du -h "$GOPATH_BIN/$tool" 2>/dev/null | cut -f1)
+                VERSION=$("$GOPATH_BIN/$tool" --version 2>&1 | head -1 || echo "unknown")
+                echo "  ✅ $tool: $SIZE - $VERSION"
+              else
+                echo "  ❌ $tool: NOT FOUND"
+              fi
+            done
+          else
+            echo "  ❌ Directory does not exist"
+          fi
+          echo ""
+          echo "📂 ~/.cache/go-pre-commit contents:"
+          if [[ -d "$HOME/.cache/go-pre-commit" ]]; then
+            echo "  📊 Directory exists - checking for tools:"
+            find "$HOME/.cache/go-pre-commit" -type f \( -name "golangci-lint" -o -name "gofumpt" -o -name "gitleaks" -o -name "goimports" \) -exec ls -lh {} \; 2>/dev/null || echo "    No tools found"
+            echo "  📊 Directory size: $(du -sh "$HOME/.cache/go-pre-commit" 2>/dev/null | cut -f1)"
+          else
+            echo "  ❌ Directory does not exist"
+          fi
+          echo ""
+          echo "📂 ~/.cache/go-pre-commit-tools contents:"
+          if [[ -d "$HOME/.cache/go-pre-commit-tools" ]]; then
+            echo "  📊 Directory exists:"
+            ls -lah "$HOME/.cache/go-pre-commit-tools" 2>/dev/null || echo "    Empty"
+            echo "  📊 Directory size: $(du -sh "$HOME/.cache/go-pre-commit-tools" 2>/dev/null | cut -f1)"
+          else
+            echo "  ❌ Directory does not exist"
+          fi
+          echo ""
+          echo "📂 Searching common tool locations for binaries:"
+          echo "  (Checking: GOPATH/bin, .local/bin, .cache, bin)"
+          for tool in golangci-lint gofumpt gitleaks goimports; do
+            echo "  🔍 Searching for $tool:"
+            find "$HOME/go/bin" "$HOME/.local/bin" "$HOME/.cache" "$HOME/bin" \
+              -maxdepth 3 -type f -name "$tool" 2>/dev/null | head -5 | sed 's/^/    /' || echo "    Not found"
+          done
+          echo "==========================================================="
+
+      # --------------------------------------------------------------------
       # Cache tools that were installed during pre-commit execution
-      # This step ensures tools like golangci-lint and gofumpt are cached for future runs
+      # Primary tool: gitleaks (installed as binary by go-pre-commit)
+      # Note: golangci-lint, gofumpt, goimports are not installed as binaries
+      #       (managed by MAGE-X or invoked via go run by go-pre-commit)
+      # Only cache when tools cache was not hit - tools won't have changed if restored from cache
       # --------------------------------------------------------------------
       - name: 💾 Cache go-pre-commit tools after installation
         if: steps.go-pre-commit-tools-cache.outputs.cache-hit != 'true' && (steps.install-pre-commit.outputs.install_success == 'true' || steps.install-pre-commit-cached.outputs.install_success == 'true')
@@ -660,7 +772,7 @@ jobs:
           mkdir -p "$TOOLS_DIR"
 
           # Cache tools that may have been installed by go-pre-commit
-          for tool in golangci-lint gofumpt; do
+          for tool in golangci-lint gofumpt gitleaks goimports; do
             if [[ -f "$GOPATH_BIN/$tool" ]]; then
               echo "  • Caching $tool"
               cp "$GOPATH_BIN/$tool" "$TOOLS_DIR/"

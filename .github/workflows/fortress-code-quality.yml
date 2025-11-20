@@ -273,7 +273,48 @@ jobs:
           echo "version=${{ env.MAGE_X_GOLANGCI_LINT_VERSION }}" >> $GITHUB_OUTPUT
 
       # --------------------------------------------------------------------
-      # Restore Cache golangci-lint
+      # Cache golangci-lint binary (prevents re-downloading)
+      # --------------------------------------------------------------------
+      - name: 💾 Restore golangci-lint binary cache
+        id: cache-golangci-lint-binary
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/golangci-lint-bin
+          key: ${{ inputs.primary-runner }}-golangci-lint-binary-${{ env.MAGE_X_GOLANGCI_LINT_VERSION }}
+
+      # --------------------------------------------------------------------
+      # Install cached golangci-lint binary to GOPATH/bin
+      # --------------------------------------------------------------------
+      - name: 📦 Install cached golangci-lint binary
+        if: steps.cache-golangci-lint-binary.outputs.cache-hit == 'true'
+        run: |
+          echo "📦 Restoring cached golangci-lint binary..."
+          GOPATH_BIN="$(go env GOPATH)/bin"
+          mkdir -p "$GOPATH_BIN"
+
+          if [[ -f ~/.cache/golangci-lint-bin/golangci-lint ]]; then
+            cp ~/.cache/golangci-lint-bin/golangci-lint "$GOPATH_BIN/"
+            chmod +x "$GOPATH_BIN/golangci-lint"
+            echo "✅ Cached golangci-lint binary installed to $GOPATH_BIN"
+            echo "📍 Version: $(golangci-lint --version | head -n1 || echo 'version check failed')"
+          else
+            echo "⚠️ Cache hit but binary not found, will install via MAGE-X"
+          fi
+
+      # --------------------------------------------------------------------
+      # Cache golangci-lint build cache (prevents re-compiling)
+      # --------------------------------------------------------------------
+      - name: 💾 Cache golangci-lint build cache
+        id: cache-golangci-lint-build
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/go-build
+          key: ${{ inputs.primary-runner }}-go-build-golangci-${{ env.MAGE_X_GOLANGCI_LINT_VERSION }}-${{ hashFiles('**/*.go') }}
+          restore-keys: |
+            ${{ inputs.primary-runner }}-go-build-golangci-${{ env.MAGE_X_GOLANGCI_LINT_VERSION }}-
+
+      # --------------------------------------------------------------------
+      # Cache golangci-lint analysis results
       # --------------------------------------------------------------------
       - name: 💾 Cache golangci-lint analysis
         id: cache-golangci-lint
@@ -314,6 +355,24 @@ jobs:
           echo "✅ Code linting completed successfully"
 
       # --------------------------------------------------------------------
+      # Save golangci-lint binary to cache (on cache miss)
+      # --------------------------------------------------------------------
+      - name: 💾 Save golangci-lint binary to cache
+        if: steps.cache-golangci-lint-binary.outputs.cache-hit != 'true'
+        run: |
+          echo "💾 Caching golangci-lint binary for future runs..."
+          GOPATH_BIN="$(go env GOPATH)/bin"
+          mkdir -p ~/.cache/golangci-lint-bin
+
+          if [[ -f "$GOPATH_BIN/golangci-lint" ]]; then
+            cp "$GOPATH_BIN/golangci-lint" ~/.cache/golangci-lint-bin/
+            echo "✅ golangci-lint binary cached"
+            echo "📊 Binary size: $(du -h "$GOPATH_BIN/golangci-lint" | cut -f1)"
+          else
+            echo "⚠️ golangci-lint binary not found at $GOPATH_BIN, cannot cache"
+          fi
+
+      # --------------------------------------------------------------------
       # Summary of golangci-lint results
       # --------------------------------------------------------------------
       - name: 📊 Job Summary
@@ -324,7 +383,8 @@ jobs:
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **Configuration** | Custom ruleset via .golangci.json |" >> $GITHUB_STEP_SUMMARY
           echo "| **Version** | ${{ steps.golangci-lint-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Cache** | 💾 Analysis cache enabled |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Binary Cache** | ${{ steps.cache-golangci-lint-binary.outputs.cache-hit == 'true' && '💚 Cache Hit' || '📦 Downloaded & Cached' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Analysis Cache** | 💾 Enabled |" >> $GITHUB_STEP_SUMMARY
           echo "| **Result** | ✅ All checks passed |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "🎯 **Code quality standards met - no linting issues found.**" >> $GITHUB_STEP_SUMMARY

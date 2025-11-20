@@ -110,6 +110,8 @@ jobs:
           AUTO_MERGE_PATCH=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH')
           AUTO_MERGE_MINOR_DEV=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_DEV')
           AUTO_MERGE_MINOR_PROD=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_PROD')
+          AUTO_MERGE_PATCH_INDIRECT=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH_INDIRECT')
+          AUTO_MERGE_MINOR_INDIRECT=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_INDIRECT')
           AUTO_MERGE_SECURITY=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_SECURITY_NON_MAJOR')
           ALERT_ON_MAJOR=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_ALERT_ON_MAJOR')
           ALERT_ON_MINOR_PROD=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_ALERT_ON_MINOR_PROD')
@@ -128,6 +130,8 @@ jobs:
           echo "AUTO_MERGE_PATCH=$AUTO_MERGE_PATCH" >> $GITHUB_ENV
           echo "AUTO_MERGE_MINOR_DEV=$AUTO_MERGE_MINOR_DEV" >> $GITHUB_ENV
           echo "AUTO_MERGE_MINOR_PROD=$AUTO_MERGE_MINOR_PROD" >> $GITHUB_ENV
+          echo "AUTO_MERGE_PATCH_INDIRECT=$AUTO_MERGE_PATCH_INDIRECT" >> $GITHUB_ENV
+          echo "AUTO_MERGE_MINOR_INDIRECT=$AUTO_MERGE_MINOR_INDIRECT" >> $GITHUB_ENV
           echo "AUTO_MERGE_SECURITY=$AUTO_MERGE_SECURITY" >> $GITHUB_ENV
           echo "ALERT_ON_MAJOR=$ALERT_ON_MAJOR" >> $GITHUB_ENV
           echo "ALERT_ON_MINOR_PROD=$ALERT_ON_MINOR_PROD" >> $GITHUB_ENV
@@ -140,6 +144,8 @@ jobs:
           echo "  🔧 Auto-merge patch: $AUTO_MERGE_PATCH"
           echo "  🔧 Auto-merge minor dev: $AUTO_MERGE_MINOR_DEV"
           echo "  🔧 Auto-merge minor prod: $AUTO_MERGE_MINOR_PROD"
+          echo "  🔧 Auto-merge patch indirect: $AUTO_MERGE_PATCH_INDIRECT"
+          echo "  🔧 Auto-merge minor indirect: $AUTO_MERGE_MINOR_INDIRECT"
           echo "  🔒 Auto-merge security (non-major): $AUTO_MERGE_SECURITY"
           echo "  ⚠️ Alert on major: $ALERT_ON_MAJOR"
           echo "  🔍 Alert on minor prod: $ALERT_ON_MINOR_PROD"
@@ -183,19 +189,111 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "🔒 Checking if this is a security update..."
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🔒 SECURITY UPDATE DETECTION"
+          echo "════════════════════════════════════════════════════════════════"
 
-          # Check PR title and labels for security indicators
+          # Check 1: PR title and labels for security indicators
+          echo "📋 Check 1: Analyzing PR labels and title..."
+          echo "  Labels: $PR_LABELS"
+          echo "  Title: $PR_TITLE"
+
           # Using environment variables to prevent script injection
-          if [[ "$PR_LABELS" == *"security"* ]] || \
-             [[ "$PR_TITLE" == *"security"* ]] || \
-             [[ "$PR_TITLE" == *"[Security]"* ]]; then
+          if [[ "${PR_LABELS,,}" == *"security"* ]]; then
+            echo "  ✅ MATCH: 'security' found in PR labels"
             echo "is_security=true" >> $GITHUB_OUTPUT
-            echo "✅ Security update detected"
+            echo "════════════════════════════════════════════════════════════════"
+            echo "🎯 RESULT: Security update detected (via labels)"
+            echo "════════════════════════════════════════════════════════════════"
+            exit 0
+          elif [[ "${PR_TITLE,,}" == *"security"* ]]; then
+            echo "  ✅ MATCH: Security keyword found in PR title"
+            echo "is_security=true" >> $GITHUB_OUTPUT
+            echo "════════════════════════════════════════════════════════════════"
+            echo "🎯 RESULT: Security update detected (via title)"
+            echo "════════════════════════════════════════════════════════════════"
+            exit 0
           else
+            echo "  ❌ NO MATCH: No security indicators in labels/title"
+          fi
+
+          # Check 2: PR body for security/vulnerability indicators
+          echo ""
+          echo "📄 Check 2: Scanning PR body for security indicators..."
+
+          if [[ "${PR_BODY,,}" == *"security"* ]]; then
+            echo "  ✅ MATCH: 'security' found in PR body"
+            echo "is_security=true" >> $GITHUB_OUTPUT
+            echo "════════════════════════════════════════════════════════════════"
+            echo "🎯 RESULT: Security update detected (via PR body - 'security')"
+            echo "════════════════════════════════════════════════════════════════"
+            exit 0
+          elif [[ "${PR_BODY,,}" == *"vulnerability"* ]]; then
+            echo "  ✅ MATCH: 'vulnerability' found in PR body"
+            echo "is_security=true" >> $GITHUB_OUTPUT
+            echo "════════════════════════════════════════════════════════════════"
+            echo "🎯 RESULT: Security update detected (via PR body - 'vulnerability')"
+            echo "════════════════════════════════════════════════════════════════"
+            exit 0
+          elif [[ "$PR_BODY" == *"CVE-"* ]]; then
+            echo "  ✅ MATCH: CVE identifier found in PR body"
+            echo "is_security=true" >> $GITHUB_OUTPUT
+            echo "════════════════════════════════════════════════════════════════"
+            echo "🎯 RESULT: Security update detected (via PR body - CVE)"
+            echo "════════════════════════════════════════════════════════════════"
+            exit 0
+          elif [[ "$PR_BODY" == *"GHSA-"* ]]; then
+            echo "  ✅ MATCH: GitHub Security Advisory found in PR body"
+            echo "is_security=true" >> $GITHUB_OUTPUT
+            echo "════════════════════════════════════════════════════════════════"
+            echo "🎯 RESULT: Security update detected (via PR body - GHSA)"
+            echo "════════════════════════════════════════════════════════════════"
+            exit 0
+          else
+            echo "  ❌ NO MATCH: No security indicators in PR body"
+          fi
+
+          # Check 3: Query GitHub Security Advisories for Go ecosystem
+          echo ""
+          echo "🌐 Check 3: Querying GitHub Security Advisories API..."
+          DEPENDENCY="${{ steps.metadata.outputs.dependency-names }}"
+          echo "  Package: $DEPENDENCY"
+          echo "  Ecosystem: GO"
+
+          # Query for vulnerabilities affecting this package
+          echo "  Executing GraphQL query..."
+          ADVISORIES=$(gh api graphql -f query='
+            query($ecosystem: SecurityAdvisoryEcosystem!, $package: String!) {
+              securityVulnerabilities(first: 10, ecosystem: $ecosystem, package: $package) {
+                nodes {
+                  advisory {
+                    severity
+                    publishedAt
+                    summary
+                  }
+                  vulnerableVersionRange
+                }
+              }
+            }' -f ecosystem=GO -f package="$DEPENDENCY" --jq '.data.securityVulnerabilities.nodes | length' 2>/dev/null || echo "0")
+
+          echo "  Advisories found: $ADVISORIES"
+
+          if [[ "$ADVISORIES" -gt 0 ]]; then
+            echo "  ✅ MATCH: $ADVISORIES vulnerabilities found in GitHub Advisories"
+            echo "is_security=true" >> $GITHUB_OUTPUT
+            echo "════════════════════════════════════════════════════════════════"
+            echo "🎯 RESULT: Security update detected (via GitHub Advisories)"
+            echo "════════════════════════════════════════════════════════════════"
+            exit 0
+          else
+            echo "  ❌ NO MATCH: No vulnerabilities found in GitHub Advisories"
             echo "is_security=false" >> $GITHUB_OUTPUT
-            echo "ℹ️ Not a security update"
+            echo "════════════════════════════════════════════════════════════════"
+            echo "🎯 RESULT: Not a security update"
+            echo "════════════════════════════════════════════════════════════════"
           fi
 
       # --------------------------------------------------------------------
@@ -204,60 +302,272 @@ jobs:
       - name: 🎯 Determine action
         id: determine-action
         run: |
-          echo "🎯 Determining action based on update type and configuration..."
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🎯 ACTION DETERMINATION LOGIC"
+          echo "════════════════════════════════════════════════════════════════"
 
           UPDATE_TYPE="${{ steps.metadata.outputs.update-type }}"
           DEP_TYPE="${{ steps.metadata.outputs.dependency-type }}"
           IS_SECURITY="${{ steps.check-security.outputs.is_security }}"
           ACTION="none"
 
+          echo "📊 Input Variables:"
+          echo "  Update Type: $UPDATE_TYPE"
+          echo "  Dependency Type: $DEP_TYPE"
+          echo "  Is Security: $IS_SECURITY"
+          echo ""
+          echo "📋 Active Configuration:"
+          echo "  AUTO_MERGE_SECURITY: ${{ env.AUTO_MERGE_SECURITY }}"
+          echo "  AUTO_MERGE_PATCH: ${{ env.AUTO_MERGE_PATCH }}"
+          echo "  AUTO_MERGE_PATCH_INDIRECT: ${{ env.AUTO_MERGE_PATCH_INDIRECT }}"
+          echo "  AUTO_MERGE_MINOR_DEV: ${{ env.AUTO_MERGE_MINOR_DEV }}"
+          echo "  AUTO_MERGE_MINOR_PROD: ${{ env.AUTO_MERGE_MINOR_PROD }}"
+          echo "  AUTO_MERGE_MINOR_INDIRECT: ${{ env.AUTO_MERGE_MINOR_INDIRECT }}"
+          echo "  ALERT_ON_MAJOR: ${{ env.ALERT_ON_MAJOR }}"
+          echo "  ALERT_ON_MINOR_PROD: ${{ env.ALERT_ON_MINOR_PROD }}"
+          echo ""
+          echo "🔄 Evaluating decision tree..."
+          echo "────────────────────────────────────────────────────────────────"
+
           # Security updates (if enabled)
-          if [[ "$IS_SECURITY" == "true" ]] && [[ "${{ env.AUTO_MERGE_SECURITY }}" == "true" ]]; then
-            if [[ "$UPDATE_TYPE" != "version-update:semver-major" ]]; then
-              ACTION="auto-merge-security"
+          echo "🔍 Checking Rule 1: Security updates..."
+          if [[ "$IS_SECURITY" == "true" ]]; then
+            echo "  ✅ IS_SECURITY == true"
+            if [[ "${{ env.AUTO_MERGE_SECURITY }}" == "true" ]]; then
+              echo "  ✅ AUTO_MERGE_SECURITY == true"
+              if [[ "$UPDATE_TYPE" != "version-update:semver-major" ]]; then
+                echo "  ✅ UPDATE_TYPE != major"
+                ACTION="auto-merge-security"
+                echo "  🎯 MATCH! Action: $ACTION"
+                echo "  📝 Reason: Non-major security update with auto-merge enabled"
+              else
+                echo "  ❌ UPDATE_TYPE == major"
+                ACTION="alert-security-major"
+                echo "  🎯 MATCH! Action: $ACTION"
+                echo "  📝 Reason: Major security update requires manual review"
+              fi
             else
-              ACTION="alert-security-major"
-            fi
-          # Patch updates
-          elif [[ "$UPDATE_TYPE" == "version-update:semver-patch" ]]; then
-            if [[ "${{ env.AUTO_MERGE_PATCH }}" == "true" ]]; then
-              ACTION="auto-merge-patch"
-            else
-              ACTION="manual-review"
-            fi
-          # Minor updates - development dependencies
-          elif [[ "$UPDATE_TYPE" == "version-update:semver-minor" ]] && [[ "$DEP_TYPE" == "direct:development" ]]; then
-            if [[ "${{ env.AUTO_MERGE_MINOR_DEV }}" == "true" ]]; then
-              ACTION="auto-merge-minor-dev"
-            else
-              ACTION="manual-review"
-            fi
-          # Minor updates - production dependencies
-          elif [[ "$UPDATE_TYPE" == "version-update:semver-minor" ]] && [[ "$DEP_TYPE" == "direct:production" ]]; then
-            if [[ "${{ env.AUTO_MERGE_MINOR_PROD }}" == "true" ]]; then
-              ACTION="auto-merge-minor-prod"
-            elif [[ "${{ env.ALERT_ON_MINOR_PROD }}" == "true" ]]; then
-              ACTION="alert-minor-prod"
-            else
-              ACTION="manual-review"
-            fi
-          # Major updates
-          elif [[ "$UPDATE_TYPE" == "version-update:semver-major" ]]; then
-            if [[ "${{ env.ALERT_ON_MAJOR }}" == "true" ]]; then
-              ACTION="alert-major"
-            else
-              ACTION="manual-review"
+              echo "  ❌ AUTO_MERGE_SECURITY == false"
+              echo "  ⏭️ Skipping security auto-merge (disabled)"
             fi
           else
+            echo "  ❌ IS_SECURITY == false"
+            echo "  ⏭️ Not a security update, checking other rules..."
+          fi
+          echo ""
+
+          # Patch updates - direct dependencies
+          if [[ "$ACTION" == "none" ]]; then
+            echo "🔍 Checking Rule 2: Patch updates (direct dependencies)..."
+            if [[ "$UPDATE_TYPE" == "version-update:semver-patch" ]]; then
+              echo "  ✅ UPDATE_TYPE == patch"
+              if [[ "$DEP_TYPE" != "indirect" ]]; then
+                echo "  ✅ DEP_TYPE != indirect (is direct)"
+                if [[ "${{ env.AUTO_MERGE_PATCH }}" == "true" ]]; then
+                  echo "  ✅ AUTO_MERGE_PATCH == true"
+                  ACTION="auto-merge-patch"
+                  echo "  🎯 MATCH! Action: $ACTION"
+                  echo "  📝 Reason: Patch update for direct dependency with auto-merge enabled"
+                else
+                  echo "  ❌ AUTO_MERGE_PATCH == false"
+                  ACTION="manual-review"
+                  echo "  🎯 MATCH! Action: $ACTION"
+                  echo "  📝 Reason: Patch auto-merge is disabled in configuration"
+                fi
+              else
+                echo "  ❌ DEP_TYPE == indirect"
+                echo "  ⏭️ Skipping, will check indirect patch rule next"
+              fi
+            else
+              echo "  ❌ UPDATE_TYPE != patch"
+              echo "  ⏭️ Not a patch update"
+            fi
+          fi
+          echo ""
+
+          # Patch updates - indirect dependencies
+          if [[ "$ACTION" == "none" ]]; then
+            echo "🔍 Checking Rule 3: Patch updates (indirect dependencies)..."
+            if [[ "$UPDATE_TYPE" == "version-update:semver-patch" ]]; then
+              echo "  ✅ UPDATE_TYPE == patch"
+              if [[ "$DEP_TYPE" == "indirect" ]]; then
+                echo "  ✅ DEP_TYPE == indirect"
+                if [[ "${{ env.AUTO_MERGE_PATCH_INDIRECT }}" == "true" ]]; then
+                  echo "  ✅ AUTO_MERGE_PATCH_INDIRECT == true"
+                  ACTION="auto-merge-patch-indirect"
+                  echo "  🎯 MATCH! Action: $ACTION"
+                  echo "  📝 Reason: Patch update for indirect dependency with auto-merge enabled"
+                else
+                  echo "  ❌ AUTO_MERGE_PATCH_INDIRECT == false"
+                  ACTION="manual-review"
+                  echo "  🎯 MATCH! Action: $ACTION"
+                  echo "  📝 Reason: Indirect patch auto-merge is disabled in configuration"
+                fi
+              else
+                echo "  ❌ DEP_TYPE != indirect"
+                echo "  ⏭️ Not an indirect dependency"
+              fi
+            else
+              echo "  ❌ UPDATE_TYPE != patch"
+              echo "  ⏭️ Not a patch update"
+            fi
+          fi
+          echo ""
+
+          # Minor updates - development dependencies
+          if [[ "$ACTION" == "none" ]]; then
+            echo "🔍 Checking Rule 4: Minor updates (development dependencies)..."
+            if [[ "$UPDATE_TYPE" == "version-update:semver-minor" ]]; then
+              echo "  ✅ UPDATE_TYPE == minor"
+              if [[ "$DEP_TYPE" == "direct:development" ]]; then
+                echo "  ✅ DEP_TYPE == direct:development"
+                if [[ "${{ env.AUTO_MERGE_MINOR_DEV }}" == "true" ]]; then
+                  echo "  ✅ AUTO_MERGE_MINOR_DEV == true"
+                  ACTION="auto-merge-minor-dev"
+                  echo "  🎯 MATCH! Action: $ACTION"
+                  echo "  📝 Reason: Minor update for dev dependency with auto-merge enabled"
+                else
+                  echo "  ❌ AUTO_MERGE_MINOR_DEV == false"
+                  ACTION="manual-review"
+                  echo "  🎯 MATCH! Action: $ACTION"
+                  echo "  📝 Reason: Minor dev dependency auto-merge is disabled"
+                fi
+              else
+                echo "  ❌ DEP_TYPE != direct:development (is: $DEP_TYPE)"
+                echo "  ⏭️ Not a development dependency"
+              fi
+            else
+              echo "  ❌ UPDATE_TYPE != minor"
+              echo "  ⏭️ Not a minor update"
+            fi
+          fi
+          echo ""
+
+          # Minor updates - production dependencies
+          if [[ "$ACTION" == "none" ]]; then
+            echo "🔍 Checking Rule 5: Minor updates (production dependencies)..."
+            if [[ "$UPDATE_TYPE" == "version-update:semver-minor" ]]; then
+              echo "  ✅ UPDATE_TYPE == minor"
+              if [[ "$DEP_TYPE" == "direct:production" ]]; then
+                echo "  ✅ DEP_TYPE == direct:production"
+                if [[ "${{ env.AUTO_MERGE_MINOR_PROD }}" == "true" ]]; then
+                  echo "  ✅ AUTO_MERGE_MINOR_PROD == true"
+                  ACTION="auto-merge-minor-prod"
+                  echo "  🎯 MATCH! Action: $ACTION"
+                  echo "  📝 Reason: Minor update for prod dependency with auto-merge enabled"
+                elif [[ "${{ env.ALERT_ON_MINOR_PROD }}" == "true" ]]; then
+                  echo "  ❌ AUTO_MERGE_MINOR_PROD == false"
+                  echo "  ✅ ALERT_ON_MINOR_PROD == true"
+                  ACTION="alert-minor-prod"
+                  echo "  🎯 MATCH! Action: $ACTION"
+                  echo "  📝 Reason: Minor prod dependency - alerting maintainer per config"
+                else
+                  echo "  ❌ AUTO_MERGE_MINOR_PROD == false"
+                  echo "  ❌ ALERT_ON_MINOR_PROD == false"
+                  ACTION="manual-review"
+                  echo "  🎯 MATCH! Action: $ACTION"
+                  echo "  📝 Reason: Minor prod dependency auto-merge and alerts disabled"
+                fi
+              else
+                echo "  ❌ DEP_TYPE != direct:production (is: $DEP_TYPE)"
+                echo "  ⏭️ Not a production dependency"
+              fi
+            else
+              echo "  ❌ UPDATE_TYPE != minor"
+              echo "  ⏭️ Not a minor update"
+            fi
+          fi
+          echo ""
+
+          # Minor updates - indirect dependencies
+          if [[ "$ACTION" == "none" ]]; then
+            echo "🔍 Checking Rule 6: Minor updates (indirect dependencies)..."
+            if [[ "$UPDATE_TYPE" == "version-update:semver-minor" ]]; then
+              echo "  ✅ UPDATE_TYPE == minor"
+              if [[ "$DEP_TYPE" == "indirect" ]]; then
+                echo "  ✅ DEP_TYPE == indirect"
+                if [[ "${{ env.AUTO_MERGE_MINOR_INDIRECT }}" == "true" ]]; then
+                  echo "  ✅ AUTO_MERGE_MINOR_INDIRECT == true"
+                  ACTION="auto-merge-minor-indirect"
+                  echo "  🎯 MATCH! Action: $ACTION"
+                  echo "  📝 Reason: Minor update for indirect dependency with auto-merge enabled"
+                else
+                  echo "  ❌ AUTO_MERGE_MINOR_INDIRECT == false"
+                  ACTION="manual-review"
+                  echo "  🎯 MATCH! Action: $ACTION"
+                  echo "  📝 Reason: Indirect minor auto-merge is disabled in configuration"
+                fi
+              else
+                echo "  ❌ DEP_TYPE != indirect"
+                echo "  ⏭️ Not an indirect dependency"
+              fi
+            else
+              echo "  ❌ UPDATE_TYPE != minor"
+              echo "  ⏭️ Not a minor update"
+            fi
+          fi
+          echo ""
+
+          # Major updates
+          if [[ "$ACTION" == "none" ]]; then
+            echo "🔍 Checking Rule 7: Major updates..."
+            if [[ "$UPDATE_TYPE" == "version-update:semver-major" ]]; then
+              echo "  ✅ UPDATE_TYPE == major"
+              if [[ "${{ env.ALERT_ON_MAJOR }}" == "true" ]]; then
+                echo "  ✅ ALERT_ON_MAJOR == true"
+                ACTION="alert-major"
+                echo "  🎯 MATCH! Action: $ACTION"
+                echo "  📝 Reason: Major update - alerting maintainer for breaking changes"
+              else
+                echo "  ❌ ALERT_ON_MAJOR == false"
+                ACTION="manual-review"
+                echo "  🎯 MATCH! Action: $ACTION"
+                echo "  📝 Reason: Major update with alerts disabled - requires manual review"
+              fi
+            else
+              echo "  ❌ UPDATE_TYPE != major"
+              echo "  ⏭️ Not a major update"
+            fi
+          fi
+          echo ""
+
+          # Fallback
+          if [[ "$ACTION" == "none" ]]; then
+            echo "⚠️ No rules matched - applying fallback..."
             ACTION="manual-review"
+            echo "  🎯 FALLBACK Action: $ACTION"
+            echo "  📝 Reason: No matching rule found - defaulting to manual review"
+            echo "  ⚠️ This shouldn't happen - check workflow logic!"
           fi
 
+          echo ""
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🎯 FINAL DECISION: $ACTION"
+          echo "════════════════════════════════════════════════════════════════"
+
           echo "action=$ACTION" >> $GITHUB_OUTPUT
-          echo "✅ Determined action: $ACTION"
 
       # --------------------------------------------------------------------
       # Handle major version alerts
       # --------------------------------------------------------------------
+      - name: 📊 Log major version alert decision
+        run: |
+          ACTION="${{ steps.determine-action.outputs.action }}"
+          if [[ "$ACTION" == "alert-major" ]] || [[ "$ACTION" == "alert-security-major" ]]; then
+            echo "════════════════════════════════════════════════════════════════"
+            echo "⚠️ MAJOR VERSION ALERT - WILL EXECUTE"
+            echo "════════════════════════════════════════════════════════════════"
+            echo "Action: $ACTION"
+            echo "Next step: Creating alert comment and adding manual-review label"
+          else
+            echo "════════════════════════════════════════════════════════════════"
+            echo "⚠️ MAJOR VERSION ALERT - SKIPPED"
+            echo "════════════════════════════════════════════════════════════════"
+            echo "Action: $ACTION"
+            echo "Reason: Not a major version update requiring alert"
+            echo "Skipping: Major version alert step"
+          fi
+
       - name: ⚠️ Alert on major version bump
         if: steps.determine-action.outputs.action == 'alert-major' || steps.determine-action.outputs.action == 'alert-security-major'
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
@@ -326,6 +636,24 @@ jobs:
       # --------------------------------------------------------------------
       # Handle minor production dependency alerts
       # --------------------------------------------------------------------
+      - name: 📊 Log minor prod dependency alert decision
+        run: |
+          ACTION="${{ steps.determine-action.outputs.action }}"
+          if [[ "$ACTION" == "alert-minor-prod" ]]; then
+            echo "════════════════════════════════════════════════════════════════"
+            echo "🔍 MINOR PROD DEPENDENCY ALERT - WILL EXECUTE"
+            echo "════════════════════════════════════════════════════════════════"
+            echo "Action: $ACTION"
+            echo "Next step: Creating alert comment for maintainer review"
+          else
+            echo "════════════════════════════════════════════════════════════════"
+            echo "🔍 MINOR PROD DEPENDENCY ALERT - SKIPPED"
+            echo "════════════════════════════════════════════════════════════════"
+            echo "Action: $ACTION"
+            echo "Reason: Not a minor production dependency requiring alert"
+            echo "Skipping: Minor prod alert step"
+          fi
+
       - name: 🔍 Alert on minor production dependency
         if: steps.determine-action.outputs.action == 'alert-minor-prod'
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
@@ -378,15 +706,61 @@ jobs:
       # --------------------------------------------------------------------
       # Auto-merge approved updates
       # --------------------------------------------------------------------
+      - name: 📊 Log auto-merge decision
+        run: |
+          ACTION="${{ steps.determine-action.outputs.action }}"
+          if [[ "$ACTION" == auto-merge-* ]]; then
+            echo "════════════════════════════════════════════════════════════════"
+            echo "🚀 AUTO-MERGE - WILL EXECUTE"
+            echo "════════════════════════════════════════════════════════════════"
+            echo "Action: $ACTION"
+            echo "Dependency: ${{ steps.metadata.outputs.dependency-names }}"
+            echo "Version: ${{ steps.metadata.outputs.previous-version }} → ${{ steps.metadata.outputs.new-version }}"
+            echo "Next steps:"
+            echo "  1. Approve the PR with appropriate message"
+            echo "  2. Enable auto-merge (squash)"
+            echo "  3. PR will merge automatically when CI passes"
+          else
+            echo "════════════════════════════════════════════════════════════════"
+            echo "🚀 AUTO-MERGE - SKIPPED"
+            echo "════════════════════════════════════════════════════════════════"
+            echo "Action: $ACTION"
+            echo "Reason: Action does not start with 'auto-merge-'"
+            if [[ "$ACTION" == "manual-review" ]]; then
+              echo ""
+              echo "⚠️ MANUAL REVIEW REQUIRED"
+              echo "This PR was not auto-merged due to configuration settings."
+              echo "Possible reasons:"
+              echo "  - Auto-merge is disabled for this update type"
+              echo "  - Update type doesn't match any auto-merge rules"
+              echo "  - Major version update requiring review"
+              echo ""
+              echo "Please review the decision tree output above for specific reason."
+            elif [[ "$ACTION" == alert-* ]]; then
+              echo ""
+              echo "📢 ALERT ACTION TAKEN"
+              echo "An alert comment was created instead of auto-merge."
+              echo "Check the alert step output for details."
+            fi
+            echo "Skipping: Auto-merge step"
+          fi
+
       - name: 🚀 Auto-merge approved updates
         if: |
           startsWith(steps.determine-action.outputs.action, 'auto-merge-')
         run: |
-          echo "🚀 Processing auto-merge for ${{ steps.determine-action.outputs.action }}..."
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🚀 EXECUTING AUTO-MERGE"
+          echo "════════════════════════════════════════════════════════════════"
 
           ACTION="${{ steps.determine-action.outputs.action }}"
           DEPENDENCY="${{ steps.metadata.outputs.dependency-names }}"
           VERSION_CHANGE="${{ steps.metadata.outputs.previous-version }} → ${{ steps.metadata.outputs.new-version }}"
+
+          echo "Processing: $ACTION"
+          echo "Dependency: $DEPENDENCY"
+          echo "Version: $VERSION_CHANGE"
+          echo ""
 
           # Check token availability (use env var to avoid expanding secrets in run block)
           # TOKEN_TYPE is passed as environment variable to indicate which token is being used
@@ -401,11 +775,17 @@ jobs:
             "auto-merge-patch")
               APPROVAL_MSG="✅ Auto-approving patch update"
               ;;
+            "auto-merge-patch-indirect")
+              APPROVAL_MSG="✅ Auto-approving patch update (indirect dependency)"
+              ;;
             "auto-merge-minor-dev")
               APPROVAL_MSG="✅ Auto-approving minor development dependency update"
               ;;
             "auto-merge-minor-prod")
               APPROVAL_MSG="✅ Auto-approving minor production dependency update"
+              ;;
+            "auto-merge-minor-indirect")
+              APPROVAL_MSG="✅ Auto-approving minor update (indirect dependency)"
               ;;
             "auto-merge-security")
               APPROVAL_MSG="🔒 Auto-approving security update"
@@ -416,22 +796,67 @@ jobs:
           esac
 
           # Approve the PR
-          echo "📝 Approving PR..."
+          echo "Step 1: Approving PR..."
+          echo "────────────────────────────────────────────────────────────────"
           if ! gh pr review --approve "$PR_URL" --body "$APPROVAL_MSG: $DEPENDENCY ($VERSION_CHANGE)"; then
             echo "❌ Failed to approve PR"
+            echo "════════════════════════════════════════════════════════════════"
+            echo "🚫 AUTO-MERGE FAILED"
+            echo "════════════════════════════════════════════════════════════════"
+            echo "Reason: Could not approve PR via GitHub CLI"
+            echo "This is likely a permissions or network issue."
             exit 1
           fi
+          echo "✅ PR approved successfully"
+          echo ""
 
           # Attempt to enable auto-merge
-          echo "🚀 Attempting to enable auto-merge..."
+          echo "Step 2: Enabling auto-merge..."
+          echo "────────────────────────────────────────────────────────────────"
           if gh pr merge --auto --squash "$PR_URL"; then
-            echo "✅ Successfully enabled auto-merge for $ACTION"
+            echo "✅ Auto-merge enabled successfully"
+            echo ""
+            echo "════════════════════════════════════════════════════════════════"
+            echo "✅ AUTO-MERGE COMPLETED"
+            echo "════════════════════════════════════════════════════════════════"
+            echo "Status: PR approved and auto-merge enabled"
+            echo "Action: $ACTION"
+            echo "Dependency: $DEPENDENCY"
+            echo "Version: $VERSION_CHANGE"
+            echo "Merge method: squash"
+            echo ""
+            echo "Next steps:"
+            echo "  ✓ PR will automatically merge when:"
+            echo "    - All required checks pass"
+            echo "    - All required reviews are approved"
+            echo "  ✓ Branch will be deleted after merge"
+            echo "════════════════════════════════════════════════════════════════"
           else
-            echo "⚠️ Auto-merge failed (likely permissions issue)"
-            echo "💡 Tip: Ensure GH_PAT_TOKEN is set with repo permissions for Dependabot PRs"
+            echo "❌ Auto-merge command failed"
+            echo ""
+            echo "════════════════════════════════════════════════════════════════"
+            echo "⚠️ AUTO-MERGE PARTIALLY COMPLETED"
+            echo "════════════════════════════════════════════════════════════════"
+            echo "Status: PR approved but auto-merge failed"
+            echo "Action: $ACTION"
+            echo "Dependency: $DEPENDENCY"
+            echo "Version: $VERSION_CHANGE"
+            echo ""
+            echo "Reason: Auto-merge command failed (permissions issue)"
+            echo ""
+            echo "Common causes:"
+            echo "  - Using GITHUB_TOKEN instead of GH_PAT_TOKEN"
+            echo "  - PAT doesn't have 'repo' scope"
+            echo "  - Auto-merge not enabled in repository settings"
+            echo "  - Branch protection rules prevent auto-merge"
+            echo ""
+            echo "Resolution:"
+            echo "  ✓ PR is approved and ready"
+            echo "  ✓ You can manually merge when CI passes"
+            echo "  ✓ Or add GH_PAT_TOKEN secret with repo permissions"
+            echo "════════════════════════════════════════════════════════════════"
 
             # Fallback: Set up for manual merge
-            echo "🔄 PR has been approved and is ready for manual merge"
             echo "action-taken=approved-ready-for-merge" >> $GITHUB_OUTPUT
 
             # Don't exit with error - the PR is still approved
@@ -467,6 +892,8 @@ jobs:
               labels.push('dev-dependency');
             } else if (depType === 'direct:production') {
               labels.push('prod-dependency');
+            } else if (depType === 'indirect') {
+              labels.push('indirect-dependency');
             }
 
             // Add update type label
@@ -533,11 +960,17 @@ jobs:
             "auto-merge-patch")
               ACTION_DESC="✅ Auto-merged (patch update)"
               ;;
+            "auto-merge-patch-indirect")
+              ACTION_DESC="✅ Auto-merged (patch update - indirect dependency)"
+              ;;
             "auto-merge-minor-dev")
               ACTION_DESC="✅ Auto-merged (minor dev dependency)"
               ;;
             "auto-merge-minor-prod")
               ACTION_DESC="✅ Auto-merged (minor prod dependency)"
+              ;;
+            "auto-merge-minor-indirect")
+              ACTION_DESC="✅ Auto-merged (minor update - indirect dependency)"
               ;;
             "auto-merge-security")
               ACTION_DESC="🔒 Auto-merged (security update)"
@@ -575,6 +1008,8 @@ jobs:
           AUTO_MERGE_PATCH=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH')
           AUTO_MERGE_MINOR_DEV=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_DEV')
           AUTO_MERGE_MINOR_PROD=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_PROD')
+          AUTO_MERGE_PATCH_INDIRECT=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH_INDIRECT')
+          AUTO_MERGE_MINOR_INDIRECT=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_INDIRECT')
           AUTO_MERGE_SECURITY=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_SECURITY_NON_MAJOR')
 
           echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
@@ -582,6 +1017,8 @@ jobs:
           echo "| Auto-merge patch | $AUTO_MERGE_PATCH |" >> $GITHUB_STEP_SUMMARY
           echo "| Auto-merge minor dev | $AUTO_MERGE_MINOR_DEV |" >> $GITHUB_STEP_SUMMARY
           echo "| Auto-merge minor prod | $AUTO_MERGE_MINOR_PROD |" >> $GITHUB_STEP_SUMMARY
+          echo "| Auto-merge patch indirect | $AUTO_MERGE_PATCH_INDIRECT |" >> $GITHUB_STEP_SUMMARY
+          echo "| Auto-merge minor indirect | $AUTO_MERGE_MINOR_INDIRECT |" >> $GITHUB_STEP_SUMMARY
           echo "| Auto-merge security | $AUTO_MERGE_SECURITY |" >> $GITHUB_STEP_SUMMARY
           echo "| Maintainer | @$MAINTAINER |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
