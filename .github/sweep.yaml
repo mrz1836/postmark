@@ -1,5 +1,4 @@
 gha_enabled: true
-branch: master
 blocked_dirs: []
 draft: false
 description: |
@@ -7,10 +6,8 @@ description: |
 rules:
   - "Read .github/AGENTS.md first; it overrides these rules."
   - "Format code with magex format:fix"
-  - "Lint with 'magex lint' and vet with 'magex vet'"
+  - "Lint with 'magex lint'"
   - "Run 'magex test' before committing"
-  - "Commit messages use '<type>(<scope>): <short description>'"
-  - "PR titles use '[Subsystem] Imperative and concise summary'"
-  - "PR descriptions include: What Changed, Why It Was Necessary, Testing Performed, Impact / Risk"
-  - "Run 'magex dep:tidy' after import changes"
+  - "Commit messages refer to AGENTS.md"
+  - "Run 'magex deps:tidy' after import changes"
   - "Report vulnerabilities privately following SECURITY.md"
