@@ -589,6 +589,22 @@
             "type": "shell"
         },
         {
+            "command": "magex deps:update all-modules verbose",
+            "detail": "Update dependencies across all modules",
+            "group": "none",
+            "label": "magex: deps:update:all-modules",
+            "presentation": {
+                "clear": true,
+                "focus": false,
+                "panel": "shared",
+                "reveal": "always"
+            },
+            "problemMatcher": [
+                "$go"
+            ],
+            "type": "shell"
+        },
+        {
             "command": "magex deps:audit",
             "detail": "Audit dependencies for known security vulnerabilities",
             "group": "none",
