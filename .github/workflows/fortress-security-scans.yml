@@ -97,6 +97,7 @@ jobs:
           go-primary-version: ${{ inputs.go-primary-version }}
           go-secondary-version: ${{ inputs.go-primary-version }}
           go-sum-file: ${{ inputs.go-sum-file }}
+          enable-multi-module: ${{ env.ENABLE_MULTI_MODULE_TESTING }}
 
       # --------------------------------------------------------------------
       # Extract Go module directory from GO_SUM_FILE path
@@ -114,7 +115,11 @@ jobs:
           echo "📋 Generating module list for security scanning..."
           GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
 
-          if [ -n "$GO_MODULE_DIR" ]; then
+          if [ "$ENABLE_MULTI_MODULE_TESTING" == "true" ]; then
+            echo "🔧 Multi-module enabled - running go list from repository root"
+            echo "📦 go.work will discover all Go modules"
+            go list -json -m all > go.list
+          elif [ -n "$GO_MODULE_DIR" ]; then
             echo "🔧 Running go list from directory: $GO_MODULE_DIR"
             (cd "$GO_MODULE_DIR" && go list -json -m all > ../go.list)
           else
@@ -216,6 +221,7 @@ jobs:
           go-primary-version: ${{ inputs.go-primary-version }}
           go-secondary-version: ${{ inputs.go-primary-version }}
           go-sum-file: ${{ inputs.go-sum-file }}
+          enable-multi-module: ${{ env.ENABLE_MULTI_MODULE_TESTING }}
 
       # --------------------------------------------------------------------
       # Extract Go module directory from GO_SUM_FILE path
@@ -283,7 +289,11 @@ jobs:
           echo "🔍 Running vulnerability analysis..."
           GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
 
-          if [ -n "$GO_MODULE_DIR" ]; then
+          if [ "$ENABLE_MULTI_MODULE_TESTING" == "true" ]; then
+            echo "🔧 Multi-module enabled - running magex deps:audit from repository root"
+            echo "📦 magex will discover all Go modules"
+            magex deps:audit
+          elif [ -n "$GO_MODULE_DIR" ]; then
             echo "🔧 Running magex deps:audit from directory: $GO_MODULE_DIR"
             (cd "$GO_MODULE_DIR" && magex deps:audit)
           else

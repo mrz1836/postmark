@@ -41,8 +41,12 @@ inputs:
     description: "Secondary Go version for toolchain comparison"
     required: true
   go-sum-file:
-    description: "Path to go.sum file for cache key generation"
+    description: "Path to go.sum file for cache key generation (single module mode only; ignored when enable-multi-module is true)"
     required: true
+  enable-multi-module:
+    description: "Enable multi-module mode - uses pattern **/go.sum to hash all go.sum files for cache keys, skips root go.sum validation"
+    required: false
+    default: "false"
 
 outputs:
   go-version-actual:
@@ -102,6 +106,7 @@ runs:
     # Validate go.sum exists for cache key generation
     # --------------------------------------------------------------------
     - name: 🔍 Validate go.sum exists
+      if: ${{ inputs.enable-multi-module != 'true' }}
       shell: bash
       run: |
         GO_SUM_FILE="${{ inputs.go-sum-file }}"
@@ -131,34 +136,74 @@ runs:
         echo "📋 Input Values:"
         echo "  matrix-os: '${{ inputs.matrix-os }}'"
         echo "  go-sum-file: '${{ inputs.go-sum-file }}'"
+        echo "  enable-multi-module: '${{ inputs.enable-multi-module }}'"
 
-        # Verify go.sum file details
-        GO_SUM_FILE="${{ inputs.go-sum-file }}"
-        if [ -f "$GO_SUM_FILE" ]; then
+        if [ "${{ inputs.enable-multi-module }}" == "true" ]; then
+          # Multi-module mode - show all go.sum files
           echo ""
-          echo "📄 Go.sum File Analysis:"
-          echo "  Path: $GO_SUM_FILE"
-          echo "  Size: $(wc -c < "$GO_SUM_FILE") bytes"
-          echo "  Lines: $(wc -l < "$GO_SUM_FILE") lines"
-          echo "  SHA256: $(sha256sum "$GO_SUM_FILE" | cut -d' ' -f1)"
+          echo "📦 Multi-module mode enabled"
+          echo "🔍 Found go.sum files:"
+          find . -name "go.sum" -type f | while read file; do
+            echo "  - $file ($(wc -l < "$file") lines, $(wc -c < "$file") bytes)"
+          done
+
           echo ""
-          echo "🔍 First 5 lines of go.sum:"
-          head -5 "$GO_SUM_FILE" | sed 's/^/    /'
-          echo ""
-          echo "🔍 Last 3 lines of go.sum:"
-          tail -3 "$GO_SUM_FILE" | sed 's/^/    /'
+          echo "🔑 Expected Module Cache Key Pattern:"
+          echo "  Pattern: ${{ inputs.matrix-os }}-gomod-multi-[hash-of-all-go.sum]"
+          echo "  Actual hash: ${{ hashFiles('**/go.sum') }}"
+          echo "  Complete key: ${{ inputs.matrix-os }}-gomod-multi-${{ hashFiles('**/go.sum') }}"
         else
-          echo "❌ ERROR: go.sum file not found at: $GO_SUM_FILE"
+          # Single module mode - verify go.sum file
+          GO_SUM_FILE="${{ inputs.go-sum-file }}"
+          if [ -f "$GO_SUM_FILE" ]; then
+            echo ""
+            echo "📄 Go.sum File Analysis:"
+            echo "  Path: $GO_SUM_FILE"
+            echo "  Size: $(wc -c < "$GO_SUM_FILE") bytes"
+            echo "  Lines: $(wc -l < "$GO_SUM_FILE") lines"
+            echo "  SHA256: $(sha256sum "$GO_SUM_FILE" | cut -d' ' -f1)"
+            echo ""
+            echo "🔍 First 5 lines of go.sum:"
+            head -5 "$GO_SUM_FILE" | sed 's/^/    /'
+            echo ""
+            echo "🔍 Last 3 lines of go.sum:"
+            tail -3 "$GO_SUM_FILE" | sed 's/^/    /'
+          else
+            echo "❌ ERROR: go.sum file not found at: $GO_SUM_FILE"
+          fi
+
+          # Show expected cache key pattern
+          echo ""
+          echo "🔑 Expected Module Cache Key Pattern:"
+          echo "  Pattern: ${{ inputs.matrix-os }}-gomod-[hash-of-go.sum]"
+          echo "  Actual hash: ${{ hashFiles(inputs.go-sum-file) }}"
+          echo "  Complete key: ${{ inputs.matrix-os }}-gomod-${{ hashFiles(inputs.go-sum-file) }}"
         fi
 
-        # Show expected cache key pattern
-        echo ""
-        echo "🔑 Expected Module Cache Key Pattern:"
-        echo "  Pattern: ${{ inputs.matrix-os }}-gomod-[hash-of-go.sum]"
-        echo "  Actual hash: ${{ hashFiles(inputs.go-sum-file) }}"
-        echo "  Complete key: ${{ inputs.matrix-os }}-gomod-${{ hashFiles(inputs.go-sum-file) }}"
         echo ""
         echo "============================================================"
+
+    # --------------------------------------------------------------------
+    # Compute cache keys based on multi-module mode
+    # --------------------------------------------------------------------
+    - name: 🔑 Compute cache keys
+      id: cache-keys
+      shell: bash
+      run: |
+        if [ "${{ inputs.enable-multi-module }}" == "true" ]; then
+          echo "📦 Multi-module mode enabled - using hash of all go.sum files"
+          HASH="${{ hashFiles('**/go.sum') }}"
+          echo "module-key=${{ inputs.matrix-os }}-gomod-multi-${HASH}" >> $GITHUB_OUTPUT
+          echo "build-key=${{ inputs.matrix-os }}-gobuild-multi-${{ inputs.go-version }}-${HASH}" >> $GITHUB_OUTPUT
+          echo "mode=multi" >> $GITHUB_OUTPUT
+        else
+          echo "📁 Single module mode - using hash of ${{ inputs.go-sum-file }}"
+          HASH="${{ hashFiles(inputs.go-sum-file) }}"
+          echo "module-key=${{ inputs.matrix-os }}-gomod-${HASH}" >> $GITHUB_OUTPUT
+          echo "build-key=${{ inputs.matrix-os }}-gobuild-${{ inputs.go-version }}-${HASH}" >> $GITHUB_OUTPUT
+          echo "mode=single" >> $GITHUB_OUTPUT
+        fi
+        echo "🔑 Cache keys computed successfully"
 
     # --------------------------------------------------------------------
     # Restore Go module cache (shared across versions)
@@ -168,7 +213,7 @@ runs:
       uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
       with:
         path: ~/go/pkg/mod
-        key: ${{ inputs.matrix-os }}-gomod-${{ hashFiles(inputs.go-sum-file) }}
+        key: ${{ steps.cache-keys.outputs.module-key }}
 
     # --------------------------------------------------------------------
     # DEBUG: Build cache key components
@@ -185,18 +230,27 @@ runs:
         echo "  matrix-os: '${{ inputs.matrix-os }}'"
         echo "  go-version: '${{ inputs.go-version }}'"
         echo "  go-sum-file: '${{ inputs.go-sum-file }}'"
+        echo "  enable-multi-module: '${{ inputs.enable-multi-module }}'"
 
-        # Verify go.sum file details (for build cache key)
-        GO_SUM_FILE="${{ inputs.go-sum-file }}"
-        if [ -f "$GO_SUM_FILE" ]; then
+        if [ "${{ inputs.enable-multi-module }}" == "true" ]; then
+          # Multi-module mode - show summary of all go.sum files
           echo ""
-          echo "📄 Go.sum File Analysis (for build cache):"
-          echo "  Path: $GO_SUM_FILE"
-          echo "  Size: $(wc -c < "$GO_SUM_FILE") bytes"
-          echo "  SHA256: $(sha256sum "$GO_SUM_FILE" | cut -d' ' -f1)"
-          echo "  Last Modified: $(stat -c %y "$GO_SUM_FILE" 2>/dev/null || stat -f %Sm "$GO_SUM_FILE" 2>/dev/null || echo 'Unknown')"
+          echo "📦 Multi-module mode enabled"
+          echo "🔍 Go.sum files count: $(find . -name "go.sum" -type f | wc -l)"
+          echo "🔑 Cache hash: ${{ hashFiles('**/go.sum') }}"
         else
-          echo "❌ ERROR: go.sum file not found at: $GO_SUM_FILE"
+          # Single module mode - verify go.sum file details
+          GO_SUM_FILE="${{ inputs.go-sum-file }}"
+          if [ -f "$GO_SUM_FILE" ]; then
+            echo ""
+            echo "📄 Go.sum File Analysis (for build cache):"
+            echo "  Path: $GO_SUM_FILE"
+            echo "  Size: $(wc -c < "$GO_SUM_FILE") bytes"
+            echo "  SHA256: $(sha256sum "$GO_SUM_FILE" | cut -d' ' -f1)"
+            echo "  Last Modified: $(stat -c %y "$GO_SUM_FILE" 2>/dev/null || stat -f %Sm "$GO_SUM_FILE" 2>/dev/null || echo 'Unknown')"
+          else
+            echo "❌ ERROR: go.sum file not found at: $GO_SUM_FILE"
+          fi
         fi
 
         # Show cache paths that will be used
@@ -210,10 +264,17 @@ runs:
 
         # Show expected cache key pattern
         echo ""
-        echo "🔑 Expected Build Cache Key Pattern:"
-        echo "  Pattern: ${{ inputs.matrix-os }}-gobuild-${{ inputs.go-version }}-[hash-of-go.sum]"
-        echo "  Actual hash: ${{ hashFiles(inputs.go-sum-file) }}"
-        echo "  Complete key: ${{ inputs.matrix-os }}-gobuild-${{ inputs.go-version }}-${{ hashFiles(inputs.go-sum-file) }}"
+        if [ "${{ inputs.enable-multi-module }}" == "true" ]; then
+          echo "🔑 Expected Build Cache Key Pattern:"
+          echo "  Pattern: ${{ inputs.matrix-os }}-gobuild-multi-${{ inputs.go-version }}-[hash-of-all-go.sum]"
+          echo "  Actual hash: ${{ hashFiles('**/go.sum') }}"
+          echo "  Complete key: ${{ inputs.matrix-os }}-gobuild-multi-${{ inputs.go-version }}-${{ hashFiles('**/go.sum') }}"
+        else
+          echo "🔑 Expected Build Cache Key Pattern:"
+          echo "  Pattern: ${{ inputs.matrix-os }}-gobuild-${{ inputs.go-version }}-[hash-of-go.sum]"
+          echo "  Actual hash: ${{ hashFiles(inputs.go-sum-file) }}"
+          echo "  Complete key: ${{ inputs.matrix-os }}-gobuild-${{ inputs.go-version }}-${{ hashFiles(inputs.go-sum-file) }}"
+        fi
         echo ""
         echo "============================================================"
 
@@ -227,7 +288,7 @@ runs:
         path: |
           ~/.cache/go-build
           ~/.cache/go-build/test
-        key: ${{ inputs.matrix-os }}-gobuild-${{ inputs.go-version }}-${{ hashFiles(inputs.go-sum-file) }}
+        key: ${{ steps.cache-keys.outputs.build-key }}
 
     # --------------------------------------------------------------------
     # DEBUG: Cache restoration summary
@@ -247,17 +308,27 @@ runs:
         # Show the actual keys that were used
         echo ""
         echo "🔑 Actual Cache Keys Used:"
-        MODULE_KEY="${{ inputs.matrix-os }}-gomod-${{ hashFiles(inputs.go-sum-file) }}"
-        BUILD_KEY="${{ inputs.matrix-os }}-gobuild-${{ inputs.go-version }}-${{ hashFiles(inputs.go-sum-file) }}"
-        echo "  Module: $MODULE_KEY"
-        echo "  Build:  $BUILD_KEY"
-
-        # Break down the keys for analysis
-        echo ""
-        echo "🔍 Key Component Analysis:"
-        echo "  OS component: '${{ inputs.matrix-os }}'"
-        echo "  Go version component: '${{ inputs.go-version }}'"
-        echo "  Go.sum hash component: '${{ hashFiles(inputs.go-sum-file) }}'"
+        if [ "${{ inputs.enable-multi-module }}" == "true" ]; then
+          MODULE_KEY="${{ inputs.matrix-os }}-gomod-multi-${{ hashFiles('**/go.sum') }}"
+          BUILD_KEY="${{ inputs.matrix-os }}-gobuild-multi-${{ inputs.go-version }}-${{ hashFiles('**/go.sum') }}"
+          echo "  Module: $MODULE_KEY"
+          echo "  Build:  $BUILD_KEY"
+          echo ""
+          echo "🔍 Key Component Analysis (Multi-module mode):"
+          echo "  OS component: '${{ inputs.matrix-os }}'"
+          echo "  Go version component: '${{ inputs.go-version }}'"
+          echo "  Go.sum hash component (all files): '${{ hashFiles('**/go.sum') }}'"
+        else
+          MODULE_KEY="${{ inputs.matrix-os }}-gomod-${{ hashFiles(inputs.go-sum-file) }}"
+          BUILD_KEY="${{ inputs.matrix-os }}-gobuild-${{ inputs.go-version }}-${{ hashFiles(inputs.go-sum-file) }}"
+          echo "  Module: $MODULE_KEY"
+          echo "  Build:  $BUILD_KEY"
+          echo ""
+          echo "🔍 Key Component Analysis (Single module mode):"
+          echo "  OS component: '${{ inputs.matrix-os }}'"
+          echo "  Go version component: '${{ inputs.go-version }}'"
+          echo "  Go.sum hash component: '${{ hashFiles(inputs.go-sum-file) }}'"
+        fi
 
         # Cache effectiveness summary
         echo ""

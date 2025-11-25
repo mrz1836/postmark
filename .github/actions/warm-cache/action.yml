@@ -47,8 +47,12 @@ inputs:
     required: false
     default: "false"
   go-sum-file:
-    description: "Path to go.sum file for cache key generation"
+    description: "Path to go.sum file for cache key generation (single module mode)"
     required: true
+  enable-multi-module:
+    description: "Enable multi-module mode - uses hash of all go.sum files for cache keys"
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -91,6 +95,7 @@ runs:
         go-primary-version: ${{ inputs.go-primary-version }}
         go-secondary-version: ${{ inputs.go-secondary-version }}
         go-sum-file: ${{ inputs.go-sum-file }}
+        enable-multi-module: ${{ inputs.enable-multi-module }}
 
     # ────────────────────────────────────────────────────────────────────────────
     # Setup MAGE-X (required for magex commands in cache warming)
@@ -136,9 +141,29 @@ runs:
         echo "module-dir=$GO_MODULE_DIR" >> $GITHUB_OUTPUT
 
     # --------------------------------------------------------------------
-    # Ensure go.sum exists and download modules
+    # Compute cache keys for saving (must match restore keys)
     # --------------------------------------------------------------------
-    - name: 📋 Ensure go.sum exists
+    - name: 🔑 Compute cache keys for saving
+      id: cache-keys
+      shell: bash
+      run: |
+        if [ "${{ inputs.enable-multi-module }}" == "true" ]; then
+          echo "📦 Multi-module mode - cache keys will use hash of all go.sum files"
+          HASH="${{ hashFiles('**/go.sum') }}"
+          echo "module-key=${{ inputs.matrix-os }}-gomod-multi-${HASH}" >> $GITHUB_OUTPUT
+          echo "build-key=${{ inputs.matrix-os }}-gobuild-multi-${{ inputs.go-version }}-${HASH}" >> $GITHUB_OUTPUT
+        else
+          echo "📁 Single module mode - cache keys will use hash of ${{ inputs.go-sum-file }}"
+          HASH="${{ hashFiles(inputs.go-sum-file) }}"
+          echo "module-key=${{ inputs.matrix-os }}-gomod-${HASH}" >> $GITHUB_OUTPUT
+          echo "build-key=${{ inputs.matrix-os }}-gobuild-${{ inputs.go-version }}-${HASH}" >> $GITHUB_OUTPUT
+        fi
+
+    # --------------------------------------------------------------------
+    # Ensure go.sum exists (single-module mode only)
+    # --------------------------------------------------------------------
+    - name: 📋 Ensure go.sum exists (single-module)
+      if: ${{ inputs.enable-multi-module != 'true' }}
       shell: bash
       run: |
         GO_SUM_FILE="${{ inputs.go-sum-file }}"
@@ -159,6 +184,63 @@ runs:
           echo "✅ Go.sum already exists at $GO_SUM_FILE"
         fi
 
+    # --------------------------------------------------------------------
+    # Ensure all modules are tidy (multi-module mode only)
+    # Handles both go.work workspaces and single-module repos with multi-module testing enabled
+    # --------------------------------------------------------------------
+    - name: 📋 Ensure modules are tidy (multi-module)
+      if: ${{ inputs.enable-multi-module == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "🔧 Multi-module mode - detecting workspace configuration"
+
+        # Check if go.work exists (workspace mode)
+        if [ -f "go.work" ]; then
+          echo "📦 go.work workspace detected - syncing and tidying all modules"
+          echo "ℹ️  No root go.sum validation required (go.work manages workspace modules)"
+
+          # Sync the workspace
+          echo "🔄 Running 'go work sync' to synchronize workspace modules..."
+          go work sync
+
+          # Find and tidy each module in the workspace
+          echo "🔍 Finding all modules in workspace..."
+          module_paths=$(go work edit -json | jq -r '(.Use // [])[].DiskPath')
+          if [ -z "$module_paths" ]; then
+            echo "⚠️ Warning: No modules found in workspace"
+          fi
+
+          tidy_failed=0
+          while read -r module_dir; do
+            # Skip empty lines
+            [ -n "$module_dir" ] || continue
+
+            if [ ! -f "$module_dir/go.mod" ]; then
+              echo "❌ Module directory $module_dir is missing go.mod file"
+              exit 1
+            fi
+            echo "🔧 Tidying module: $module_dir"
+            if ! (cd "$module_dir" && go mod tidy); then
+              echo "❌ Failed to tidy module: $module_dir"
+              tidy_failed=1
+            fi
+          done <<< "$module_paths"
+
+          if [ "$tidy_failed" -ne 0 ]; then
+            echo "❌ One or more modules failed to tidy"
+            exit 1
+          fi
+
+          echo "✅ All workspace modules synced and tidied successfully"
+        else
+          # No go.work - single module with multi-module testing enabled
+          echo "📁 No go.work file - running single module tidy from repository root"
+          echo "ℹ️  Multi-module testing mode without workspace (legacy behavior)"
+          magex tidy
+          echo "✅ Module tidied successfully"
+        fi
+
     # ────────────────────────────────────────────────────────────────────────────
     # Ensure cache directories exist
     # ────────────────────────────────────────────────────────────────────────────
@@ -170,6 +252,18 @@ runs:
         mkdir -p "$GOCACHE"
         mkdir -p "$GOCACHE/test"
         echo "✅ Cache directories created successfully"
+
+    # ────────────────────────────────────────────────────────────────────────────
+    # Full checkout for module download (only when module cache misses)
+    # The initial sparse checkout only includes go.mod/go.sum for cache key generation.
+    # Module download requires full checkout because go.mod has replace directives
+    # pointing to local sibling modules (e.g., ../functions/pkg/config).
+    # ────────────────────────────────────────────────────────────────────────────
+    - name: 📥 Full checkout for module download (module cache miss)
+      if: steps.setup-go.outputs.module-cache-hit != 'true'
+      uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      with:
+        persist-credentials: false
 
     # ────────────────────────────────────────────────────────────────────────────
     # Download modules when module cache missed
@@ -186,7 +280,11 @@ runs:
         echo "=== Downloading Dependencies ==="
         echo "============================================================"
 
-        if [ -n "$GO_MODULE_DIR" ]; then
+        if [ "$ENABLE_MULTI_MODULE_TESTING" == "true" ]; then
+          echo "🔧 Multi-module mode - running magex deps:download from repository root"
+          echo "📦 magex will discover all Go modules and download dependencies"
+          magex deps:download
+        elif [ -n "$GO_MODULE_DIR" ]; then
           echo "🔧 Running magex deps:download from directory: $GO_MODULE_DIR"
           (cd "$GO_MODULE_DIR" && magex deps:download)
         else
@@ -194,6 +292,17 @@ runs:
           magex deps:download
         fi
         echo "✅ Modules downloaded successfully"
+
+    # ────────────────────────────────────────────────────────────────────────────
+    # Full checkout for build cache warming (only when module cache hit but build missed)
+    # If module cache missed, we already did a full checkout above.
+    # This handles the case where module cache was warm but build cache needs warming.
+    # ────────────────────────────────────────────────────────────────────────────
+    - name: 📥 Full checkout for build warming (module hit, build miss)
+      if: steps.setup-go.outputs.module-cache-hit == 'true' && steps.setup-go.outputs.build-cache-hit != 'true'
+      uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      with:
+        persist-credentials: false
 
     # ────────────────────────────────────────────────────────────────────────────
     # Warm build cache when build cache missed
@@ -214,7 +323,15 @@ runs:
         PARALLEL_JOBS="${MAGE_X_PARALLEL:-1}"
         echo "🔧 Using parallelism level: $PARALLEL_JOBS (from MAGE_X_PARALLEL env var)"
 
-        if [ -n "$GO_MODULE_DIR" ]; then
+        if [ "$ENABLE_MULTI_MODULE_TESTING" == "true" ]; then
+          echo "🔧 Multi-module mode - running build commands from repository root"
+          echo "📦 magex will discover all Go modules and pre-build packages"
+          # Use configured parallelism to avoid OOM on GitHub Actions runners
+          magex build:prebuild p="$PARALLEL_JOBS" strategy="${MAGE_X_BUILD_STRATEGY:-smart}" batch_size="${MAGE_X_BUILD_BATCH_SIZE:-20}" batch_delay="${MAGE_X_BUILD_BATCH_DELAY_MS:-0}" exclude="${MAGE_X_BUILD_EXCLUDE_PATTERN:-}"
+
+          echo "🏗️ Building stdlib for host platform..."
+          magex install:stdlib
+        elif [ -n "$GO_MODULE_DIR" ]; then
           echo "🔧 Running build commands from directory: $GO_MODULE_DIR"
           # Use configured parallelism to avoid OOM on GitHub Actions runners
           (cd "$GO_MODULE_DIR" && magex build:prebuild p="$PARALLEL_JOBS" strategy="${MAGE_X_BUILD_STRATEGY:-smart}" batch_size="${MAGE_X_BUILD_BATCH_SIZE:-20}" batch_delay="${MAGE_X_BUILD_BATCH_DELAY_MS:-0}" exclude="${MAGE_X_BUILD_EXCLUDE_PATTERN:-}")
@@ -242,7 +359,7 @@ runs:
         path: |
           ~/.cache/go-build
           ~/.cache/go-build/test
-        key: ${{ inputs.matrix-os }}-gobuild-${{ inputs.go-version }}-${{ hashFiles(inputs.go-sum-file) }}
+        key: ${{ steps.cache-keys.outputs.build-key }}
 
     # ────────────────────────────────────────────────────────────────────────────
     # Save the Go module cache we just populated
@@ -252,7 +369,7 @@ runs:
       uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.0.2
       with:
         path: ~/go/pkg/mod
-        key: ${{ inputs.matrix-os }}-gomod-${{ hashFiles(inputs.go-sum-file) }}
+        key: ${{ steps.cache-keys.outputs.module-key }}
 
     # --------------------------------------------------------------------
     # Track cache performance (no outputs - use artifacts instead)

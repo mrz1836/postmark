@@ -142,6 +142,7 @@ jobs:
           go-primary-version: ${{ inputs.go-primary-version }}
           go-secondary-version: ${{ inputs.go-secondary-version }}
           go-sum-file: ${{ inputs.go-sum-file }}
+          enable-multi-module: ${{ env.ENABLE_MULTI_MODULE_TESTING }}
 
       # --------------------------------------------------------------------
       # Extract Go module directory from GO_SUM_FILE path
@@ -214,7 +215,17 @@ jobs:
           # Run benchmarks and capture output
           GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
 
-          if [ -n "$GO_MODULE_DIR" ]; then
+          if [ "$ENABLE_MULTI_MODULE_TESTING" == "true" ]; then
+            echo "🔧 Multi-module testing enabled - running $BENCH_CMD from repository root"
+            echo "📦 magex will discover all Go modules"
+            if $BENCH_CMD > "$BENCH_OUTPUT_FILE" 2>&1; then
+              echo "✅ Benchmarks command completed"
+              BENCH_STATUS="success"
+            else
+              echo "❌ Benchmarks command failed"
+              BENCH_STATUS="failure"
+            fi
+          elif [ -n "$GO_MODULE_DIR" ]; then
             echo "🔧 Running $BENCH_CMD from directory: $GO_MODULE_DIR"
             if (cd "$GO_MODULE_DIR" && $BENCH_CMD) > "$BENCH_OUTPUT_FILE" 2>&1; then
               echo "✅ Benchmarks command completed"

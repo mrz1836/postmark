@@ -319,6 +319,19 @@ jobs:
         with:
           go-sum-file: ${{ env.GO_SUM_FILE }}
       # --------------------------------------------------------------------
+      # Detect go.work file for multi-module workspace
+      # --------------------------------------------------------------------
+      - name: 🔍 Detect Multi-Module Workspace
+        id: detect-gowork
+        run: |
+          if [ -f "go.work" ]; then
+            echo "gowork-exists=true" >> $GITHUB_OUTPUT
+            echo "✅ go.work file found - multi-module workspace detected"
+          else
+            echo "gowork-exists=false" >> $GITHUB_OUTPUT
+            echo "ℹ️  No go.work file found - single module repository"
+          fi
+      # --------------------------------------------------------------------
       # Extract GoFortress version metadata from fortress.yml
       # --------------------------------------------------------------------
       - name: 📋 Extract GoFortress Version
@@ -652,6 +665,9 @@ jobs:
           echo "| **Go Sum File** | \`${{ env.GO_SUM_FILE }}\` | Location of go.sum for dependency verification |" >> $GITHUB_STEP_SUMMARY
           echo "| **Go Module Directory** | \`${{ env.GO_MODULE_DIR || '.' }}\` | Directory containing go.mod (extracted from go.sum path) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Module Root Type** | $([ -n \"${{ env.GO_MODULE_DIR }}\" ] && echo \"📁 Subdirectory\" || echo \"📂 Repository Root\") | Whether go.mod is in repository root or subdirectory |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Multi-Module Testing** | $([ \"${{ env.ENABLE_MULTI_MODULE_TESTING }}\" == \"true\" ] && echo \"✅ Enabled\" || echo \"❌ Disabled\") | $([ \"${{ env.ENABLE_MULTI_MODULE_TESTING }}\" == \"true\" ] && echo \"Tests run from repo root with automatic module discovery\" || echo \"Tests run from module directory specified by GO_SUM_FILE\") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Multi-Module Workspace** | $([ \"${{ steps.detect-gowork.outputs.gowork-exists }}\" == \"true\" ] && echo \"✅ go.work found\" || echo \"⚪ No go.work file\") | $([ \"${{ steps.detect-gowork.outputs.gowork-exists }}\" == \"true\" ] && echo \"Workspace file enables cross-module dependency resolution\" || echo \"Single module repository\") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Test Execution Context** | $([ \"${{ env.ENABLE_MULTI_MODULE_TESTING }}\" == \"true\" ] && echo \"📦 Repository Root\" || echo \"📁 Module Directory\") | Working directory for test execution and cache keys |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "<br><br>" >> $GITHUB_STEP_SUMMARY
       # --------------------------------------------------------------------
