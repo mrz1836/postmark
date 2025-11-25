@@ -91,6 +91,7 @@ jobs:
           go-primary-version: ${{ inputs.go-primary-version }}
           go-secondary-version: ${{ inputs.go-primary-version }}
           go-sum-file: ${{ inputs.go-sum-file }}
+          enable-multi-module: ${{ env.ENABLE_MULTI_MODULE_TESTING }}
 
       # --------------------------------------------------------------------
       # Validate version tag format

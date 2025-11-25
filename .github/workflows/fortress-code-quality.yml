@@ -92,6 +92,7 @@ jobs:
           go-primary-version: ${{ inputs.go-primary-version }}
           go-secondary-version: ${{ inputs.go-primary-version }}
           go-sum-file: ${{ env.GO_SUM_FILE }}
+          enable-multi-module: ${{ env.ENABLE_MULTI_MODULE_TESTING }}
 
       # --------------------------------------------------------------------
       # Extract Go module directory from GO_SUM_FILE path
@@ -245,6 +246,7 @@ jobs:
           go-primary-version: ${{ inputs.go-primary-version }}
           go-secondary-version: ${{ inputs.go-primary-version }}
           go-sum-file: ${{ env.GO_SUM_FILE }}
+          enable-multi-module: ${{ env.ENABLE_MULTI_MODULE_TESTING }}
 
       # --------------------------------------------------------------------
       # Extract Go module directory from GO_SUM_FILE path
@@ -344,7 +346,11 @@ jobs:
 
           GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
 
-          if [ -n "$GO_MODULE_DIR" ]; then
+          if [ "$ENABLE_MULTI_MODULE_TESTING" == "true" ]; then
+            echo "🔧 Multi-module linting enabled - running from repository root"
+            echo "📦 magex will discover all Go modules"
+            magex lint
+          elif [ -n "$GO_MODULE_DIR" ]; then
             echo "🔧 Running magex lint from directory: $GO_MODULE_DIR"
             (cd "$GO_MODULE_DIR" && magex lint)
           else
@@ -453,6 +459,7 @@ jobs:
           go-primary-version: ${{ inputs.go-primary-version }}
           go-secondary-version: ${{ inputs.go-primary-version }}
           go-sum-file: ${{ env.GO_SUM_FILE }}
+          enable-multi-module: ${{ env.ENABLE_MULTI_MODULE_TESTING }}
 
       # --------------------------------------------------------------------
       # Extract Go module directory from GO_SUM_FILE path
