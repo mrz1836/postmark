@@ -176,6 +176,9 @@ on:
       fork-security-mode:
         description: "Security mode for fork PRs (safe/unsafe)"
         value: ${{ jobs.setup-config.outputs.fork-security-mode }}
+      completion-report-enabled:
+        description: "Whether workflow completion report is enabled"
+        value: ${{ jobs.setup-config.outputs.completion-report-enabled }}
 # Security: Restrictive default permissions with job-level overrides for least privilege access
 permissions:
   contents: read
@@ -229,6 +232,7 @@ jobs:
       redis-service-mode: ${{ steps.redis-config.outputs.redis-service-mode }}
       is-fork-pr: ${{ steps.fork-detection.outputs.is-fork-pr }}
       fork-security-mode: ${{ steps.fork-detection.outputs.fork-security-mode }}
+      completion-report-enabled: ${{ steps.config.outputs.completion-report-enabled }}
     steps:
       # --------------------------------------------------------------------
       # Start timer to record workflow start time
@@ -301,11 +305,12 @@ jobs:
       # Checkout code (sparse checkout)
       # --------------------------------------------------------------------
       - name: 📥 Checkout (sparse)
-        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           sparse-checkout: |
             .mage.yaml
             go.mod
+            go.work
             ${{ env.GO_SUM_FILE }}
             .github/workflows/fortress.yml
             .github/actions/configure-redis
@@ -529,6 +534,7 @@ jobs:
           echo "fuzz-testing-enabled=${{ env.ENABLE_FUZZ_TESTING }}" >> $GITHUB_OUTPUT
           echo "go-tests-enabled=${{ env.ENABLE_GO_TESTS }}" >> $GITHUB_OUTPUT
           echo "pre-commit-enabled=${{ env.ENABLE_GO_PRE_COMMIT }}" >> $GITHUB_OUTPUT
+          echo "completion-report-enabled=${{ env.ENABLE_COMPLETION_REPORT }}" >> $GITHUB_OUTPUT
 
           # Detect if this is a release run
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
