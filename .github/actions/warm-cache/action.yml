@@ -208,7 +208,8 @@ runs:
           echo "🔍 Finding all modules in workspace..."
           module_paths=$(go work edit -json | jq -r '(.Use // [])[].DiskPath')
           if [ -z "$module_paths" ]; then
-            echo "⚠️ Warning: No modules found in workspace"
+            echo "❌ Error: No modules found in workspace - go.work exists but has no 'use' directives"
+            exit 1
           fi
 
           tidy_failed=0
