@@ -330,7 +330,7 @@ jobs:
             echo "|-----------|--------|--------|"
             echo "| 🎯 Setup | ${{ needs.setup.result }} | Required |"
             echo "| 🪄 MAGE-X | ${{ needs.test-magex.result }} | Required |"
-            echo "| 💾 Warm Cache | ${{ needs.warm-cache.result }} | ${{ needs.setup.outputs.cache-warming-enabled == 'true' && 'Optional' || 'Skipped' }} |"
+            echo "| 💾 Warm Cache | ${{ needs.warm-cache.result }} | ${{ needs.setup.outputs.cache-warming-enabled == 'true' && 'Required' || 'Disabled' }} |"
             echo "| 🔒 Security | ${{ needs.security.result }} | Required |"
             echo "| 📊 Code Quality | ${{ needs.code-quality.result }} | Required |"
             echo "| 🪝 Pre-commit | ${{ needs.pre-commit.result }} | ${{ needs.setup.outputs.pre-commit-enabled == 'true' && 'Required' || 'Skipped' }} |"
@@ -361,6 +361,14 @@ jobs:
           if [[ "${{ needs.test-magex.result }}" == "failure" || "${{ needs.test-magex.result }}" == "cancelled" ]]; then
             echo "❌ Test MAGE-X failed or was cancelled" >&2
             FAILED=true
+          fi
+
+          # Only check warm-cache if it was enabled
+          if [[ "${{ needs.setup.outputs.cache-warming-enabled }}" == "true" ]]; then
+            if [[ "${{ needs.warm-cache.result }}" == "failure" || "${{ needs.warm-cache.result }}" == "cancelled" ]]; then
+              echo "❌ Warm cache failed or was cancelled" >&2
+              FAILED=true
+            fi
           fi
 
           if [[ "${{ needs.security.result }}" == "failure" || "${{ needs.security.result }}" == "cancelled" ]]; then
