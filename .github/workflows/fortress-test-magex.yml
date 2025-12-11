@@ -68,6 +68,7 @@ jobs:
             .mage.yaml
             go.mod
             ${{ env.GO_SUM_FILE }}
+            magefiles/
 
       # --------------------------------------------------------------------
       # Setup MAGE-X using the reusable composite action
@@ -156,6 +157,7 @@ jobs:
             "lint"
             "metrics:coverage"
             "metrics:loc"
+            "metrics:mage"
             "release"
             "release:validate"
             "test"
@@ -207,6 +209,37 @@ jobs:
           echo "✅ MAGE-X verification completed successfully."
 
       # --------------------------------------------------------------------
+      # Collect Mage Metrics
+      # --------------------------------------------------------------------
+      - name: 📊 Collect Mage Metrics
+        id: mage-metrics
+        run: |
+          set -euo pipefail
+          echo "📋 Running magex metrics:mage..."
+
+          # Run magex metrics:mage and capture output
+          METRICS_OUTPUT=$(magex metrics:mage 2>&1 || true)
+          echo "$METRICS_OUTPUT"
+
+          # Parse directory found status
+          if echo "$METRICS_OUTPUT" | grep -q "Magefiles Directory Found: ✅"; then
+            echo "directory-found=true" >> $GITHUB_OUTPUT
+          else
+            echo "directory-found=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Parse total functions count
+          TOTAL_FUNCTIONS=$(echo "$METRICS_OUTPUT" | grep -oE "Total functions found: [0-9]+" | grep -oE "[0-9]+" || echo "0")
+          echo "total-functions=$TOTAL_FUNCTIONS" >> $GITHUB_OUTPUT
+
+          # Count number of mage files (lines in table excluding header)
+          FILE_COUNT=$(echo "$METRICS_OUTPUT" | { grep -E "^\| magefiles/" || true; } | wc -l | tr -d ' ')
+          echo "file-count=$FILE_COUNT" >> $GITHUB_OUTPUT
+
+          echo ""
+          echo "✅ Mage metrics collected successfully."
+
+      # --------------------------------------------------------------------
       # Summary of MAGE-X verification
       # --------------------------------------------------------------------
       - name: 📊 Job Summary
@@ -225,6 +258,16 @@ jobs:
           echo "| **Purpose** | Verify MAGE-X installation and standard commands |" >> $GITHUB_STEP_SUMMARY
           echo "| **Matched Commands** | ${{ steps.verify-magex.outputs.matched }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Missing Commands** | ${{ steps.verify-magex.outputs.missing }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Mage Metrics Section
+          echo "### 📁 Mage Metrics" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Magefiles Directory** | ${{ steps.mage-metrics.outputs.directory-found == 'true' && '✅ Found' || '❌ Not Found' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Mage Files** | ${{ steps.mage-metrics.outputs.file-count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Total Functions** | ${{ steps.mage-metrics.outputs.total-functions }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [[ "${{ steps.verify-magex.outputs.missing }}" != "0" ]]; then
