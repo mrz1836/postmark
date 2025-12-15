@@ -2,15 +2,19 @@
 #  Test Matrix Execution (Reusable Workflow) (GoFortress)
 #
 #  Purpose: Execute Go tests across multiple operating systems and Go versions
-#  in a matrix strategy with comprehensive failure detection and statistics collection.
+#  in a matrix strategy with native CI mode for failure detection and reporting.
 #
 #  This workflow handles:
 #    - Multi-platform test execution (ubuntu, windows, macOS)
 #    - Multiple Go version testing (primary, secondary)
 #    - Race detection and code coverage
-#    - Test failure detection and reporting
-#    - Statistics collection and artifact uploading
+#    - Native CI mode for GitHub annotations and JSONL output
 #    - Cache performance tracking
+#
+#  CI Mode: magex automatically detects GitHub Actions and produces:
+#    - GitHub annotations with file:line locations
+#    - Step summary written to $GITHUB_STEP_SUMMARY
+#    - Structured output at .mage-x/ci-results.jsonl
 #
 #  Maintainer: @mrz1836
 #
@@ -168,60 +172,6 @@ jobs:
           use-local: ${{ env.MAGE_X_USE_LOCAL }}
 
       # --------------------------------------------------------------------
-      # Start test timer
-      # --------------------------------------------------------------------
-      - name: ⏱️ Start test timer
-        id: test-timer
-        run: |
-          TEST_START=$(date +%s)
-          echo "test-start=$TEST_START" >> $GITHUB_OUTPUT
-          echo "🕒 Test timer started at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-      # --------------------------------------------------------------------
-      # Detect test output mode based on test count and configuration
-      # --------------------------------------------------------------------
-      - name: 🔍 Detect test output mode
-        id: detect-mode
-        run: |
-          # Count total tests in the repository (excluding vendor and testdata)
-          GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
-          if [ -n "$GO_MODULE_DIR" ]; then
-            TEST_COUNT=$(cd "$GO_MODULE_DIR" && find . -type f -name '*_test.go' \
-              -not -path './vendor/*' \
-              -not -path './third_party/*' \
-              -not -path './testdata/*' \
-              -exec grep -hE '^\s*func (\([^)]+\) )?Test[A-Z0-9_]' {} + | wc -l | xargs)
-          else
-            TEST_COUNT=$(find . -type f -name '*_test.go' \
-              -not -path './vendor/*' \
-              -not -path './third_party/*' \
-              -not -path './testdata/*' \
-              -exec grep -hE '^\s*func (\([^)]+\) )?Test[A-Z0-9_]' {} + | wc -l | xargs)
-          fi
-
-          # Sanitize count (ensure it's numeric)
-          TEST_COUNT=${TEST_COUNT:-0}
-          if ! [[ "$TEST_COUNT" =~ ^[0-9]+$ ]]; then
-            TEST_COUNT=0
-          fi
-
-          echo "📊 Total tests found: $TEST_COUNT"
-
-          # Determine output mode based on test count and failure patterns
-          # For large test suites (>100 tests), use FAILURES_ONLY to reduce noise
-          # For smaller test suites, use FULL to see all output
-          if [[ "$TEST_COUNT" -gt 100 ]]; then
-            DETECTED_MODE="FAILURES_ONLY"
-            echo "🎛️ Using FAILURES_ONLY mode for large test suite ($TEST_COUNT tests)"
-          else
-            DETECTED_MODE="FULL"
-            echo "🎛️ Using FULL mode for manageable test suite ($TEST_COUNT tests)"
-          fi
-
-          echo "detected-mode=$DETECTED_MODE" >> $GITHUB_OUTPUT
-          echo "test-count=$TEST_COUNT" >> $GITHUB_OUTPUT
-
-      # --------------------------------------------------------------------
       # Setup Redis service using composite action with caching
       # --------------------------------------------------------------------
       - name: 🗄️ Setup Redis Service
@@ -237,40 +187,32 @@ jobs:
           trust-service-health: ${{ inputs.redis-trust-service-health }}
 
       # --------------------------------------------------------------------
-      # Setup test failure detection functions
+      # Start test timer
       # --------------------------------------------------------------------
-      - name: 🔧 Setup failure detection
-        uses: ./.github/actions/test-failure-detection
-        with:
-          output-file: "test-output.log"
-          mode: "text" # Will be overridden during actual detection
+      - name: ⏱️ Start test timer
+        id: test-timer
+        run: |
+          TEST_START=$(date +%s)
+          echo "test-start=$TEST_START" >> $GITHUB_OUTPUT
+          echo "🕒 Test timer started at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
       # --------------------------------------------------------------------
-      # Run tests with appropriate configuration
+      # Run tests with native CI mode
+      # CI mode auto-detects GitHub Actions and produces:
+      # - GitHub annotations (::error file=path,line=N::)
+      # - Step summary ($GITHUB_STEP_SUMMARY)
+      # - Structured output (.mage-x/ci-results.jsonl)
       # --------------------------------------------------------------------
       - name: 🧪 Run tests
         id: run-tests
         continue-on-error: true
         run: |
-          # Sanitize inherited environment variables first
-          TEST_COUNT=${TEST_COUNT:-0}
-          TEST_COUNT=$(echo "$TEST_COUNT" | xargs)
-          if ! [[ "$TEST_COUNT" =~ ^[0-9]+$ ]]; then
-            TEST_COUNT=0
-          fi
-          export TEST_COUNT
-
-          # Safely assign values to shell vars with defaults
+          # Determine test type based on inputs
           RACE="${{ inputs.race-detection-enabled || 'false' }}"
           COVER="${{ inputs.code-coverage-enabled || 'false' }}"
-          MODE="${{ steps.detect-mode.outputs.detected-mode || 'FULL' }}"
 
           echo "🔍 Race Detection Enabled: $RACE"
           echo "🔍 Code Coverage Enabled: $COVER"
-          echo "🎛️ Output Mode: $MODE"
-
-          # Initialize test exit code
-          TEST_EXIT_CODE=0
 
           # Build unified magex command with timeout and appropriate test type
           if [[ "$RACE" == "true" && "$COVER" == "true" ]]; then
@@ -291,109 +233,60 @@ jobs:
             echo "🏁 Running tests without coverage or race detection (timeout: $TEST_TIMEOUT)..."
           fi
 
-          # Build command with JSON flag for FAILURES_ONLY mode
+          # magex CI mode auto-detects GitHub Actions and produces structured output
           MAGEX_CMD="magex test:${TEST_TYPE} -timeout $TEST_TIMEOUT"
-          if [[ "$MODE" == "FAILURES_ONLY" ]]; then
-            MAGEX_CMD="$MAGEX_CMD -json"
-          fi
-
-          echo "🔧 Running: $MAGEX_CMD (timeout: $TEST_TIMEOUT)"
-
-          # Pre-execution diagnostic info for better visibility
-          if [ -n "$GO_MODULE_DIR" ]; then
-            PACKAGE_COUNT=$(cd "$GO_MODULE_DIR" && find . -name '*.go' -not -path './vendor/*' -not -path './third_party/*' | xargs dirname | sort -u | wc -l | xargs)
-          else
-            PACKAGE_COUNT=$(find . -name '*.go' -not -path './vendor/*' -not -path './third_party/*' | xargs dirname | sort -u | wc -l | xargs)
-          fi
-          PACKAGE_COUNT=${PACKAGE_COUNT:-0}
-          echo "🚀 Starting test execution:"
-          echo "   • Total tests: $TEST_COUNT"
-          echo "   • Test packages: $PACKAGE_COUNT"
-          echo "   • Test mode: $TEST_TYPE"
-          echo "   • Output mode: $MODE"
-          ESTIMATED_TIME=$(( ($TEST_COUNT + 49) / 50 ))
-          echo "   • Estimated time: $ESTIMATED_TIME minutes (based on ~50 tests/minute)"
-          echo "   • Timeout: $TEST_TIMEOUT"
+          echo "🔧 Running: $MAGEX_CMD"
           echo ""
 
-          START_TIME=$(date +%s)
-          export START_TIME
-
-          # Execute based on detected mode with simplified processing
-          set +e  # Don't exit on error to capture exit code properly
-          if [[ "$MODE" == "FULL" ]]; then
-            echo "📝 Using FULL output mode - showing all test output"
-            echo "🔍 Executing: $MAGEX_CMD"
-            if [ "$ENABLE_MULTI_MODULE_TESTING" == "true" ]; then
-              echo "🔧 Multi-module testing enabled - running from repository root"
-              echo "📦 magex will discover all Go modules and merge coverage"
-              $MAGEX_CMD 2>&1 | tee test-output.log
-            elif [ -n "$GO_MODULE_DIR" ]; then
-              echo "🔧 Running from directory: $GO_MODULE_DIR"
-              (cd "$GO_MODULE_DIR" && $MAGEX_CMD) 2>&1 | tee test-output.log
-            else
-              echo "🔧 Running from repository root"
-              $MAGEX_CMD 2>&1 | tee test-output.log
-            fi
-            TEST_EXIT_CODE=${PIPESTATUS[0]}
-            echo "🔍 Magex command exit code: $TEST_EXIT_CODE"
-
-            # Extract failures for summary (even in full mode) using robust detection
-            if [[ $TEST_EXIT_CODE -ne 0 ]]; then
-              source test-failure-functions.sh 2>/dev/null || true
-              detect_failures_from_text "test-output.log" "test-failures.txt" || true
-            fi
-
-          elif [[ "$MODE" == "FAILURES_ONLY" ]]; then
-            echo "📝 Using FAILURES_ONLY mode - JSON output with failure extraction"
-            echo "🔍 Executing: $MAGEX_CMD"
-            if [ "$ENABLE_MULTI_MODULE_TESTING" == "true" ]; then
-              echo "🔧 Multi-module testing enabled - running from repository root"
-              echo "📦 magex will discover all Go modules and merge coverage"
-              $MAGEX_CMD 2>&1 | tee test-output.log
-            elif [ -n "$GO_MODULE_DIR" ]; then
-              echo "🔧 Running from directory: $GO_MODULE_DIR"
-              (cd "$GO_MODULE_DIR" && $MAGEX_CMD) 2>&1 | tee test-output.log
-            else
-              echo "🔧 Running from repository root"
-              $MAGEX_CMD 2>&1 | tee test-output.log
-            fi
-            TEST_EXIT_CODE=${PIPESTATUS[0]}
-            echo "🔍 Magex command exit code: $TEST_EXIT_CODE"
-
-            # Always extract failures in JSON mode to check for test failures
-            source test-failure-functions.sh 2>/dev/null || true
-            detect_failures_from_json "test-output.log" "test-failures.txt" || true
-
-            # JSON failure override: Check if JSON contains ACTUAL test failures when exit code is 0
-            if [[ $TEST_EXIT_CODE -eq 0 ]] && [[ -f test-output.log ]]; then
-              echo "🔍 Checking JSON output for actual test failures despite exit code 0..."
-
-              # Check for JSON test failure entries or error patterns
-              JSON_FAILURES=0
-              if grep -q '^{' test-output.log 2>/dev/null; then
-                # Count ONLY failed test events, not package/suite failures which are expected
-                # Look for Action="fail" AND Package field AND Test field (indicating actual test failure)
-                JSON_FAILURES=$(grep '^{' test-output.log 2>/dev/null | \
-                  jq -r 'select(.Action == "fail" and .Test != null and .Test != "" and (.Package // "") != "" and (.Test | test("^Test[A-Za-z].*"))) | .Test' 2>/dev/null | wc -l | xargs || echo "0")
-
-                if [[ $JSON_FAILURES -gt 0 ]]; then
-                  echo "⚠️ Found $JSON_FAILURES actual failing test functions in JSON output"
-                  echo "🔧 Overriding exit code from 0 to 1 due to detected test failures"
-                  TEST_EXIT_CODE=1
-                else
-                  echo "✅ JSON output contains no actual test failures (exit code 0 is correct)"
-                fi
-              fi
-            fi
+          # Execute tests - CI mode automatically:
+          # - Parses test output in real-time
+          # - Emits GitHub annotations for failures
+          # - Writes step summary
+          # - Creates .mage-x/ci-results.jsonl
+          set +e
+          if [ "$ENABLE_MULTI_MODULE_TESTING" == "true" ]; then
+            echo "🔧 Multi-module testing enabled - running from repository root"
+            $MAGEX_CMD 2>&1 | tee test-output.log
+          elif [ -n "$GO_MODULE_DIR" ]; then
+            echo "🔧 Running from directory: $GO_MODULE_DIR"
+            (cd "$GO_MODULE_DIR" && $MAGEX_CMD) 2>&1 | tee test-output.log
+          else
+            echo "🔧 Running from repository root"
+            $MAGEX_CMD 2>&1 | tee test-output.log
           fi
+          TEST_EXIT_CODE=${PIPESTATUS[0]}
           set -e
 
-          # Set outputs for other steps
+          # Set outputs
           echo "test-exit-code=$TEST_EXIT_CODE" >> $GITHUB_OUTPUT
-          echo "output-mode=$MODE" >> $GITHUB_OUTPUT
-
           echo "🏁 Test execution completed with exit code: $TEST_EXIT_CODE"
+
+          # Calculate duration
+          TEST_END=$(date +%s)
+          TEST_DURATION=$((TEST_END - ${{ steps.test-timer.outputs.test-start }}))
+          echo "test-duration=$TEST_DURATION" >> $GITHUB_OUTPUT
+          echo "⏱️ Test duration: ${TEST_DURATION}s"
+
+      # --------------------------------------------------------------------
+      # Normalize CI results location for multi-module projects
+      # --------------------------------------------------------------------
+      - name: 🔄 Normalize CI results location
+        if: always()
+        run: |
+          # Ensure CI results are in expected location for artifact upload
+          # When running from GO_MODULE_DIR, results are created there
+          if [ -n "$GO_MODULE_DIR" ] && [ -f "$GO_MODULE_DIR/.mage-x/ci-results.jsonl" ]; then
+            mkdir -p .mage-x
+            if ! cp "$GO_MODULE_DIR/.mage-x/ci-results.jsonl" .mage-x/; then
+              echo "❌ Failed to copy CI results from $GO_MODULE_DIR/.mage-x/ci-results.jsonl to .mage-x/"
+              exit 1
+            fi
+            echo "✅ Copied CI results from module directory: $GO_MODULE_DIR"
+          elif [ -f ".mage-x/ci-results.jsonl" ]; then
+            echo "✅ CI results already in expected location"
+          else
+            echo "⚠️ No CI results file found (tests may have passed with no failures)"
+          fi
 
       # --------------------------------------------------------------------
       # Normalize coverage file name if coverage was generated
@@ -401,15 +294,14 @@ jobs:
       - name: 🔄 Normalize coverage file name
         if: inputs.code-coverage-enabled == 'true' && steps.run-tests.outputs.test-exit-code == '0'
         run: |
-          # Check if we need to look in the module directory first
           GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
 
+          # Check module directory first
           if [ -n "$GO_MODULE_DIR" ]; then
             echo "📁 Looking for coverage files in module directory: $GO_MODULE_DIR"
-            # Move coverage file from module directory to root if it exists there
             for coverage_file in coverage.out coverage.txt cover.out cover.txt profile.out profile.txt; do
               if [[ -f "$GO_MODULE_DIR/$coverage_file" ]]; then
-                echo "📁 Found coverage file in module directory: $GO_MODULE_DIR/$coverage_file"
+                echo "📁 Found coverage file: $GO_MODULE_DIR/$coverage_file"
                 echo "🔄 Moving to repository root as coverage.txt"
                 mv "$GO_MODULE_DIR/$coverage_file" coverage.txt
                 break
@@ -417,12 +309,12 @@ jobs:
             done
           fi
 
-          # Look for coverage files in root directory (either originally there or just moved)
+          # Check root directory
           for coverage_file in coverage.out coverage.txt cover.out cover.txt profile.out profile.txt; do
             if [[ -f "$coverage_file" ]]; then
               echo "📁 Found coverage file: $coverage_file"
               if [[ "$coverage_file" != "coverage.txt" ]]; then
-                echo "🔄 Renaming $coverage_file to coverage.txt for consistency"
+                echo "🔄 Renaming to coverage.txt"
                 mv "$coverage_file" coverage.txt
               fi
               echo "✅ Coverage file normalized to coverage.txt"
@@ -430,234 +322,12 @@ jobs:
             fi
           done
 
-          # Verify coverage file exists and has content
+          # Verify
           if [[ -f coverage.txt ]] && [[ -s coverage.txt ]]; then
-            COVERAGE_LINES=$(wc -l < coverage.txt)
-            echo "✅ Coverage file verified: $COVERAGE_LINES lines"
+            echo "✅ Coverage file verified: $(wc -l < coverage.txt) lines"
           else
             echo "⚠️ No coverage file found or file is empty"
           fi
-
-      # --------------------------------------------------------------------
-      # Inject matrix job info into failure signatures for deduplication tracking
-      # --------------------------------------------------------------------
-      - name: 🏷️ Add matrix job info to signatures
-        if: always()
-        run: |
-          # Add matrix job information to signatures for tracking across matrix jobs
-          if [[ -f test-failures-signatures.json ]]; then
-            echo "🏷️ Adding matrix job information to failure signatures..."
-            MATRIX_JOB_ID="${{ matrix.name }}"
-
-            # Debug: Show signature file before processing
-            echo "🔍 Signature file before adding matrix info:"
-            echo "  • File size: $(wc -c < test-failures-signatures.json) bytes"
-            echo "  • Entry count: $(jq 'length' test-failures-signatures.json 2>/dev/null || echo 'invalid')"
-            if [[ -s test-failures-signatures.json ]]; then
-              echo "  • First entry:"
-              jq '.[0]' test-failures-signatures.json 2>/dev/null | head -5 | sed 's/^/    /' || echo "    (invalid JSON)"
-            fi
-
-            # Add matrix_job field to each signature entry
-            jq --arg matrix_job "$MATRIX_JOB_ID" 'map(. + {matrix_job: $matrix_job})' test-failures-signatures.json > test-failures-signatures.tmp && \
-              mv test-failures-signatures.tmp test-failures-signatures.json
-
-            echo "✅ Added matrix job info ($MATRIX_JOB_ID) to $(jq 'length' test-failures-signatures.json 2>/dev/null || echo '0') signatures"
-          else
-            echo "ℹ️ No signatures file found - creating empty file for matrix job ${{ matrix.name }}"
-            echo '[]' > test-failures-signatures.json
-          fi
-
-      # --------------------------------------------------------------------
-      # Create test failure summary if failures occurred
-      # --------------------------------------------------------------------
-      - name: 🚨 Create Test Failure Summary
-        if: always() && steps.run-tests.outputs.test-exit-code != '0'
-        run: |
-          echo "🚨 Processing test failures for enhanced reporting..."
-
-          FAILURES_EXIST=false
-
-          # Check if we have failure details to process
-          if [[ -f test-failures.txt ]] && [[ -s test-failures.txt ]]; then
-            FAILURES_EXIST=true
-            echo "📋 Found $(wc -l < test-failures.txt) test failures to process"
-
-            # Create enhanced failure summary with structured JSON output
-            echo "📊 Creating enhanced test failure summary..."
-
-            # Initialize the JSON structure
-            echo '[]' > test-failures-summary.json
-
-            # Process each unique package that had failures
-            TEMP_PACKAGES=$(mktemp)
-
-            # Process both test failures and build failures
-
-            # Extract package names from test failures using a named regex and
-            # intermediate steps
-            FAIL_REGEX='FAIL:.*\(([^)]+)\)'
-            PACKAGE_LINE_REGEX='.*\(([^):]+)[^)]*\).*'
-
-            grep -oE "$FAIL_REGEX" test-failures.txt 2>/dev/null > temp-fail-lines.txt
-            sed -E "s/$PACKAGE_LINE_REGEX/\1/" temp-fail-lines.txt | sort -u > "$TEMP_PACKAGES"
-            rm temp-fail-lines.txt
-
-            if [[ -s "$TEMP_PACKAGES" ]]; then
-              echo "📦 Found packages with test failures:"
-              cat "$TEMP_PACKAGES"
-
-              # Process each package with test failures
-              while IFS= read -r package; do
-                if [[ -n "$package" ]]; then
-                  echo "🔍 Processing test failures for package: $package"
-
-                  # Extract failures for this specific package
-                  PACKAGE_FAILURES=$(grep "($package)" test-failures.txt 2>/dev/null || true)
-                  if [[ -n "$PACKAGE_FAILURES" ]]; then
-                    # Create package failure entry for test failures
-                    PACKAGE_JSON=$(jq -n \
-                      --arg pkg "$package" \
-                      --arg failures "$PACKAGE_FAILURES" \
-                      '{
-                        Package: $pkg,
-                        Type: "test",
-                        failures: [
-                          $failures | split("\n")[] | select(length > 0) | {
-                            Test: (. | gsub("^.*FAIL: "; "") | gsub(" \\(.*\\)$"; "")),
-                            Output: .,
-                            Elapsed: "unknown"
-                          }
-                        ]
-                      }')
-
-                    # Add to summary
-                    jq --argjson new_entry "$PACKAGE_JSON" '. += [$new_entry]' test-failures-summary.json > test-failures-summary.json.tmp
-                    mv test-failures-summary.json.tmp test-failures-summary.json
-                  fi
-                fi
-              done < "$TEMP_PACKAGES"
-            fi
-
-            rm -f "$TEMP_PACKAGES"
-
-            # Now handle build failures separately
-            TEMP_BUILD_PACKAGES=$(mktemp)
-
-            if grep "^--- BUILD FAILED:" test-failures.txt 2>/dev/null | sed 's/^--- BUILD FAILED: //' | sort -u > "$TEMP_BUILD_PACKAGES"; then
-              echo "📦 Found packages with build failures:"
-              cat "$TEMP_BUILD_PACKAGES"
-
-              # Process each package with build failures
-              while IFS= read -r package; do
-                if [[ -n "$package" ]]; then
-                  echo "🔨 Processing build failures for package: $package"
-
-                  # Extract build error details for this package
-                  BUILD_ERRORS=$(awk -v pkg="$package" '
-                    BEGIN { capture = 0; errors = "" }
-                    $0 == "--- BUILD FAILED: " pkg { capture = 1; next }
-                    /^--- (FAIL|BUILD FAILED):/ && $0 != "--- BUILD FAILED: " pkg { capture = 0 }
-                    capture && /^    / {
-                      if (errors) errors = errors "\n" substr($0, 5)
-                      else errors = substr($0, 5)
-                    }
-                    END { print errors }
-                  ' test-failures.txt)
-
-                  # Create package failure entry for build failures
-                  BUILD_JSON=$(jq -n \
-                    --arg pkg "$package" \
-                    --arg errors "$BUILD_ERRORS" \
-                    '{
-                      Package: $pkg,
-                      Type: "build",
-                      BuildErrors: ($errors | split("\n") | map(select(length > 0))),
-                      failures: [{
-                        Test: "Build compilation",
-                        Output: ("--- BUILD FAILED: " + $pkg + "\n" + $errors),
-                        Elapsed: "unknown"
-                      }]
-                    }')
-
-                  # Add to summary
-                  jq --argjson new_entry "$BUILD_JSON" '. += [$new_entry]' test-failures-summary.json > test-failures-summary.json.tmp
-                  mv test-failures-summary.json.tmp test-failures-summary.json
-                fi
-              done < "$TEMP_BUILD_PACKAGES"
-            fi
-
-            rm -f "$TEMP_BUILD_PACKAGES"
-
-            echo "✅ Test failure summary created with $(jq 'length' test-failures-summary.json) packages"
-
-          else
-            echo "ℹ️ No specific test failures detected, creating generic failure entry"
-            # Create generic failure entry when exit code indicates failure but no specific patterns found
-            jq -n \
-              --arg exit_code "${{ steps.run-tests.outputs.test-exit-code }}" \
-              '[{
-                Package: "unknown",
-                failures: [{
-                  Test: "Generic failure",
-                  Output: ("Test execution failed with exit code " + $exit_code),
-                  Elapsed: "unknown"
-                }]
-              }]' > test-failures-summary.json
-          fi
-
-          # Verify the summary file
-          if [[ -f test-failures-summary.json ]]; then
-            echo "📊 Final failure summary:"
-            jq . test-failures-summary.json
-          fi
-
-      # --------------------------------------------------------------------
-      # Create test failure annotations for GitHub PR/commit view
-      # --------------------------------------------------------------------
-      - name: 📋 Annotate Key Test Failures
-        if: always() && steps.run-tests.outputs.test-exit-code != '0'
-        run: |
-          if [[ -f test-failures.txt ]] && [[ -s test-failures.txt ]]; then
-            echo "📋 Creating GitHub annotations for key test failures..."
-
-            # Limit to first 10 failures to avoid annotation overload
-            head -10 test-failures.txt | while IFS= read -r failure_line; do
-              if [[ -n "$failure_line" ]]; then
-                # Extract test name and create annotation
-                TEST_NAME=$(echo "$failure_line" | sed -E 's/^.*FAIL: ([^ ]+).*$/\1/' | head -c 100)
-                echo "::error title=Test Failure::❌ $TEST_NAME failed in ${{ matrix.name }}"
-              fi
-            done
-
-            TOTAL_FAILURES=$(wc -l < test-failures.txt)
-            if [[ "$TOTAL_FAILURES" -gt 10 ]]; then
-              echo "::warning title=Additional Failures::⚠️ $((TOTAL_FAILURES - 10)) additional test failures not shown in annotations"
-            fi
-
-            echo "✅ Created annotations for up to 10 test failures"
-          else
-            echo "::error title=Test Suite Failed::❌ Test suite failed but no specific failure patterns detected"
-          fi
-
-      # --------------------------------------------------------------------
-      # Generate comprehensive test statistics
-      # --------------------------------------------------------------------
-      - name: 📊 Calculate test statistics
-        id: test-summary
-        if: always()
-        uses: ./.github/actions/test-statistics
-        with:
-          matrix-name: ${{ matrix.name }}
-          matrix-os: ${{ matrix.os }}
-          matrix-go-version: ${{ matrix.go-version }}
-          test-exit-code: ${{ steps.run-tests.outputs.test-exit-code || '0' }}
-          output-mode: ${{ steps.run-tests.outputs.output-mode || 'FULL' }}
-          job-status: ${{ job.status }}
-          test-start-time: ${{ steps.test-timer.outputs.test-start || '0' }}
-          race-detection-enabled: ${{ inputs.race-detection-enabled }}
-          code-coverage-enabled: ${{ inputs.code-coverage-enabled }}
-          fuzz-run: "false"
 
       # --------------------------------------------------------------------
       # Collect cache performance statistics
@@ -691,21 +361,6 @@ jobs:
           echo "• Image Size: ${{ steps.setup-redis.outputs.image-size }}MB"
           echo "• Cache Operation Time: ${{ steps.setup-redis.outputs.cache-operation-time }}s"
           echo "• Connection Time: ${{ steps.setup-redis.outputs.connection-time }}s"
-          echo "• Installation Method: ${{ steps.setup-redis.outputs.installation-method }}"
-
-          # Calculate total Redis setup time
-          CACHE_TIME="${{ steps.setup-redis.outputs.cache-operation-time || '0' }}"
-          CONNECTION_TIME="${{ steps.setup-redis.outputs.connection-time || '0' }}"
-          TOTAL_TIME=$((CACHE_TIME + CONNECTION_TIME))
-
-          echo "• Total Setup Time: ${TOTAL_TIME}s"
-
-          # Performance assessment
-          if [[ "${{ steps.setup-redis.outputs.cache-hit }}" == "true" ]]; then
-            echo "🚀 Performance: Redis cache hit - faster startup achieved!"
-          else
-            echo "📥 Performance: Redis pulled from Docker Hub - consider cache warming"
-          fi
 
       # --------------------------------------------------------------------
       # Upload performance cache statistics for completion report
@@ -718,31 +373,18 @@ jobs:
           retention-days: "1"
 
       # --------------------------------------------------------------------
-      # Upload test outputs and failure details for validation
+      # Upload CI results (native CI mode output)
       # --------------------------------------------------------------------
-      - name: 📤 Upload test outputs and statistics
+      - name: 📤 Upload CI results
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: test-results-unit-${{ matrix.os }}-${{ matrix.go-version }}
+          name: ci-results-${{ matrix.os }}-${{ matrix.go-version }}
           path: |
+            .mage-x/ci-results.jsonl
             test-output.log
-            test-failures.txt
-            test-failures-detailed.txt
-            test-failures-summary.json
-            test-failures-signatures.json
           retention-days: 1
           if-no-files-found: ignore
-
-      # --------------------------------------------------------------------
-      # Upload test statistics for completion report
-      # --------------------------------------------------------------------
-      - name: 📤 Upload test statistics
-        uses: ./.github/actions/upload-statistics
-        with:
-          artifact-name: test-stats-${{ matrix.os }}-${{ matrix.go-version }}
-          artifact-path: ${{ steps.test-summary.outputs.statistics-file }}
-          retention-days: "1"
 
       # --------------------------------------------------------------------
       # Verify coverage file exists and upload for processing
@@ -755,7 +397,7 @@ jobs:
             echo "📊 Coverage file size: $(wc -c < coverage.txt) bytes"
             echo "📊 Coverage entries: $(wc -l < coverage.txt) lines"
 
-            # Basic validation - ensure it looks like Go coverage format
+            # Basic validation
             if head -1 coverage.txt | grep -q "mode:"; then
               echo "✅ Coverage file format validation passed"
             else
