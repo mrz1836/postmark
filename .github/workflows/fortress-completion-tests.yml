@@ -131,7 +131,13 @@ jobs:
           echo "🗂️ Flattening downloaded artifacts..."
 
           # Source shared helper functions for artifact processing
-          source .github/scripts/parse-test-label.sh
+          source .github/scripts/parse-test-label.sh || { echo "❌ Failed to source parse-test-label.sh"; exit 1; }
+
+          # Verify critical function is available
+          if ! type copy_ci_artifact &>/dev/null; then
+            echo "❌ Error: copy_ci_artifact function not found after sourcing"
+            exit 1
+          fi
 
           # Process stats artifacts (bench-stats, cache-stats JSON files)
           if [ -d "./artifacts/" ]; then
@@ -150,7 +156,7 @@ jobs:
           if [ -d "./ci-artifacts/" ]; then
             echo "📋 Processing unit test CI results..."
             find ./ci-artifacts/ -name "*.jsonl" -type f | while read -r file; do
-              copy_ci_artifact "$file" "ci"
+              copy_ci_artifact "$file" "ci" || true
             done
           fi
 
@@ -158,7 +164,7 @@ jobs:
           if [ -d "./test-artifacts/" ]; then
             echo "📋 Processing fuzz test CI results..."
             find ./test-artifacts/ -name "*.jsonl" -type f | while read -r file; do
-              copy_ci_artifact "$file" "ci"
+              copy_ci_artifact "$file" "ci" || true
             done
           fi
 
@@ -180,7 +186,11 @@ jobs:
         id: process-tests
         run: |
           # Source shared helper function for generating test labels
-          source .github/scripts/parse-test-label.sh
+          source .github/scripts/parse-test-label.sh || { echo "❌ Failed to source parse-test-label.sh"; exit 1; }
+
+          # Enable nullglob so "for f in *.jsonl" loops safely skip when no files match
+          # (prevents iterating with literal pattern string "ci-*.jsonl")
+          shopt -s nullglob
 
           # Initialize totals for summary
           TOTAL_TESTS=0
@@ -289,7 +299,7 @@ jobs:
                     PKG=$(echo "$line" | jq -r '.failure.package // "unknown"' | sed 's|.*/||')
                     ERROR=$(echo "$line" | jq -r '.failure.error // ""' | head -c 100 | tr '\n' ' ')
 
-                    # Truncate error message for table display
+                    # Truncate error message for table display (max 80 chars: 77 + "...")
                     if [[ ${#ERROR} -gt 80 ]]; then
                       ERROR="${ERROR:0:77}..."
                     fi

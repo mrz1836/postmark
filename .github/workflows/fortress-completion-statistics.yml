@@ -567,11 +567,11 @@ jobs:
           # Display LOC section
           if [[ "$LOC_FOUND" == "true" ]]; then
             # Format numbers with commas for display
-            DISPLAY_TEST_LOC=$(printf "%'d" "${TEST_FILES_LOC:-0}")
+            DISPLAY_TEST_LOC=$(LC_NUMERIC=en_US.UTF-8 printf "%'d" "${TEST_FILES_LOC:-0}")
             DISPLAY_TEST_COUNT="${TEST_FILES_COUNT:-N/A}"
-            DISPLAY_GO_LOC=$(printf "%'d" "${GO_FILES_LOC:-0}")
+            DISPLAY_GO_LOC=$(LC_NUMERIC=en_US.UTF-8 printf "%'d" "${GO_FILES_LOC:-0}")
             DISPLAY_GO_COUNT="${GO_FILES_COUNT:-N/A}"
-            DISPLAY_TOTAL_LOC=$(printf "%'d" "${TOTAL_LOC:-0}")
+            DISPLAY_TOTAL_LOC=$(LC_NUMERIC=en_US.UTF-8 printf "%'d" "${TOTAL_LOC:-0}")
             DISPLAY_TOTAL_FILES="${TOTAL_FILES_COUNT:-N/A}"
             DISPLAY_LOC_DATE="${LOC_DATE:-N/A}"
 

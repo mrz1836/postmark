@@ -203,19 +203,23 @@ jobs:
             echo "::error title=Fuzz Test Suite Failed::$FAIL_COUNT fuzz tests failed on ${{ inputs.primary-runner }} Go ${{ inputs.go-primary-version }}"
 
             # Annotate first 3 failures from JSONL
-            grep '"type":"failure"' "$JSONL_FILE" | head -3 | while read -r line; do
-              TEST=$(echo "$line" | jq -r '.failure.test')
-              ERROR=$(echo "$line" | jq -r '.failure.error // "test failed"')
-              echo "::error title=Failed Fuzz Test::$TEST - $ERROR"
-            done
+            if [ "$FAIL_COUNT" -gt 0 ]; then
+              grep '"type":"failure"' "$JSONL_FILE" | head -3 | while read -r line; do
+                TEST=$(echo "$line" | jq -r '.failure.test')
+                ERROR=$(echo "$line" | jq -r '.failure.error // "test failed"')
+                echo "::error title=Failed Fuzz Test::$TEST - $ERROR"
+              done
+            fi
           elif [ -f fuzz-output.log ]; then
             # Fallback to log file parsing
             FAIL_COUNT=$(grep -c -E "^--- FAIL:" fuzz-output.log 2>/dev/null || echo "0")
             echo "::error title=Fuzz Test Suite Failed::$FAIL_COUNT fuzz tests failed on ${{ inputs.primary-runner }} Go ${{ inputs.go-primary-version }}"
 
-            grep -E "^--- FAIL:" fuzz-output.log | head -3 | while read -r line; do
-              echo "::error title=Failed Fuzz Test::$line"
-            done
+            if [ "$FAIL_COUNT" -gt 0 ]; then
+              grep -E "^--- FAIL:" fuzz-output.log | head -3 | while read -r line; do
+                echo "::error title=Failed Fuzz Test::$line"
+              done
+            fi
           fi
 
       # --------------------------------------------------------------------
