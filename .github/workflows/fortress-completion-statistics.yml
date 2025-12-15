@@ -99,18 +99,6 @@ jobs:
       # --------------------------------------------------------------------
       # Download specific artifacts needed for statistics processing
       # --------------------------------------------------------------------
-      - name: 📥 Download test statistics
-        if: always() && env.ENABLE_GO_TESTS == 'true'
-        uses: ./.github/actions/download-artifact-resilient
-        with:
-          pattern: "test-stats-*"
-          path: ./artifacts/
-          merge-multiple: true
-          max-retries: ${{ env.ARTIFACT_DOWNLOAD_RETRIES }}
-          retry-delay: ${{ env.ARTIFACT_DOWNLOAD_RETRY_DELAY }}
-          timeout: ${{ env.ARTIFACT_DOWNLOAD_TIMEOUT }}
-          continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
-
       - name: 📥 Download benchmark statistics
         if: always()
         uses: ./.github/actions/download-artifact-resilient
@@ -174,6 +162,16 @@ jobs:
           else
             echo "⚠️ No artifacts directory found"
           fi
+
+      # --------------------------------------------------------------------
+      # Setup MAGE-X for LOC metrics
+      # --------------------------------------------------------------------
+      - name: 🔧 Setup MAGE-X for LOC metrics
+        uses: ./.github/actions/setup-magex
+        with:
+          magex-version: ${{ env.MAGE_X_VERSION }}
+          runner-os: ${{ runner.os }}
+          use-local: ${{ env.MAGE_X_USE_LOCAL }}
 
       # --------------------------------------------------------------------
       # Initialize statistics report section
@@ -533,69 +531,67 @@ jobs:
       - name: 📊 Generate Lines of Code Summary
         id: process-loc
         run: |
-          # Try to get LOC from stats files first
+          echo "📊 Running magex metrics:loc json..."
+
+          # Run magex metrics:loc json and capture output
+          LOC_OUTPUT=$(magex metrics:loc json 2>&1 || true)
           LOC_FOUND=false
-          TEST_FILES_COUNT=""
-          GO_FILES_COUNT=""
-          TOTAL_LOC=""
-          LOC_DATE=""
 
-          if compgen -G "*-stats-*.json" >/dev/null 2>&1; then
-            echo "🔍 Looking for LOC data in stats files..."
-            for stats_file in *-stats-*.json; do
-              if [ -f "$stats_file" ]; then
-                echo "📋 Checking $stats_file for LOC data..."
-                TEST_FILES_COUNT=$(jq -r '.loc_test_files // "null"' "$stats_file")
-                GO_FILES_COUNT=$(jq -r '.loc_go_files // "null"' "$stats_file")
-                TOTAL_LOC=$(jq -r '.loc_total // "null"' "$stats_file")
+          if [[ -n "$LOC_OUTPUT" ]]; then
+            echo "📋 magex metrics:loc json output:"
+            echo "$LOC_OUTPUT"
 
-                echo "  - Test Files: '$TEST_FILES_COUNT'"
-                echo "  - Go Files: '$GO_FILES_COUNT'"
-                echo "  - Total: '$TOTAL_LOC'"
+            # Parse JSON output using jq
+            TEST_FILES_LOC=$(echo "$LOC_OUTPUT" | jq -r '.test_files_loc // empty')
+            TEST_FILES_COUNT=$(echo "$LOC_OUTPUT" | jq -r '.test_files_count // empty')
+            GO_FILES_LOC=$(echo "$LOC_OUTPUT" | jq -r '.go_files_loc // empty')
+            GO_FILES_COUNT=$(echo "$LOC_OUTPUT" | jq -r '.go_files_count // empty')
+            TOTAL_LOC=$(echo "$LOC_OUTPUT" | jq -r '.total_loc // empty')
+            TOTAL_FILES_COUNT=$(echo "$LOC_OUTPUT" | jq -r '.total_files_count // empty')
+            LOC_DATE=$(echo "$LOC_OUTPUT" | jq -r '.date // empty')
 
-                # Check if we have valid LOC data (not null and not empty string)
-                if [[ "$TEST_FILES_COUNT" != "null" ]] && [[ "$TEST_FILES_COUNT" != "" ]] && \
-                   [[ "$GO_FILES_COUNT" != "null" ]] && [[ "$GO_FILES_COUNT" != "" ]] && \
-                   [[ "$TOTAL_LOC" != "null" ]] && [[ "$TOTAL_LOC" != "" ]]; then
-                  LOC_DATE=$(jq -r '.loc_date // "unknown"' "$stats_file")
-                  LOC_FOUND=true
-                  echo "✅ Found valid LOC data in $stats_file: $TOTAL_LOC total lines"
-                  break
-                fi
-              fi
-            done
+            echo "  - Test Files LOC: '$TEST_FILES_LOC' (count: $TEST_FILES_COUNT)"
+            echo "  - Go Files LOC: '$GO_FILES_LOC' (count: $GO_FILES_COUNT)"
+            echo "  - Total LOC: '$TOTAL_LOC' (files: $TOTAL_FILES_COUNT)"
+            echo "  - Date: '$LOC_DATE'"
+
+            # Check if we have valid LOC data
+            if [[ -n "$TEST_FILES_LOC" ]] && [[ -n "$GO_FILES_LOC" ]] && [[ -n "$TOTAL_LOC" ]]; then
+              LOC_FOUND=true
+              echo "✅ Successfully parsed LOC JSON data"
+            fi
+          else
+            echo "⚠️ No output from magex metrics:loc json"
           fi
 
-          # Display LOC section if we have data
-          if [[ "$LOC_FOUND" == "true" ]] && [[ -n "$TOTAL_LOC" ]]; then
-            # Ensure no empty values in table
-            DISPLAY_TEST_FILES="${TEST_FILES_COUNT:-N/A}"
-            DISPLAY_GO_FILES="${GO_FILES_COUNT:-N/A}"
+          # Display LOC section
+          if [[ "$LOC_FOUND" == "true" ]]; then
+            # Format numbers with commas for display
+            DISPLAY_TEST_LOC=$(printf "%'d" "${TEST_FILES_LOC:-0}")
+            DISPLAY_TEST_COUNT="${TEST_FILES_COUNT:-N/A}"
+            DISPLAY_GO_LOC=$(printf "%'d" "${GO_FILES_LOC:-0}")
+            DISPLAY_GO_COUNT="${GO_FILES_COUNT:-N/A}"
+            DISPLAY_TOTAL_LOC=$(printf "%'d" "${TOTAL_LOC:-0}")
+            DISPLAY_TOTAL_FILES="${TOTAL_FILES_COUNT:-N/A}"
             DISPLAY_LOC_DATE="${LOC_DATE:-N/A}"
-            DISPLAY_TOTAL="${TOTAL_LOC:-N/A}"
-
-            # Double-check for empty strings and replace with N/A
-            [[ -z "$DISPLAY_TEST_FILES" ]] && DISPLAY_TEST_FILES="N/A"
-            [[ -z "$DISPLAY_GO_FILES" ]] && DISPLAY_GO_FILES="N/A"
-            [[ -z "$DISPLAY_LOC_DATE" ]] && DISPLAY_LOC_DATE="N/A"
-            [[ -z "$DISPLAY_TOTAL" ]] && DISPLAY_TOTAL="N/A"
 
             {
               echo ""
               echo "<br><br>"
               echo ""
               echo "### 📊 Lines of Code Summary"
-              echo "| Type | Total Lines | Date |"
-              echo "|------|-------------|------|"
-              echo "| Test Files | $DISPLAY_TEST_FILES | $DISPLAY_LOC_DATE |"
-              echo "| Go Files | $DISPLAY_GO_FILES | $DISPLAY_LOC_DATE |"
+              echo "| Type | Lines of Code | Files | Date |"
+              echo "|------|---------------|-------|------|"
+              echo "| Test Files | $DISPLAY_TEST_LOC | $DISPLAY_TEST_COUNT | $DISPLAY_LOC_DATE |"
+              echo "| Go Files | $DISPLAY_GO_LOC | $DISPLAY_GO_COUNT | $DISPLAY_LOC_DATE |"
+              echo "| **Total** | **$DISPLAY_TOTAL_LOC** | **$DISPLAY_TOTAL_FILES** | |"
               echo ""
-              echo "**Total lines of code: $DISPLAY_TOTAL**"
+              echo "<br><br>"
             } >> statistics-section.md
 
-            echo "✅ LOC section added to report with values: Test=$DISPLAY_TEST_FILES, Go=$DISPLAY_GO_FILES, Total=$DISPLAY_TOTAL"
+            echo "✅ LOC section added: Test=$DISPLAY_TEST_LOC ($DISPLAY_TEST_COUNT files), Go=$DISPLAY_GO_LOC ($DISPLAY_GO_COUNT files), Total=$DISPLAY_TOTAL_LOC ($DISPLAY_TOTAL_FILES files)"
           else
-            echo "⚠️ No valid LOC data available to display"
+            echo "⚠️ Could not collect LOC data"
             {
               echo ""
               echo "<br><br>"
@@ -604,7 +600,9 @@ jobs:
               echo "| Status | Details |"
               echo "|--------|---------|"
               echo "| **Lines of Code** | ❌ Data not available |"
-              echo "| **Reason** | magex metrics:loc not executed or parsing failed |"
+              echo "| **Reason** | magex metrics:loc json command failed or produced unexpected output |"
+              echo ""
+              echo "<br><br>"
             } >> statistics-section.md
           fi
 

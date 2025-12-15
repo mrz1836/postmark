@@ -1,7 +1,22 @@
 # ------------------------------------------------------------------------------------
 #  Test Statistics Collection (Composite Action)
 #
-#  Purpose: Calculate and collect comprehensive test statistics including test counts,
+#  ⚠️ DEPRECATED: This action is deprecated in favor of magex native CI mode.
+#
+#  magex CI mode automatically produces .mage-x/ci-results.jsonl which includes:
+#    - Test pass/fail counts
+#    - Duration metrics
+#    - Failure details with file:line locations
+#    - Summary statistics
+#
+#  Usage: Simply run `magex test:*` commands - CI mode auto-detects GitHub Actions.
+#  The validation workflow reads results from ci-results.jsonl instead of this action.
+#
+#  This action is kept for backwards compatibility but will be removed in a future release.
+#
+#  ---------------------------------------------------------------------------------
+#
+#  Original Purpose: Calculate and collect comprehensive test statistics including test counts,
 #  failure metrics, performance data, and lines of code metrics.
 #
 #  This action provides standardized statistics collection:

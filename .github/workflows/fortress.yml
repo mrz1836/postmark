@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------------
 #  🏰 GoFortress - Enterprise-grade CI/CD fortress for Go applications
 #
-#  Version: 1.2.0 | Released: 2025-11-20
+#  Version: 1.3.0 | Released: 2025-12-14
 #
 #  Built Strong. Tested Harder.
 #
@@ -186,6 +186,27 @@ jobs:
       ossi-token: ${{ secrets.OSSI_TOKEN }}
       ossi-username: ${{ secrets.OSSI_USERNAME }}
   # ----------------------------------------------------------------------------------
+  # Pre-commit Checks (FORK-SAFE: No secrets required)
+  # ----------------------------------------------------------------------------------
+  pre-commit:
+    name: 🪝 Pre-commit Checks
+    needs: [load-env, setup, test-magex, warm-cache]
+    if: |
+      !cancelled() &&
+      needs.setup.result == 'success' &&
+      needs.test-magex.result == 'success' &&
+      (needs.warm-cache.result == 'success' || needs.warm-cache.result == 'skipped') &&
+      needs.setup.outputs.pre-commit-enabled == 'true'
+    permissions:
+      contents: read # Read repository content for pre-commit checks
+    uses: ./.github/workflows/fortress-pre-commit.yml
+    with:
+      env-json: ${{ needs.load-env.outputs.env-json }}
+      primary-runner: ${{ needs.setup.outputs.primary-runner }}
+      go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
+      pre-commit-enabled: ${{ needs.setup.outputs.pre-commit-enabled }}
+      go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
+  # ----------------------------------------------------------------------------------
   # Code Quality Checks (FORK-SAFE: No secrets required)
   # ----------------------------------------------------------------------------------
   code-quality:
@@ -209,27 +230,6 @@ jobs:
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
       github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
-  # ----------------------------------------------------------------------------------
-  # Pre-commit Checks (FORK-SAFE: No secrets required)
-  # ----------------------------------------------------------------------------------
-  pre-commit:
-    name: 🪝 Pre-commit Checks
-    needs: [load-env, setup, test-magex, warm-cache]
-    if: |
-      !cancelled() &&
-      needs.setup.result == 'success' &&
-      needs.test-magex.result == 'success' &&
-      (needs.warm-cache.result == 'success' || needs.warm-cache.result == 'skipped') &&
-      needs.setup.outputs.pre-commit-enabled == 'true'
-    permissions:
-      contents: read # Read repository content for pre-commit checks
-    uses: ./.github/workflows/fortress-pre-commit.yml
-    with:
-      env-json: ${{ needs.load-env.outputs.env-json }}
-      primary-runner: ${{ needs.setup.outputs.primary-runner }}
-      go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
-      pre-commit-enabled: ${{ needs.setup.outputs.pre-commit-enabled }}
-      go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
   # ----------------------------------------------------------------------------------
   # Test Suite (FORK-UNSAFE: Requires CODECOV_TOKEN for coverage - skipped on fork PRs)
   # ----------------------------------------------------------------------------------
