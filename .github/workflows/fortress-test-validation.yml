@@ -115,22 +115,26 @@ jobs:
           find ci-results/ -name "ci-results.jsonl" -o -name "*.jsonl" 2>/dev/null | head -20
 
           # Process each CI results file
-          # Note: Using find instead of compgen -G because ** glob requires shopt -s globstar
+          # Note: Using find for recursive directory traversal to locate all matching files
           if find ci-results/ -name "*.jsonl" 2>/dev/null | grep -q .; then
             echo "✅ Found CI results JSONL files"
 
             for jsonl_file in $(find ci-results/ -name "*.jsonl" 2>/dev/null); do
-              # Extract artifact directory name (grandparent of JSONL file)
-              # Path: ci-results/ARTIFACT_NAME/.mage-x/ci-results.jsonl
+              # Extract artifact directory name from JSONL file path
+              # Supported directory structures:
+              #   1. Expected: ci-results/ARTIFACT_NAME/.mage-x/ci-results.jsonl
+              #      → Use grandparent (skip .mage-x) to get ARTIFACT_NAME
+              #   2. Fallback: ci-results/ARTIFACT_NAME/ci-results.jsonl
+              #      → Use parent directory as ARTIFACT_NAME
               ARTIFACT_DIR=$(dirname "$(dirname "$jsonl_file")" | xargs basename)
               JSONL_NAME=$(basename "$jsonl_file")
 
-              # Validate expected structure - warn but continue with fallback
+              # Detect which structure we have by checking parent directory
               PARENT_DIR=$(basename "$(dirname "$jsonl_file")")
               if [[ "$PARENT_DIR" != ".mage-x" ]]; then
                 echo "  Warning: Unexpected artifact structure for: $jsonl_file"
                 echo "  Expected: ci-results/ARTIFACT_NAME/.mage-x/ci-results.jsonl"
-                # Fallback: use parent directory name as artifact identifier
+                # Fallback: parent is the artifact dir (not grandparent)
                 ARTIFACT_DIR=$(basename "$(dirname "$jsonl_file")")
               fi
 
@@ -297,14 +301,19 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
 
             for jsonl_file in $(find ci-results/ -name "*.jsonl" 2>/dev/null); do
-              # Extract artifact directory name (grandparent of JSONL file)
-              # Path: ci-results/ARTIFACT_NAME/.mage-x/ci-results.jsonl
+              # Extract artifact directory name from JSONL file path
+              # Supported directory structures:
+              #   1. Expected: ci-results/ARTIFACT_NAME/.mage-x/ci-results.jsonl
+              #      → Use grandparent (skip .mage-x) to get ARTIFACT_NAME
+              #   2. Fallback: ci-results/ARTIFACT_NAME/ci-results.jsonl
+              #      → Use parent directory as ARTIFACT_NAME
               ARTIFACT_DIR=$(dirname "$(dirname "$jsonl_file")" | xargs basename)
               JSONL_NAME=$(basename "$jsonl_file")
 
-              # Validate expected structure - use fallback if unexpected
+              # Detect which structure we have by checking parent directory
               PARENT_DIR=$(basename "$(dirname "$jsonl_file")")
               if [[ "$PARENT_DIR" != ".mage-x" ]]; then
+                # Fallback: parent is the artifact dir (not grandparent)
                 ARTIFACT_DIR=$(basename "$(dirname "$jsonl_file")")
               fi
 
