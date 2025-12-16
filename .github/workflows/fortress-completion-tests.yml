@@ -155,17 +155,17 @@ jobs:
           # Process CI results from ci-artifacts (unit tests)
           if [ -d "./ci-artifacts/" ]; then
             echo "📋 Processing unit test CI results..."
-            find ./ci-artifacts/ -name "*.jsonl" -type f | while read -r file; do
+            while IFS= read -r -d '' file; do
               copy_ci_artifact "$file" "ci" || true
-            done
+            done < <(find ./ci-artifacts/ -name "*.jsonl" -type f -print0 2>/dev/null)
           fi
 
           # Process CI results from test-artifacts (fuzz tests)
           if [ -d "./test-artifacts/" ]; then
             echo "📋 Processing fuzz test CI results..."
-            find ./test-artifacts/ -name "*.jsonl" -type f | while read -r file; do
+            while IFS= read -r -d '' file; do
               copy_ci_artifact "$file" "ci" || true
-            done
+            done < <(find ./test-artifacts/ -name "*.jsonl" -type f -print0 2>/dev/null)
           fi
 
           # Show all available JSONL files
