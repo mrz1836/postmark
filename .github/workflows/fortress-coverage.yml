@@ -451,14 +451,14 @@ jobs:
                       # Validate extracted history files contain actual coverage data
                       EXTRACTED_FILES=$(find . -name "*.json" -type f 2>/dev/null | wc -l || echo "0")
                       VALID_FILES=0
-                      for json_file in $(find . -name "*.json" -type f 2>/dev/null); do
+                      while IFS= read -r -d '' json_file; do
                         if [[ -s "$json_file" ]] && grep -q "coverage" "$json_file" 2>/dev/null; then
                           VALID_FILES=$((VALID_FILES + 1))
                         else
                           echo "    ⚠️ Removing invalid history file: $(basename "$json_file")"
                           rm -f "$json_file"
                         fi
-                      done
+                      done < <(find . -name "*.json" -type f -print0 2>/dev/null)
                       echo "    📄 Extracted $EXTRACTED_FILES files, $VALID_FILES valid history entries"
                     else
                       echo "    ⚠️ Failed to extract history-$run_id.zip (possibly corrupted)"
