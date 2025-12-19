@@ -1,6 +1,5 @@
 # ────────────────────────────────────────────────────────────────
 # Dependabot Configuration
-# Repo: mrz1836/<repo>
 #
 # Purpose:
 #   • Keep Go modules, GitHub Actions, DevContainer images/features, and Docker
