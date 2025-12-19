@@ -135,4 +135,4 @@ Before requesting review, ensure:
 * **Never force-push** to main/master branches
 * **Delete branches** after merging to keep the repository clean
 
-> The merge strategy may vary by project. Check with maintainers if unsure..
+> The merge strategy may vary by project. Check with maintainers if unsure.
