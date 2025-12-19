@@ -269,7 +269,6 @@ permissions:
 ## 📚 Resources
 
 ### Internal
-* [CI Validation](ci-validation.md) - CI/CD pipeline overview
 * [Security Practices](security-practices.md) - Security guidelines
 
 ### External

@@ -84,7 +84,7 @@
   </tr>
   <tr>
     <td align="center">
-      🤖&nbsp;<a href="#-ai-compliance"><code>AI&nbsp;Compliance</code></a>
+      🤖&nbsp;<a href="#-ai-usage--assistant-guidelines"><code>AI&nbsp;Usage</code></a>
     </td>
     <td align="center">
        ⚖️&nbsp;<a href="#-license"><code>License</code></a>
@@ -313,7 +313,7 @@ The release process is defined in the [.goreleaser.yml](.goreleaser.yml) configu
 Then create and push a new Git tag using:
 
 ```bash
-magex version:bump bump=patch push
+magex version:bump bump=patch push=true branch=master
 ```
 
 This process ensures consistent, repeatable releases with properly versioned artifacts and citation metadata.
@@ -564,15 +564,8 @@ Read more about this Go project's [code standards](.github/CODE_STANDARDS.md).
 
 <br/>
 
-## 🤖 AI Compliance
-This project documents expectations for AI assistants using a few dedicated files:
-
-- [AGENTS.md](.github/AGENTS.md) — canonical rules for coding style, workflows, and pull requests used by [Codex](https://chatgpt.com/codex).
-- [CLAUDE.md](.github/CLAUDE.md) — quick checklist for the [Claude](https://www.anthropic.com/product) agent.
-- [.cursorrules](.cursorrules) — machine-readable subset of the policies for [Cursor](https://www.cursor.so/) and similar tools.
-- [sweep.yaml](.github/sweep.yaml) — rules for [Sweep](https://github.com/sweepai/sweep), a tool for code review and pull request management.
-
-Edit `AGENTS.md` first when adjusting these policies, and keep the other files in sync within the same pull request.
+## 🤖 AI Usage & Assistant Guidelines
+Read the [AI Usage & Assistant Guidelines](.github/tech-conventions/ai-compliance.md) for details on how AI is used in this project and how to interact with the AI assistants.
 
 <br/>
 

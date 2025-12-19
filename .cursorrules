@@ -20,10 +20,3 @@ All contributors must read `.github/AGENTS.md` for complete guidelines. If any r
   2. **Why It Was Necessary**
   3. **Testing Performed**
   4. **Impact / Risk**
-
-## Dependency Management
-- Manage modules with `magex tidy` after import changes.
-
-## Security Reporting
-- Do not open public issues for vulnerabilities.
-- Follow `SECURITY.md` for responsible disclosure.

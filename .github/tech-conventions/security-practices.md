@@ -208,7 +208,6 @@ scorecard --repo=github.com/owner/repo
 ### Internal Resources
 * [`SECURITY.md`](../SECURITY.md) - Vulnerability reporting
 * [Dependency Management](dependency-management.md) - Supply chain security
-* [CI Validation](ci-validation.md) - Automated security checks
 
 ### External Resources
 * [OWASP Top 10](https://owasp.org/Top10/)

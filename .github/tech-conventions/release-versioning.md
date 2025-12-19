@@ -29,11 +29,11 @@ We follow **Semantic Versioning (✧ SemVer)**:
 
 ## 🔄 Release Workflow
 
-| Step | Command                  | Purpose                                                                                            |
-|------|--------------------------|----------------------------------------------------------------------------------------------------|
-| 1    | `magex release:snaphot`  | Build & upload a **snapshot** (pre‑release) for quick CI validation.                               |
+| Step | Command                                   | Purpose                                                                                            |
+|------|-------------------------------------------|----------------------------------------------------------------------------------------------------|
+| 1    | `magex release:snapshot`                   | Build & upload a **snapshot** (pre‑release) for quick CI validation.                               |
 | 2    | `magex version:bump push=true bump=patch` | Create and push a signed Git tag. Triggers GitHub Actions to package the release                   |
-| 3    | GitHub Actions           | CI runs `goreleaser release` on the tag; artifacts and changelog are published to GitHub Releases. |
+| 3    | GitHub Actions                            | CI runs `goreleaser release` on the tag; artifacts and changelog are published to GitHub Releases. |
 
 > **Note for AI Agents:** Do not create or push tags automatically. Only the repository [codeowners](../CODEOWNERS) are authorized to tag and publish official releases.
 
@@ -65,12 +65,6 @@ For significant releases, you may want to add a manual summary:
 * Pre-release tags: `v1.2.3-rc.1`, `v1.2.3-beta.2`
 * Development snapshots: Generated automatically, not tagged
 
-### Tag Signing
-Production releases should be signed:
-```bash
-git tag -s v1.2.3 -m "Release version 1.2.3"
-```
-
 <br><br>
 
 ## 📦 Release Artifacts
@@ -94,7 +88,6 @@ Before tagging a release:
 - [ ] All tests passing (`magex test`)
 - [ ] No security vulnerabilities (`magex deps:audit`)
 - [ ] Documentation updated
-- [ ] CHANGELOG entries reviewed
 - [ ] Version bumped if needed
 - [ ] PR merged to main branch
 
@@ -133,7 +126,7 @@ git log v1.2.2..v1.2.3 --oneline
 
 The release process is largely automated via GitHub Actions:
 * **Trigger**: Push of a tag matching `v*`
-* **Workflow**: `.github/workflows/release.yml`
+* **Workflow**: `.github/workflows/fortress-release.yml`
 * **Configuration**: `.goreleaser.yml`
 * **Permissions**: Requires `GITHUB_TOKEN` with release permissions
 

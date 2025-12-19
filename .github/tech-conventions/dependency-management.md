@@ -14,10 +14,22 @@
   go mod tidy
   ```
 
+or via magex command:
+
+  ```bash
+  magex deps:tidy
+  ```
+
 * Periodically refresh dependencies with:
 
   ```bash
   go get -u ./...
+  ```
+
+  or via magex command:
+
+  ```bash
+  magex deps:update
   ```
 
 > Avoid unnecessary upgrades near release windows—review major version bumps carefully for breaking changes.
