@@ -112,6 +112,8 @@ runs:
     - name: ✅ Download MAGE-X binary (remote mode only)
       if: inputs.use-local != 'true' && steps.magex-cache.outputs.cache-hit != 'true'
       shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
       run: |
         echo "⬇️ Cache miss – downloading MAGE-X binary..."
         echo "📋 Downloading MAGE-X version ${{ inputs.magex-version }}..."
@@ -141,18 +143,22 @@ runs:
         VERSION="${{ inputs.magex-version }}"
         CLEAN_VERSION="${VERSION#v}"
 
-        # Build download URL
-        DOWNLOAD_URL="https://github.com/mrz1836/mage-x/releases/download/$VERSION/mage-x_${CLEAN_VERSION}_${OS}_${ARCH}.tar.gz"
-        echo "📥 Downloading from: $DOWNLOAD_URL"
+        # Build asset name and download using gh CLI
+        ASSET_NAME="mage-x_${CLEAN_VERSION}_${OS}_${ARCH}.tar.gz"
+        echo "📥 Downloading asset: $ASSET_NAME from mrz1836/mage-x@$VERSION"
 
         # Download and extract
         TEMP_DIR=$(mktemp -d)
         cd "$TEMP_DIR"
 
-        if curl -fsSL "$DOWNLOAD_URL" -o mage-x.tar.gz; then
+        if gh release download "$VERSION" \
+            --repo mrz1836/mage-x \
+            --pattern "$ASSET_NAME" \
+            --dir .; then
           echo "✅ Download successful"
+          mv "$ASSET_NAME" mage-x.tar.gz
         else
-          echo "❌ Download failed from $DOWNLOAD_URL"
+          echo "❌ Download failed for $ASSET_NAME from mrz1836/mage-x@$VERSION"
           exit 1
         fi
 
