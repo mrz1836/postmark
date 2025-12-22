@@ -179,9 +179,10 @@ on:
       completion-report-enabled:
         description: "Whether workflow completion report is enabled"
         value: ${{ jobs.setup-config.outputs.completion-report-enabled }}
-# Security: Restrictive default permissions with job-level overrides for least privilege access
-permissions:
-  contents: read
+
+# Security: Restrict default permissions (jobs must explicitly request what they need)
+permissions: {}
+
 jobs:
   # ----------------------------------------------------------------------------------
   # Setup the configuration for the CI environment
@@ -189,6 +190,8 @@ jobs:
   setup-config:
     name: 🔧 Setup CI Config
     runs-on: ${{ inputs.primary-runner }}
+    permissions:
+      contents: read
     outputs:
       benchmarks-enabled: ${{ steps.config.outputs.benchmarks-enabled }}
       benchmark-matrix: ${{ steps.matrix.outputs.matrix }}

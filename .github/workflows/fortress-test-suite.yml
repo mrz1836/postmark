@@ -112,10 +112,8 @@ on:
         description: "Codecov token for uploading coverage (required when coverage-provider is codecov)"
         required: false
 
-# Security: Restrictive default permissions with job-level overrides for least privilege access
-permissions:
-  contents: read # Default read-only access to repository contents
-  actions: read # Required for test validation workflow to access artifacts
+# Security: Restrict default permissions (jobs must explicitly request what they need)
+permissions: {}
 
 jobs:
   # ----------------------------------------------------------------------------------
@@ -124,6 +122,9 @@ jobs:
   execute-test-matrix:
     name: 🧪 Execute Test Matrix
     if: inputs.go-tests-enabled == 'true'
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/fortress-test-matrix.yml
     with:
       env-json: ${{ inputs.env-json }}
@@ -149,6 +150,9 @@ jobs:
   execute-fuzz-tests:
     name: 🎯 Execute Fuzz Tests
     if: inputs.go-tests-enabled == 'true' && inputs.fuzz-testing-enabled == 'true'
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/fortress-test-fuzz.yml
     with:
       env-json: ${{ inputs.env-json }}
@@ -165,6 +169,9 @@ jobs:
     name: 🔍 Validate Test Results
     needs: [execute-test-matrix, execute-fuzz-tests]
     if: always() && inputs.go-tests-enabled == 'true' # Always run to validate results even if tests failed
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/fortress-test-validation.yml
     with:
       env-json: ${{ inputs.env-json }}

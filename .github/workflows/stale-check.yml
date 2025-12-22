@@ -27,9 +27,8 @@ on:
     - cron: "0 12 * * 1-5" # 7:00 AM EST (12:00 UTC)
   workflow_dispatch: # Allow manual triggering
 
-# Security: Restrictive default permissions with job-level overrides for least privilege access
-permissions:
-  contents: read
+# Security: Restrict default permissions (jobs must explicitly request what they need)
+permissions: {}
 
 # --------------------------------------------------------------------
 # Concurrency Control

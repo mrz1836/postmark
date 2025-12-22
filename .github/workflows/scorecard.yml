@@ -18,9 +18,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-# Security: Restrictive default permissions with job-level overrides for least privilege access
-permissions:
-  contents: read
+# Security: Restrict default permissions (jobs must explicitly request what they need)
+permissions: {}
 
 jobs:
   analysis:

@@ -22,9 +22,8 @@ on:
         required: true
         type: string
 
-# Security: Restrictive default permissions with job-level overrides for least privilege access
-permissions:
-  contents: read
+# Security: Restrict default permissions (jobs must explicitly request what they need)
+permissions: {}
 
 jobs:
   # ----------------------------------------------------------------------------------
@@ -33,6 +32,8 @@ jobs:
   test-magex:
     name: 🪄 Verify & Test MAGE-X
     runs-on: ${{ inputs.primary-runner }}
+    permissions:
+      contents: read
     steps:
       # --------------------------------------------------------------------
       # Parse environment variables

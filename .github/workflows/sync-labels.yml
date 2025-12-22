@@ -39,9 +39,8 @@ on:
         default: false
         required: false
 
-# Security: Restrictive default permissions with job-level overrides for least privilege access
-permissions:
-  contents: read
+# Security: Restrict default permissions (jobs must explicitly request what they need)
+permissions: {}
 
 # --------------------------------------------------------------------
 # Concurrency Control
@@ -305,13 +304,16 @@ jobs:
         env:
           ENV_JSON: ${{ needs.load-env.outputs.env-json }}
           GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+          LABELS_JSON: ${{ steps.parse_labels.outputs.labels_json }}
+          LABELS_COUNT: ${{ steps.parse_labels.outputs.labels_count }}
         with:
           github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
             // Configuration
-            const isDryRun = '${{ github.event.inputs.dry_run }}' === 'true';
-            const labelsJson = '${{ steps.parse_labels.outputs.labels_json }}';
-            const labelsCount = '${{ steps.parse_labels.outputs.labels_count }}';
+            const isDryRun = process.env.DRY_RUN === 'true';
+            const labelsJson = process.env.LABELS_JSON;
+            const labelsCount = process.env.LABELS_COUNT;
             const envJson = JSON.parse(process.env.ENV_JSON);
             const preferredToken = envJson.PREFERRED_GITHUB_TOKEN;
             const isUsingPAT = preferredToken === 'GH_PAT_TOKEN' && process.env.GH_PAT_TOKEN !== '';
@@ -521,10 +523,12 @@ jobs:
       - name: 🔍 Verify sync results
         if: github.event.inputs.dry_run != 'true'
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          LABELS_JSON: ${{ steps.parse_labels.outputs.labels_json }}
         with:
           github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
-            const labelsJson = '${{ steps.parse_labels.outputs.labels_json }}';
+            const labelsJson = process.env.LABELS_JSON;
 
             console.log('🔍 === Verifying Label Sync Results ===');
 
