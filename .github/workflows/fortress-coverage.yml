@@ -1009,6 +1009,7 @@ jobs:
                     if curl -L -H "Authorization: Bearer $GITHUB_TOKEN" \
                             -H "Accept: application/vnd.github+json" \
                             --connect-timeout 10 --max-time 30 \
+                            --retry 3 --retry-delay 5 --retry-all-errors \
                             "$COVERAGE_ARTIFACTS" -o "base-coverage-artifact.zip" 2>/dev/null; then
 
                       if [[ -s "base-coverage-artifact.zip" ]]; then
