@@ -38,10 +38,8 @@ on:
         description: "Test failure analysis metrics"
         value: ${{ jobs.analyze-tests.outputs.failure-data }}
 
-# Security: Restrictive default permissions with job-level overrides for least privilege access
-permissions:
-  contents: read
-  actions: read # Required for artifact downloads
+# Security: Restrict default permissions (jobs must explicitly request what they need)
+permissions: {}
 
 jobs:
   # ----------------------------------------------------------------------------------
@@ -51,6 +49,9 @@ jobs:
     name: 🧪 Analyze Test Results
     runs-on: ubuntu-latest
     if: always()
+    permissions:
+      contents: read
+      actions: read
     outputs:
       tests-markdown: ${{ steps.set-output.outputs.content }}
       test-data: ${{ steps.process-tests.outputs.test-metrics }}

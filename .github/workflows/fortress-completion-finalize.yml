@@ -40,10 +40,8 @@ on:
         description: "Complete assembled report"
         value: ${{ jobs.finalize-report.outputs.report-content }}
 
-# Security: Restrictive default permissions with job-level overrides for least privilege access
-permissions:
-  contents: read
-  actions: read # Required for artifact downloads
+# Security: Restrict default permissions (jobs must explicitly request what they need)
+permissions: {}
 
 jobs:
   # ----------------------------------------------------------------------------------
@@ -53,6 +51,9 @@ jobs:
     name: ✅ Finalize Report
     runs-on: ubuntu-latest
     if: always()
+    permissions:
+      contents: read
+      actions: read
     outputs:
       report-content: ${{ steps.set-output.outputs.content }}
     steps:

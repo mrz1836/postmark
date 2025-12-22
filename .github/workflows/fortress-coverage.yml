@@ -52,10 +52,8 @@ on:
         description: "Codecov token for uploading coverage (required when coverage-provider is codecov)"
         required: false
 
-# Security: Restrictive default permissions with job-level overrides
-permissions:
-  contents: read
-  actions: read # Required for artifact downloads
+# Security: Restrict default permissions (jobs must explicitly request what they need)
+permissions: {}
 
 jobs:
   # ----------------------------------------------------------------------------------

@@ -59,9 +59,8 @@ on:
     branches:
       - "**" # All branches for PRs
 
-# Security: Restrictive default permissions with job-level overrides for least privilege access
-permissions:
-  contents: read
+# Security: Restrict default permissions (jobs must explicitly request what they need)
+permissions: {}
 
 # --------------------------------------------------------------------
 # Concurrency Control

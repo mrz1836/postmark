@@ -95,9 +95,8 @@ on:
   pull_request_target:
     types: [opened, reopened, ready_for_review, closed, synchronize]
 
-# Least privilege at the workflow level; jobs get bumps as needed
-permissions:
-  contents: read
+# Security: Restrict default permissions (jobs must explicitly request what they need)
+permissions: {}
 
 # --------------------------------------------------------------------
 # Concurrency Control

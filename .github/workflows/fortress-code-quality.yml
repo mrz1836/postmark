@@ -53,9 +53,8 @@ on:
         description: "GitHub token for API access"
         required: true
 
-# Security: Restrictive default permissions with job-level overrides for least privilege access
-permissions:
-  contents: read
+# Security: Restrict default permissions (jobs must explicitly request what they need)
+permissions: {}
 
 jobs:
   # ----------------------------------------------------------------------------------
@@ -65,6 +64,8 @@ jobs:
     name: 📊 Govet (Static Analysis)
     if: ${{ inputs.static-analysis-enabled == 'true' }}
     runs-on: ${{ inputs.primary-runner }}
+    permissions:
+      contents: read
     steps:
       # --------------------------------------------------------------------
       # Checkout code (required for local actions)
@@ -210,6 +211,8 @@ jobs:
     timeout-minutes: 20
     if: ${{ inputs.go-lint-enabled == 'true' }}
     runs-on: ${{ inputs.primary-runner }}
+    permissions:
+      contents: read
     outputs:
       golangci-lint-version: ${{ steps.golangci-lint-version.outputs.version }}
     steps:
@@ -430,6 +433,8 @@ jobs:
     name: 📐 YAML/JSON Format Validation
     if: ${{ inputs.yaml-lint-enabled == 'true' }}
     runs-on: ${{ inputs.primary-runner }}
+    permissions:
+      contents: read
     outputs:
       yamlfmt-version: ${{ steps.yamlfmt-version.outputs.version }}
     steps:

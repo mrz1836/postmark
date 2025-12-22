@@ -34,10 +34,8 @@ on:
   pull_request:
     types: [ready_for_review, review_request_removed]
 
-# Security: Restrictive default permissions with job-level overrides for least privilege access
-permissions:
-  contents: read # Default read-only access to repository contents
-  pull-requests: read # Default read access to pull requests
+# Security: Restrict default permissions (jobs must explicitly request what they need)
+permissions: {}
 
 # --------------------------------------------------------------------
 # Concurrency Control
@@ -58,6 +56,8 @@ jobs:
   load-env:
     name: 🌍 Load Environment Variables
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       env-json: ${{ steps.load-env.outputs.env-json }}
     steps:

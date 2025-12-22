@@ -41,9 +41,8 @@ on:
         description: "List of checks that were executed"
         value: ${{ jobs.pre-commit.outputs.checks-executed }}
 
-# Security: Restrictive default permissions with job-level overrides for least privilege access
-permissions:
-  contents: read
+# Security: Restrict default permissions (jobs must explicitly request what they need)
+permissions: {}
 
 jobs:
   # ----------------------------------------------------------------------------------
@@ -53,6 +52,8 @@ jobs:
     name: 🪝 Pre-commit Checks
     if: ${{ inputs.pre-commit-enabled == 'true' }}
     runs-on: ${{ inputs.primary-runner }}
+    permissions:
+      contents: read
     outputs:
       pre-commit-version: ${{ steps.pre-commit-version.outputs.version }}
       checks-executed: ${{ steps.run-checks.outputs.executed }}
