@@ -52,6 +52,8 @@ jobs:
   load-env:
     name: 🌍 Load Environment Variables
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # Required: Read repository content for sparse checkout
     # Only run on Dependabot PRs
     if: github.event.pull_request.user.login == 'dependabot[bot]'
     outputs:
