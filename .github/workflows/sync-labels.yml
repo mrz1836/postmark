@@ -56,6 +56,8 @@ jobs:
   load-env:
     name: 🌍 Load Environment Variables
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # Required: Read repository content for sparse checkout
     outputs:
       env-json: ${{ steps.load-env.outputs.env-json }}
       labels-file: ${{ steps.extract-config.outputs.labels-file }}
