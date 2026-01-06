@@ -59,5 +59,5 @@ Creating and maintaining GitHub Actions workflows with security, reliability, an
 
 ### 🏗️ Build & Project Setup
 
-**[MAGE-X Build Automation](mage-x.md)**
-Zero-boilerplate build automation system with 150+ built-in commands that replaces Makefiles. Includes installation, configuration, command reference, and migration guide.
+**[MAGE-X Build Tooling](mage-x.md)**
+Zero-boilerplate build toolchain with 150+ built-in commands that replaces Makefiles. Includes installation, configuration, command reference, and migration guide.
