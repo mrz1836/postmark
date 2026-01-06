@@ -171,6 +171,17 @@ jobs:
           use-local: ${{ env.MAGE_X_USE_LOCAL }}
 
       # --------------------------------------------------------------------
+      # Setup benchstat (required for benchmark comparison tests)
+      # Note: benchstat requires Go 1.23+, action will skip for older versions
+      # --------------------------------------------------------------------
+      - name: 📊 Setup benchstat
+        uses: ./.github/actions/setup-benchstat
+        with:
+          benchstat-version: ${{ env.MAGE_X_BENCHSTAT_VERSION }}
+          runner-os: ${{ matrix.os }}
+          go-version: ${{ matrix.go-version }}
+
+      # --------------------------------------------------------------------
       # Setup Redis service using composite action with caching
       # --------------------------------------------------------------------
       - name: 🗄️ Setup Redis Service
