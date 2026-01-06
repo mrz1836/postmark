@@ -1,0 +1,121 @@
+# ------------------------------------------------------------------------------------
+#  Setup Benchstat Composite Action (GoFortress)
+#
+#  Purpose: Install and cache the benchstat binary for use in GitHub Actions workflows.
+#  Provides efficient caching by OS and version, with automatic binary installation
+#  on cache miss and PATH management for seamless integration.
+#
+#  Features:
+#    - Smart binary caching by OS and version
+#    - Automatic go install only on cache miss
+#    - PATH management for immediate availability
+#    - Performance tracking outputs
+#
+#  Usage:
+#    - uses: ./.github/actions/setup-benchstat
+#      with:
+#        benchstat-version: ${{ env.MAGE_X_BENCHSTAT_VERSION }}
+#        runner-os: ${{ runner.os }}
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: "Setup Benchstat"
+description: "Install and cache benchstat binary for benchmark comparison"
+
+inputs:
+  benchstat-version:
+    description: "Benchstat version to install (e.g., v0.6.0)"
+    required: true
+  runner-os:
+    description: "Runner OS for cache key (e.g., ubuntu-latest, mac-latest)"
+    required: true
+
+outputs:
+  cache-hit:
+    description: "Whether benchstat was restored from cache (true/false)"
+    value: ${{ steps.benchstat-cache.outputs.cache-hit }}
+  installation-method:
+    description: "How benchstat was obtained: cached or fresh"
+    value: ${{ steps.installation-summary.outputs.method }}
+
+runs:
+  using: "composite"
+  steps:
+    # --------------------------------------------------------------------
+    # Restore benchstat binary cache
+    # --------------------------------------------------------------------
+    - name: 💾 Restore benchstat binary cache
+      id: benchstat-cache
+      uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+      with:
+        path: ~/.cache/benchstat-bin
+        key: ${{ inputs.runner-os }}-benchstat-${{ inputs.benchstat-version }}
+
+    # --------------------------------------------------------------------
+    # Install cached binary to PATH when cache hits
+    # --------------------------------------------------------------------
+    - name: 📦 Install cached benchstat to PATH
+      if: steps.benchstat-cache.outputs.cache-hit == 'true'
+      shell: bash
+      run: |
+        echo "📦 Installing cached benchstat binary to PATH..."
+
+        # Copy cached binary to GOPATH and add to PATH
+        mkdir -p "$(go env GOPATH)/bin"
+        cp ~/.cache/benchstat-bin/benchstat "$(go env GOPATH)/bin/benchstat"
+        chmod +x "$(go env GOPATH)/bin/benchstat"
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+        echo "✅ Cached benchstat binary installed to PATH"
+
+    # --------------------------------------------------------------------
+    # Install benchstat via go install when cache misses
+    # --------------------------------------------------------------------
+    - name: ⬇️ Install benchstat (cache miss)
+      if: steps.benchstat-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "⬇️ Cache miss – installing benchstat via go install..."
+        echo "📋 Installing benchstat version: ${{ inputs.benchstat-version }}"
+
+        # Install benchstat
+        go install golang.org/x/perf/cmd/benchstat@${{ inputs.benchstat-version }}
+
+        # Cache the binary for future runs
+        mkdir -p ~/.cache/benchstat-bin
+        cp "$(go env GOPATH)/bin/benchstat" ~/.cache/benchstat-bin/benchstat
+
+        # Ensure GOPATH/bin is in PATH
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+        echo "✅ Benchstat installed and cached"
+
+    # --------------------------------------------------------------------
+    # Verify benchstat installation and set outputs
+    # --------------------------------------------------------------------
+    - name: 🔍 Verify benchstat installation
+      id: installation-summary
+      shell: bash
+      run: |
+        echo "🔍 Verifying benchstat installation..."
+
+        # Test that benchstat is available and working
+        if ! command -v benchstat >/dev/null 2>&1; then
+          echo "❌ ERROR: benchstat is not available in PATH" >&2
+          exit 1
+        fi
+
+        # Show version
+        echo "✅ benchstat is available"
+        benchstat -h 2>&1 | head -3 || true
+
+        # Determine installation method
+        if [[ "${{ steps.benchstat-cache.outputs.cache-hit }}" == "true" ]]; then
+          echo "method=cached" >> $GITHUB_OUTPUT
+          echo "📋 Installation method: Cached"
+        else
+          echo "method=fresh" >> $GITHUB_OUTPUT
+          echo "📋 Installation method: Fresh install"
+        fi

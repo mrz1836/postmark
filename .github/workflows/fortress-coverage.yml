@@ -737,7 +737,7 @@ jobs:
 
           # Count processed files from coverage output
           if [ -f "$COVERAGE_FILE" ]; then
-            FILES_PROCESSED=$(wc -l < "$COVERAGE_FILE" || echo "0")
+            FILES_PROCESSED=$(grep -v '^mode:' "$COVERAGE_FILE" | grep '^[^:]*:' | grep -o '^[^:]*' | sort -u | wc -l | tr -d ' ' || echo "0")
             echo "📁 Files processed: $FILES_PROCESSED"
           fi
 
@@ -2425,12 +2425,51 @@ jobs:
 
           # Calculate coverage from coverage.txt file using go tool cover
           if [ -f "coverage-artifacts/coverage-data/coverage.txt" ]; then
-            COVERAGE_PERCENTAGE=$(go tool cover -func="coverage-artifacts/coverage-data/coverage.txt" | tail -1 | awk '{print $3}' | sed 's/%//' || echo "0")
-            FILES_PROCESSED=$(wc -l < "coverage-artifacts/coverage-data/coverage.txt" || echo "0")
+            # First, try direct calculation (suppress stderr to avoid module warnings)
+            COVERAGE_PERCENTAGE=$(go tool cover -func="coverage-artifacts/coverage-data/coverage.txt" 2>/dev/null | tail -1 | awk '{print $3}' | sed 's/%//' || true)
+
+            # Validate result - must be a number (handles empty output or errors)
+            if [[ -z "$COVERAGE_PERCENTAGE" ]] || ! [[ "$COVERAGE_PERCENTAGE" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+              echo "⚠️ Could not calculate coverage percentage directly, trying manual calculation..."
+              COVERAGE_PERCENTAGE=""
+
+              # Fallback: Calculate from coverage file lines manually
+              # Coverage file format: path/file.go:startLine.startCol,endLine.endCol stmtCount hitCount
+              TOTAL_STATEMENTS=0
+              COVERED_STATEMENTS=0
+              while IFS= read -r line; do
+                # Skip header line (mode: ...)
+                [[ "$line" == mode:* ]] && continue
+                # Skip empty lines
+                [[ -z "$line" ]] && continue
+                # Extract statement count (first number) and hit count (second number)
+                # Format: path/file.go:startLine.startCol,endLine.endCol stmtCount hitCount
+                if [[ "$line" =~ [[:space:]]([0-9]+)[[:space:]]([0-9]+)$ ]]; then
+                  STMT_COUNT="${BASH_REMATCH[1]}"
+                  HIT_COUNT="${BASH_REMATCH[2]}"
+                  TOTAL_STATEMENTS=$((TOTAL_STATEMENTS + STMT_COUNT))
+                  if [[ $HIT_COUNT -gt 0 ]]; then
+                    COVERED_STATEMENTS=$((COVERED_STATEMENTS + STMT_COUNT))
+                  fi
+                fi
+              done < "coverage-artifacts/coverage-data/coverage.txt"
+
+              if [[ $TOTAL_STATEMENTS -gt 0 ]]; then
+                COVERAGE_PERCENTAGE=$(awk "BEGIN {printf \"%.1f\", ($COVERED_STATEMENTS / $TOTAL_STATEMENTS) * 100}")
+                echo "📈 Calculated coverage manually: ${COVERAGE_PERCENTAGE}% ($COVERED_STATEMENTS/$TOTAL_STATEMENTS statements)"
+              else
+                COVERAGE_PERCENTAGE="0"
+                echo "⚠️ No coverage data found, defaulting to 0%"
+              fi
+            fi
+
+            FILES_PROCESSED=$(grep -v '^mode:' "coverage-artifacts/coverage-data/coverage.txt" | grep '^[^:]*:' | grep -o '^[^:]*' | sort -u | wc -l | tr -d ' ' || echo "0")
             echo "📈 Calculated coverage percentage: ${COVERAGE_PERCENTAGE}%"
             echo "📁 Files processed: $FILES_PROCESSED"
           else
             echo "⚠️ Coverage file not found for statistics"
+            COVERAGE_PERCENTAGE="0"
+            FILES_PROCESSED="0"
           fi
 
           # Codecov job doesn't generate badges or deploy pages directly

@@ -171,6 +171,15 @@ jobs:
           use-local: ${{ env.MAGE_X_USE_LOCAL }}
 
       # --------------------------------------------------------------------
+      # Setup benchstat (required for benchmark comparison tests)
+      # --------------------------------------------------------------------
+      - name: 📊 Setup benchstat
+        uses: ./.github/actions/setup-benchstat
+        with:
+          benchstat-version: ${{ env.MAGE_X_BENCHSTAT_VERSION }}
+          runner-os: ${{ matrix.os }}
+
+      # --------------------------------------------------------------------
       # Setup Redis service using composite action with caching
       # --------------------------------------------------------------------
       - name: 🗄️ Setup Redis Service
