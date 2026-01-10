@@ -551,6 +551,18 @@ jobs:
             TOTAL_FILES_COUNT=$(echo "$LOC_OUTPUT" | jq -r '.total_files_count // empty')
             LOC_DATE=$(echo "$LOC_OUTPUT" | jq -r '.date // empty')
 
+            # Parse new size metrics
+            TEST_FILES_SIZE=$(echo "$LOC_OUTPUT" | jq -r '.test_files_size_human // empty')
+            GO_FILES_SIZE=$(echo "$LOC_OUTPUT" | jq -r '.go_files_size_human // empty')
+            TOTAL_SIZE=$(echo "$LOC_OUTPUT" | jq -r '.total_size_human // empty')
+            TEST_AVG_SIZE_BYTES=$(echo "$LOC_OUTPUT" | jq -r '.test_avg_size_bytes // empty')
+            GO_AVG_SIZE_BYTES=$(echo "$LOC_OUTPUT" | jq -r '.go_avg_size_bytes // empty')
+
+            # Parse code quality metrics
+            AVG_LINES_PER_FILE=$(echo "$LOC_OUTPUT" | jq -r '.avg_lines_per_file // empty')
+            TEST_COVERAGE_RATIO=$(echo "$LOC_OUTPUT" | jq -r '.test_coverage_ratio // empty')
+            PACKAGE_COUNT=$(echo "$LOC_OUTPUT" | jq -r '.package_count // empty')
+
             echo "  - Test Files LOC: '$TEST_FILES_LOC' (count: $TEST_FILES_COUNT)"
             echo "  - Go Files LOC: '$GO_FILES_LOC' (count: $GO_FILES_COUNT)"
             echo "  - Total LOC: '$TOTAL_LOC' (files: $TOTAL_FILES_COUNT)"
@@ -560,6 +572,11 @@ jobs:
             if [[ -n "$TEST_FILES_LOC" ]] && [[ -n "$GO_FILES_LOC" ]] && [[ -n "$TOTAL_LOC" ]]; then
               LOC_FOUND=true
               echo "✅ Successfully parsed LOC JSON data"
+
+              # Optionally warn if new metrics are missing
+              if [[ -z "$TOTAL_SIZE" ]] || [[ -z "$AVG_LINES_PER_FILE" ]]; then
+                echo "⚠️ Some enhanced metrics are missing (older magex version?)"
+              fi
             fi
           else
             echo "⚠️ No output from magex metrics:loc json"
@@ -576,17 +593,67 @@ jobs:
             DISPLAY_TOTAL_FILES="${TOTAL_FILES_COUNT:-N/A}"
             DISPLAY_LOC_DATE="${LOC_DATE:-N/A}"
 
+            # Format average sizes for display
+            if [[ -n "$TEST_AVG_SIZE_BYTES" ]] && [[ "$TEST_AVG_SIZE_BYTES" != "0" ]]; then
+              DISPLAY_TEST_AVG_SIZE=$(numfmt --to=iec-i --suffix=B "$TEST_AVG_SIZE_BYTES" 2>/dev/null || echo "${TEST_AVG_SIZE_BYTES}B")
+            else
+              DISPLAY_TEST_AVG_SIZE="N/A"
+            fi
+
+            if [[ -n "$GO_AVG_SIZE_BYTES" ]] && [[ "$GO_AVG_SIZE_BYTES" != "0" ]]; then
+              DISPLAY_GO_AVG_SIZE=$(numfmt --to=iec-i --suffix=B "$GO_AVG_SIZE_BYTES" 2>/dev/null || echo "${GO_AVG_SIZE_BYTES}B")
+            else
+              DISPLAY_GO_AVG_SIZE="N/A"
+            fi
+
+            DISPLAY_TEST_SIZE="${TEST_FILES_SIZE:-N/A}"
+            DISPLAY_GO_SIZE="${GO_FILES_SIZE:-N/A}"
+            DISPLAY_TOTAL_SIZE="${TOTAL_SIZE:-N/A}"
+
             {
               echo ""
               echo "<br><br>"
               echo ""
               echo "### 📊 Lines of Code Summary"
-              echo "| Type | Lines of Code | Files | Date |"
-              echo "|------|---------------|-------|------|"
-              echo "| Test Files | $DISPLAY_TEST_LOC | $DISPLAY_TEST_COUNT | $DISPLAY_LOC_DATE |"
-              echo "| Go Files | $DISPLAY_GO_LOC | $DISPLAY_GO_COUNT | $DISPLAY_LOC_DATE |"
-              echo "| **Total** | **$DISPLAY_TOTAL_LOC** | **$DISPLAY_TOTAL_FILES** | |"
+              echo "| Type | Lines of Code | Files | Total Size | Avg Size | Date |"
+              echo "|------|---------------|-------|------------|----------|------|"
+              echo "| Test Files | $DISPLAY_TEST_LOC | $DISPLAY_TEST_COUNT | $DISPLAY_TEST_SIZE | $DISPLAY_TEST_AVG_SIZE | $DISPLAY_LOC_DATE |"
+              echo "| Go Files | $DISPLAY_GO_LOC | $DISPLAY_GO_COUNT | $DISPLAY_GO_SIZE | $DISPLAY_GO_AVG_SIZE | $DISPLAY_LOC_DATE |"
+              echo "| **Total** | **$DISPLAY_TOTAL_LOC** | **$DISPLAY_TOTAL_FILES** | **$DISPLAY_TOTAL_SIZE** | | |"
               echo ""
+
+              # Display code quality metrics if available
+              if [[ -n "$AVG_LINES_PER_FILE" ]] || [[ -n "$TEST_COVERAGE_RATIO" ]] || [[ -n "$PACKAGE_COUNT" ]]; then
+                echo "#### 📈 Code Quality Metrics"
+                echo ""
+                echo "| Metric | Value |"
+                echo "|--------|-------|"
+
+                # Display average lines per file
+                if [[ -n "$AVG_LINES_PER_FILE" ]]; then
+                  DISPLAY_AVG_LINES=$(LC_NUMERIC=en_US.UTF-8 printf "%.1f" "${AVG_LINES_PER_FILE}")
+                  echo "| Average Lines per File | $DISPLAY_AVG_LINES |"
+                fi
+
+                # Display test coverage ratio
+                if [[ -n "$TEST_COVERAGE_RATIO" ]]; then
+                  DISPLAY_COVERAGE=$(LC_NUMERIC=en_US.UTF-8 printf "%.1f%%" "${TEST_COVERAGE_RATIO}")
+                  echo "| Test Coverage Ratio | $DISPLAY_COVERAGE |"
+                fi
+
+                # Display package count
+                if [[ -n "$PACKAGE_COUNT" ]]; then
+                  echo "| Package/Directory Count | $PACKAGE_COUNT |"
+                fi
+
+                # Display total size
+                if [[ -n "$TOTAL_SIZE" ]]; then
+                  echo "| Total Project Size | $TOTAL_SIZE |"
+                fi
+
+                echo ""
+              fi
+
               echo "<br><br>"
             } >> statistics-section.md
 

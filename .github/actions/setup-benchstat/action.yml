@@ -16,6 +16,7 @@
 #      with:
 #        benchstat-version: ${{ env.MAGE_X_BENCHSTAT_VERSION }}
 #        runner-os: ${{ runner.os }}
+#        go-version: ${{ matrix.go-version }}
 #
 #  Maintainer: @mrz1836
 #
@@ -37,7 +38,7 @@ inputs:
 
 outputs:
   cache-hit:
-    description: "Whether benchstat was restored from cache (true/false)"
+    description: "Whether benchstat was restored from cache (true/false). Empty if skipped due to Go version."
     value: ${{ steps.benchstat-cache.outputs.cache-hit }}
   installation-method:
     description: "How benchstat was obtained: cached, fresh, or skipped"
@@ -57,13 +58,22 @@ runs:
       shell: bash
       run: |
         GO_VERSION="${{ inputs.go-version }}"
-        # Extract minor version: "1.24.x" -> "24", "1.22" -> "22", "1.23.5" -> "23"
-        MINOR=$(echo "$GO_VERSION" | sed -E 's/^1\.([0-9]+).*/\1/')
+        # Extract major and minor version:
+        #   "1.24.x"  -> MAJOR=1, MINOR=24
+        #   "1.22"    -> MAJOR=1, MINOR=22
+        #   "1.23.5"  -> MAJOR=1, MINOR=23
+        #   "2.0.0"   -> MAJOR=2, MINOR=0
+        MAJOR=$(echo "$GO_VERSION" | sed -E 's/^([0-9]+)\..*/\1/')
+        MINOR=$(echo "$GO_VERSION" | sed -E 's/^[0-9]+\.([0-9]+).*/\1/')
 
-        if [ -z "$MINOR" ] || ! [[ "$MINOR" =~ ^[0-9]+$ ]]; then
-          echo "⚠️ Could not parse Go version '$GO_VERSION', assuming compatible"
+        if [ -z "$MAJOR" ] || [ -z "$MINOR" ] || ! [[ "$MAJOR" =~ ^[0-9]+$ ]] || ! [[ "$MINOR" =~ ^[0-9]+$ ]]; then
+          echo "❌ Could not parse Go version '$GO_VERSION'. Please provide a valid Go version (e.g., '1.23', '1.24.x')." >&2
+          exit 1
+        elif [ "$MAJOR" -gt 1 ]; then
+          # Any Go major version > 1 is considered compatible with the 1.23+ requirement
+          echo "✅ Go $GO_VERSION >= 1.23: proceeding with benchstat installation"
           echo "skip=false" >> $GITHUB_OUTPUT
-        elif [ "$MINOR" -lt 23 ]; then
+        elif [ "$MAJOR" -eq 1 ] && [ "$MINOR" -lt 23 ]; then
           echo "⚠️ Go $GO_VERSION < 1.23: skipping benchstat installation (requires Go 1.23+)"
           echo "skip=true" >> $GITHUB_OUTPUT
         else
@@ -110,7 +120,7 @@ runs:
         echo "📋 Installing benchstat version: ${{ inputs.benchstat-version }}"
 
         # Install benchstat
-        go install golang.org/x/perf/cmd/benchstat@${{ inputs.benchstat-version }}
+        go install "golang.org/x/perf/cmd/benchstat@${{ inputs.benchstat-version }}"
 
         # Cache the binary for future runs
         mkdir -p ~/.cache/benchstat-bin

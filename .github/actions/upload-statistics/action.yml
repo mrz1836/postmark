@@ -45,6 +45,10 @@ inputs:
     description: "Compression level for the artifact (0-9, 6 is default)"
     required: false
     default: "6"
+  continue-on-error:
+    description: "Continue workflow if upload fails (for non-critical artifacts)"
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -54,6 +58,7 @@ runs:
     # --------------------------------------------------------------------
     - name: 📤 Upload ${{ inputs.artifact-name }}
       if: always() # Always run to capture data even on job failure
+      continue-on-error: ${{ inputs.continue-on-error == 'true' }}
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: ${{ inputs.artifact-name }}
