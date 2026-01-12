@@ -182,6 +182,15 @@ jobs:
           go-version: ${{ matrix.go-version }}
 
       # --------------------------------------------------------------------
+      # Setup mage (required for delegation tests that use mage binary)
+      # --------------------------------------------------------------------
+      - name: 🧙 Setup mage
+        uses: ./.github/actions/setup-mage
+        with:
+          mage-version: ${{ env.MAGE_X_MAGE_VERSION }}
+          runner-os: ${{ matrix.os }}
+
+      # --------------------------------------------------------------------
       # Setup Redis service using composite action with caching
       # --------------------------------------------------------------------
       - name: 🗄️ Setup Redis Service

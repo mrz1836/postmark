@@ -1,0 +1,120 @@
+# ------------------------------------------------------------------------------------
+#  Setup Mage Composite Action (GoFortress)
+#
+#  Purpose: Install and cache the mage binary for use in GitHub Actions workflows.
+#  Provides efficient caching by OS and version, with automatic binary installation
+#  on cache miss and PATH management for seamless integration.
+#
+#  Features:
+#    - Smart binary caching by OS and version
+#    - Automatic go install only on cache miss
+#    - PATH management for immediate availability
+#
+#  Usage:
+#    - uses: ./.github/actions/setup-mage
+#      with:
+#        mage-version: ${{ env.MAGE_X_MAGE_VERSION }}
+#        runner-os: ${{ runner.os }}
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: "Setup Mage"
+description: "Install and cache mage binary for magefile execution"
+
+inputs:
+  mage-version:
+    description: "Mage version to install (e.g., v1.15.0)"
+    required: true
+  runner-os:
+    description: "Runner OS for cache key (e.g., ubuntu-latest)"
+    required: true
+
+outputs:
+  cache-hit:
+    description: "Whether mage was restored from cache (true/false)"
+    value: ${{ steps.mage-cache.outputs.cache-hit }}
+  installation-method:
+    description: "How mage was obtained: cached or fresh"
+    value: ${{ steps.installation-summary.outputs.method }}
+
+runs:
+  using: "composite"
+  steps:
+    # --------------------------------------------------------------------
+    # Restore mage binary cache
+    # --------------------------------------------------------------------
+    - name: 💾 Restore mage binary cache
+      id: mage-cache
+      uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+      with:
+        path: ~/.cache/mage-bin
+        key: ${{ inputs.runner-os }}-mage-${{ inputs.mage-version }}
+
+    # --------------------------------------------------------------------
+    # Install cached binary to PATH when cache hits
+    # --------------------------------------------------------------------
+    - name: 📦 Install cached mage to PATH
+      if: steps.mage-cache.outputs.cache-hit == 'true'
+      shell: bash
+      run: |
+        echo "📦 Installing cached mage binary to PATH..."
+
+        # Copy cached binary to GOPATH and add to PATH
+        mkdir -p "$(go env GOPATH)/bin"
+        cp ~/.cache/mage-bin/mage "$(go env GOPATH)/bin/mage"
+        chmod +x "$(go env GOPATH)/bin/mage"
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+        echo "✅ Cached mage binary installed to PATH"
+
+    # --------------------------------------------------------------------
+    # Install mage via go install when cache misses
+    # --------------------------------------------------------------------
+    - name: ⬇️ Install mage (cache miss)
+      if: steps.mage-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "⬇️ Cache miss – installing mage via go install..."
+        echo "📋 Installing mage version: ${{ inputs.mage-version }}"
+
+        # Install mage
+        go install "github.com/magefile/mage@${{ inputs.mage-version }}"
+
+        # Cache the binary for future runs
+        mkdir -p ~/.cache/mage-bin
+        cp "$(go env GOPATH)/bin/mage" ~/.cache/mage-bin/mage
+
+        # Ensure GOPATH/bin is in PATH
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+        echo "✅ Mage installed and cached"
+
+    # --------------------------------------------------------------------
+    # Verify mage installation and set outputs
+    # --------------------------------------------------------------------
+    - name: 🔍 Verify mage installation
+      id: installation-summary
+      shell: bash
+      run: |
+        echo "🔍 Verifying mage installation..."
+
+        # Test that mage is available and working
+        if ! command -v mage >/dev/null 2>&1; then
+          echo "❌ ERROR: mage is not available in PATH" >&2
+          exit 1
+        fi
+
+        # Show version
+        MAGE_VERSION=$(mage -version 2>&1 | head -1 || echo "unknown")
+        echo "✅ mage $MAGE_VERSION is available"
+
+        # Determine installation method
+        if [[ "${{ steps.mage-cache.outputs.cache-hit }}" == "true" ]]; then
+          echo "method=cached" >> $GITHUB_OUTPUT
+          echo "📋 Installation method: Cached"
+        else
+          echo "method=fresh" >> $GITHUB_OUTPUT
+          echo "📋 Installation method: Fresh install"
+        fi
