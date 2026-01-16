@@ -58,6 +58,7 @@ jobs:
     timeout-minutes: 15 # Fuzz tests have shorter timeout
     permissions:
       contents: read # Read repository content for testing
+      actions: write # Required for workflow cancellation on failure
     runs-on: ${{ inputs.primary-runner }}
 
     steps:
@@ -280,3 +281,12 @@ jobs:
             fuzz-output.log
           retention-days: 1
           if-no-files-found: ignore
+
+      # --------------------------------------------------------------------
+      # Cancel workflow on failure (save CI resources)
+      # --------------------------------------------------------------------
+      - name: 🚨 Cancel workflow on failure
+        if: failure()
+        uses: ./.github/actions/cancel-workflow-on-failure
+        with:
+          reason: "Fuzz tests failed"

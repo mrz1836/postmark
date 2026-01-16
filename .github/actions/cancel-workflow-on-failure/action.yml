@@ -1,0 +1,282 @@
+# ------------------------------------------------------------------------------------
+#  Cancel Workflow On Failure (Composite Action) (GoFortress)
+#
+#  Purpose: Provide a reusable action that cancels the entire workflow run when
+#  a critical job fails. This prevents wasting CI resources on parallel jobs
+#  that will ultimately be invalidated by an earlier failure.
+#
+#  This action handles:
+#    - Cancelling the current workflow run via GitHub API
+#    - Optional grace period before cancellation
+#    - Detailed logging of the cancellation reason
+#    - Skipping cancellation in specific scenarios (e.g., release tags)
+#    - Safe handling of API errors and edge cases
+#
+#  Usage: Add this as the LAST step in critical jobs with `if: failure()`
+#
+#    - name: 🚨 Cancel workflow on failure
+#      if: failure()
+#      uses: ./.github/actions/cancel-workflow-on-failure
+#      with:
+#        reason: "Code quality checks failed"
+#
+#  Permission Requirements:
+#    The calling job needs `actions: write` permission to cancel workflows.
+#    Add this to your job's permissions block:
+#
+#    permissions:
+#      contents: read
+#      actions: write  # Required for workflow cancellation
+#
+#  Security Considerations:
+#    - Uses GitHub's built-in GITHUB_TOKEN (no external secrets required)
+#    - API calls are scoped to the current repository only
+#    - Cancellation only affects the current workflow run
+#    - No external network calls or dependencies
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: "Cancel Workflow On Failure"
+description: "Cancels the entire workflow run when a critical job fails to save CI resources"
+
+inputs:
+  reason:
+    description: "Reason for cancellation (displayed in logs and job summary)"
+    required: false
+    default: "A critical job failed"
+  skip-on-tags:
+    description: "Skip cancellation for tag pushes (useful for release workflows)"
+    required: false
+    default: "false"
+  grace-period:
+    description: "Seconds to wait before cancelling (allows logs to flush)"
+    required: false
+    default: "2"
+  github-token:
+    description: "GitHub token with actions:write permission (defaults to GITHUB_TOKEN)"
+    required: false
+    default: ""
+
+outputs:
+  cancelled:
+    description: "Whether the workflow cancellation was requested"
+    value: ${{ steps.cancel.outputs.cancelled }}
+  skipped:
+    description: "Whether cancellation was skipped (e.g., tag push with skip-on-tags)"
+    value: ${{ steps.cancel.outputs.skipped }}
+  skip-reason:
+    description: "Reason why cancellation was skipped (if applicable)"
+    value: ${{ steps.cancel.outputs.skip-reason }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: 🚨 Cancel workflow run
+      id: cancel
+      shell: bash
+      env:
+        # Use provided token or fall back to github.token (composite action *input defaults* cannot use expressions like github.token, so the fallback is handled here)
+        GH_TOKEN: ${{ inputs.github-token || github.token }}
+        CANCEL_REASON: ${{ inputs.reason }}
+        SKIP_ON_TAGS: ${{ inputs.skip-on-tags }}
+        GRACE_PERIOD: ${{ inputs.grace-period }}
+        GITHUB_REF: ${{ github.ref }}
+        GITHUB_RUN_ID: ${{ github.run_id }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_JOB: ${{ github.job }}
+        GITHUB_WORKFLOW: ${{ github.workflow }}
+        GITHUB_API_URL: ${{ github.api_url }}
+      run: |
+        # Note: Using set -uo pipefail (but not -e):
+        #   -e is avoided so we can handle errors (like curl failures and HTTP status codes) explicitly
+        #   -o pipefail causes a pipeline to return a failure exit status if any command in the pipeline fails,
+        #      but it does not by itself cause the script to exit without -e; exit behavior is controlled explicitly.
+        # When adding new pipelines, ensure each one either handles failures explicitly (e.g., curl ... || CURL_EXIT=$?)
+        #   or that you deliberately check and react to the pipeline's exit status if early exit is desired.
+        set -uo pipefail
+
+        echo "🚨 Workflow Cancellation Triggered"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "📋 Context:"
+        echo "  • Workflow: $GITHUB_WORKFLOW"
+        echo "  • Job: $GITHUB_JOB"
+        echo "  • Run ID: $GITHUB_RUN_ID"
+        echo "  • Ref: $GITHUB_REF"
+        printf '  • Reason: %s\n' "$CANCEL_REASON"
+        echo ""
+
+        # Initialize outputs
+        echo "cancelled=false" >> "$GITHUB_OUTPUT"
+        echo "skipped=false" >> "$GITHUB_OUTPUT"
+        echo "skip-reason=" >> "$GITHUB_OUTPUT"
+
+        # Check if we should skip cancellation for tags
+        if [[ "$SKIP_ON_TAGS" == "true" && "$GITHUB_REF" =~ ^refs/tags/.+ ]]; then
+          echo "⏭️ Skipping cancellation: Running on a tag and skip-on-tags is enabled"
+          echo "   This allows release workflows to complete even if non-critical jobs fail"
+          echo ""
+          echo "skipped=true" >> "$GITHUB_OUTPUT"
+          echo "skip-reason=tag-push-with-skip-enabled" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Validate grace period is a number
+        if ! [[ "$GRACE_PERIOD" =~ ^[0-9]+$ ]]; then
+          echo "⚠️ Invalid grace period '$GRACE_PERIOD', using default of 2 seconds"
+          GRACE_PERIOD=2
+        fi
+
+        # Grace period to allow logs to flush
+        if [[ "$GRACE_PERIOD" -gt 0 ]]; then
+          echo "⏳ Waiting ${GRACE_PERIOD}s grace period before cancellation..."
+          sleep "$GRACE_PERIOD"
+        fi
+
+        echo "🛑 Cancelling workflow run $GITHUB_RUN_ID..."
+        echo ""
+
+        # Cancel the workflow run using curl for better control and error handling
+        # This avoids dependency on gh CLI being installed
+        # Added timeouts to prevent hanging on network issues
+        # Note: stderr is NOT redirected to avoid interfering with HTTP status code parsing
+        CURL_EXIT=0
+        HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" \
+          --connect-timeout 10 \
+          --max-time 30 \
+          -X POST \
+          -H "Accept: application/vnd.github+json" \
+          -H "Authorization: Bearer $GH_TOKEN" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/cancel") || CURL_EXIT=$?
+
+        # Handle curl-level errors (network issues, timeouts)
+        if [[ $CURL_EXIT -ne 0 ]]; then
+          echo ""
+          echo "⚠️ Network error during cancel request (curl exit code: $CURL_EXIT)"
+          echo "   This could be a temporary network issue."
+          echo ""
+          echo "skipped=true" >> "$GITHUB_OUTPUT"
+          echo "skip-reason=network-error-$CURL_EXIT" >> "$GITHUB_OUTPUT"
+          # Don't exit with error - we don't want to mask the original failure
+          # The workflow will fail anyway due to the job that triggered this
+          exit 0
+        fi
+
+        # Extract HTTP status code (last line) and response body (everything except last line)
+        # Note: This spawns subshells, but prioritizes readability and portability over micro-optimization.
+        # This code only runs on job failures (rare), and the performance difference is negligible (milliseconds).
+        # Alternative approaches using mapfile/arrays add complexity and bash 4+ dependency for minimal gain.
+        HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -n1)
+        RESPONSE_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
+
+        # Validate HTTP_STATUS is non-empty (malformed response protection)
+        if [[ -z "$HTTP_STATUS" ]]; then
+          echo ""
+          echo "⚠️ Unable to determine HTTP status from cancel API response"
+          if [[ -n "$RESPONSE_BODY" ]]; then
+            printf '   Raw response (sanitized): %q\n' "$RESPONSE_BODY"
+          fi
+          echo ""
+          echo "skipped=true" >> "$GITHUB_OUTPUT"
+          echo "skip-reason=api-error-empty-status" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        echo "📡 API Response Status: $HTTP_STATUS"
+
+        case "$HTTP_STATUS" in
+          202)
+            echo ""
+            echo "✅ Workflow cancellation request accepted"
+            echo ""
+            echo "📝 Note: Other jobs may complete their current step before stopping."
+            echo "   This is expected GitHub Actions behavior."
+            echo ""
+            echo "cancelled=true" >> "$GITHUB_OUTPUT"
+            ;;
+          403)
+            echo ""
+            echo "⚠️ Permission denied (403)"
+            echo "   The job may be missing 'actions: write' permission."
+            echo "   Add this to the job's permissions block:"
+            echo ""
+            echo "   permissions:"
+            echo "     contents: read"
+            echo "     actions: write"
+            echo ""
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            echo "skip-reason=permission-denied" >> "$GITHUB_OUTPUT"
+            ;;
+          404)
+            echo ""
+            echo "⚠️ Workflow run not found (404)"
+            echo "   The workflow run may have already completed."
+            echo ""
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            echo "skip-reason=run-not-found" >> "$GITHUB_OUTPUT"
+            ;;
+          409)
+            echo ""
+            echo "⚠️ Conflict (409) - Workflow is already being cancelled or has completed"
+            echo ""
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            echo "skip-reason=already-cancelled-or-completed" >> "$GITHUB_OUTPUT"
+            ;;
+          *)
+            echo ""
+            echo "⚠️ Unexpected response (HTTP $HTTP_STATUS)"
+            if [[ -n "$RESPONSE_BODY" ]]; then
+              printf '   Response (sanitized): %q\n' "$RESPONSE_BODY"
+            fi
+            echo ""
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            echo "skip-reason=api-error-$HTTP_STATUS" >> "$GITHUB_OUTPUT"
+            ;;
+        esac
+
+        # Escape markdown special characters that could break tables or formatting
+        # Note: Multiple parameter expansions are used intentionally over sed for:
+        #   - Pure bash (no external process overhead)
+        #   - Explicit, self-documenting escapes
+        #   - Easier maintenance and debugging
+        # This only runs on failures, so micro-optimization is not a priority.
+        CANCEL_REASON_MD=$CANCEL_REASON
+        CANCEL_REASON_MD=${CANCEL_REASON_MD//\\/\\\\}
+        CANCEL_REASON_MD=${CANCEL_REASON_MD//|/\\|}
+        CANCEL_REASON_MD=${CANCEL_REASON_MD//\`/\\\`}
+        CANCEL_REASON_MD=${CANCEL_REASON_MD//\*/\\*}
+        CANCEL_REASON_MD=${CANCEL_REASON_MD//_/\\_}
+        CANCEL_REASON_MD=${CANCEL_REASON_MD//[/\\[}
+        CANCEL_REASON_MD=${CANCEL_REASON_MD//]/\\]}
+        CANCEL_REASON_MD=${CANCEL_REASON_MD//</\\<}
+        CANCEL_REASON_MD=${CANCEL_REASON_MD//>/\\>}
+
+        # Determine status cell value for job summary
+        if [[ "$HTTP_STATUS" == "202" ]]; then
+          STATUS_CELL_VALUE="✅ Accepted"
+        else
+          STATUS_CELL_VALUE="⚠️ HTTP $HTTP_STATUS"
+        fi
+
+        # Add to job summary (always, regardless of success/failure)
+        {
+          echo "## 🚨 Workflow Cancellation"
+          echo ""
+          echo "| Detail | Value |"
+          echo "|--------|-------|"
+          echo "| **Reason** | $CANCEL_REASON_MD |"
+          echo "| **Triggered by** | \`$GITHUB_JOB\` |"
+          echo "| **Run ID** | $GITHUB_RUN_ID |"
+          echo "| **Status** | $STATUS_CELL_VALUE |"
+          echo ""
+          if [[ "$HTTP_STATUS" == "202" ]]; then
+            echo "This cancellation was triggered to save CI resources after a critical failure."
+          elif [[ "$HTTP_STATUS" == "403" ]]; then
+            echo "⚠️ **Permission Issue**: Add \`actions: write\` permission to enable cancellation."
+          elif [[ "$HTTP_STATUS" == "409" ]]; then
+            echo "ℹ️ **Already Cancelling**: Another job already triggered cancellation."
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"

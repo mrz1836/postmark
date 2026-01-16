@@ -66,6 +66,7 @@ jobs:
     runs-on: ${{ inputs.primary-runner }}
     permissions:
       contents: read
+      actions: write # Required for workflow cancellation on failure
     steps:
       # --------------------------------------------------------------------
       # Checkout code (required for local actions)
@@ -203,6 +204,15 @@ jobs:
           artifact-path: cache-stats-govet.json
           retention-days: 1
 
+      # --------------------------------------------------------------------
+      # Cancel workflow on failure (save CI resources)
+      # --------------------------------------------------------------------
+      - name: 🚨 Cancel workflow on failure
+        if: failure()
+        uses: ./.github/actions/cancel-workflow-on-failure
+        with:
+          reason: "Go vet static analysis failed"
+
   # ----------------------------------------------------------------------------------
   # Lint (Code Linting)
   # ----------------------------------------------------------------------------------
@@ -213,6 +223,7 @@ jobs:
     runs-on: ${{ inputs.primary-runner }}
     permissions:
       contents: read
+      actions: write # Required for workflow cancellation on failure
     outputs:
       golangci-lint-version: ${{ steps.golangci-lint-version.outputs.version }}
     steps:
@@ -426,6 +437,15 @@ jobs:
           artifact-path: cache-stats-lint.json
           retention-days: 1
 
+      # --------------------------------------------------------------------
+      # Cancel workflow on failure (save CI resources)
+      # --------------------------------------------------------------------
+      - name: 🚨 Cancel workflow on failure
+        if: failure()
+        uses: ./.github/actions/cancel-workflow-on-failure
+        with:
+          reason: "Code linting (golangci-lint) failed"
+
   # ----------------------------------------------------------------------------------
   # YAML/JSON Format Validation (MAGE-X)
   # ----------------------------------------------------------------------------------
@@ -435,6 +455,7 @@ jobs:
     runs-on: ${{ inputs.primary-runner }}
     permissions:
       contents: read
+      actions: write # Required for workflow cancellation on failure
     outputs:
       yamlfmt-version: ${{ steps.yamlfmt-version.outputs.version }}
     steps:
@@ -596,3 +617,12 @@ jobs:
           echo "- **Comment Padding**: 1 space after #" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "🎯 **All YAML/JSON files meet formatting standards via MAGE-X.**" >> $GITHUB_STEP_SUMMARY
+
+      # --------------------------------------------------------------------
+      # Cancel workflow on failure (save CI resources)
+      # --------------------------------------------------------------------
+      - name: 🚨 Cancel workflow on failure
+        if: failure()
+        uses: ./.github/actions/cancel-workflow-on-failure
+        with:
+          reason: "YAML/JSON format validation failed"

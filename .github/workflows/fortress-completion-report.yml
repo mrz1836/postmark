@@ -23,36 +23,44 @@ on:
         default: "skipped"
       start-epoch:
         description: "Workflow start epoch time"
-        required: true
+        required: false
         type: string
+        default: "0"
       start-time:
         description: "Workflow start time"
-        required: true
+        required: false
         type: string
+        default: "unknown"
       setup-result:
         description: "Setup job result"
-        required: true
+        required: false
         type: string
+        default: "skipped"
       test-magex-result:
         description: "Test MAGE-X job result"
-        required: true
+        required: false
         type: string
+        default: "skipped"
       security-result:
         description: "Security job result"
-        required: true
+        required: false
         type: string
+        default: "skipped"
       code-quality-result:
         description: "Code quality job result"
-        required: true
+        required: false
         type: string
+        default: "skipped"
       pre-commit-result:
         description: "Pre-commit checks job result"
-        required: true
+        required: false
         type: string
+        default: "skipped"
       test-suite-result:
         description: "Test suite job result"
-        required: true
+        required: false
         type: string
+        default: "skipped"
       release-result:
         description: "Result of the release job"
         required: false
@@ -65,8 +73,9 @@ on:
         default: "skipped"
       test-matrix:
         description: "Test matrix JSON"
-        required: true
+        required: false
         type: string
+        default: "[]"
       env-json:
         description: "JSON string of environment variables"
         required: true

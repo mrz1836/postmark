@@ -100,10 +100,42 @@ runs:
 
           # Check if artifacts exist first (avoid unnecessary retries)
           echo "🔍 Checking artifact availability..."
-          if ! gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts | jq -e ".artifacts[] | select(.name | test(\"$REGEX_PATTERN\"))" > /dev/null 2>&1; then
+
+          # Fetch artifacts list, handling API errors gracefully
+          ARTIFACTS_JSON=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts 2>&1) || {
+            API_ERROR=$?
+            echo "⚠️ Failed to fetch artifacts list (exit code: $API_ERROR)"
+            echo "   Response: $ARTIFACTS_JSON"
+
+            if [ "$CONTINUE_ON_ERROR" = "true" ]; then
+              echo "::warning title=Artifact API Error::Failed to fetch artifacts list - API may be unavailable or credentials invalid"
+              DOWNLOAD_SUCCESS=false
+              break
+            else
+              echo "::error title=Artifact API Error::Failed to fetch artifacts list - API may be unavailable or credentials invalid"
+              exit 1
+            fi
+          }
+
+          # Validate JSON response before processing
+          if ! echo "$ARTIFACTS_JSON" | jq -e '.artifacts' > /dev/null 2>&1; then
+            echo "⚠️ Invalid API response (not valid artifacts JSON)"
+            echo "   Response: $ARTIFACTS_JSON"
+
+            if [ "$CONTINUE_ON_ERROR" = "true" ]; then
+              echo "::warning title=Invalid API Response::Artifacts API returned invalid response"
+              DOWNLOAD_SUCCESS=false
+              break
+            else
+              echo "::error title=Invalid API Response::Artifacts API returned invalid response"
+              exit 1
+            fi
+          fi
+
+          if ! echo "$ARTIFACTS_JSON" | jq -e ".artifacts[] | select(.name | test(\"$REGEX_PATTERN\"))" > /dev/null 2>&1; then
             echo "⚠️ No artifacts found matching pattern '$ARTIFACT_PATTERN'"
             echo "📋 Available artifacts:"
-            gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts | jq -r '.artifacts[].name' | sed 's/^/  • /' || echo "  No artifacts available"
+            echo "$ARTIFACTS_JSON" | jq -r '.artifacts[].name' 2>/dev/null | sed 's/^/  • /' || echo "  No artifacts available"
 
             if [ "$CONTINUE_ON_ERROR" = "true" ]; then
               echo "::warning title=No Artifacts Found::No artifacts found matching pattern '$ARTIFACT_PATTERN'"
@@ -116,7 +148,7 @@ runs:
           fi
 
           # Count available artifacts
-          AVAILABLE_ARTIFACTS=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts | jq "[.artifacts[] | select(.name | test(\"$REGEX_PATTERN\"))] | length")
+          AVAILABLE_ARTIFACTS=$(echo "$ARTIFACTS_JSON" | jq "[.artifacts[] | select(.name | test(\"$REGEX_PATTERN\"))] | length")
           echo "📊 Found $AVAILABLE_ARTIFACTS artifact(s) matching pattern"
 
           # Attempt download with timeout
