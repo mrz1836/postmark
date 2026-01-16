@@ -71,6 +71,7 @@ jobs:
     if: ${{ inputs.enable-nancy }}
     permissions:
       contents: read
+      actions: write # Required for workflow cancellation on failure
     steps:
       # --------------------------------------------------------------------
       # Checkout code (required for local actions)
@@ -186,6 +187,15 @@ jobs:
           artifact-name: cache-stats-security-nancy
           artifact-path: cache-stats-nancy-security.json
 
+      # --------------------------------------------------------------------
+      # Cancel workflow on failure (save CI resources)
+      # --------------------------------------------------------------------
+      - name: 🚨 Cancel workflow on failure
+        if: failure()
+        uses: ./.github/actions/cancel-workflow-on-failure
+        with:
+          reason: "Nancy dependency security check failed"
+
   # ----------------------------------------------------------------------------------
   # Govulncheck (Vulnerability Checks)
   # ----------------------------------------------------------------------------------
@@ -195,6 +205,7 @@ jobs:
     if: ${{ inputs.enable-govulncheck }}
     permissions:
       contents: read
+      actions: write # Required for workflow cancellation on failure
     steps:
       # --------------------------------------------------------------------
       # Checkout code (required for local actions)
@@ -360,6 +371,15 @@ jobs:
           artifact-name: cache-stats-security-govulncheck
           artifact-path: cache-stats-govulncheck-security.json
 
+      # --------------------------------------------------------------------
+      # Cancel workflow on failure (save CI resources)
+      # --------------------------------------------------------------------
+      - name: 🚨 Cancel workflow on failure
+        if: failure()
+        uses: ./.github/actions/cancel-workflow-on-failure
+        with:
+          reason: "Govulncheck vulnerability scan failed"
+
   # ----------------------------------------------------------------------------------
   # Gitleaks (Secret Scanning)
   # ----------------------------------------------------------------------------------
@@ -369,6 +389,7 @@ jobs:
     if: ${{ inputs.enable-gitleaks }}
     permissions:
       contents: read
+      actions: write # Required for workflow cancellation on failure
     steps:
       # --------------------------------------------------------------------
       # Checkout code (required for local actions)
@@ -459,3 +480,12 @@ jobs:
           echo "| **Result** | ⚠️  Skipped for security (fork cannot access secrets) |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "🔒 **Secret scanning was skipped because this PR comes from a fork. This is a security feature to prevent secret exposure.**" >> $GITHUB_STEP_SUMMARY
+
+      # --------------------------------------------------------------------
+      # Cancel workflow on failure (save CI resources)
+      # --------------------------------------------------------------------
+      - name: 🚨 Cancel workflow on failure
+        if: failure()
+        uses: ./.github/actions/cancel-workflow-on-failure
+        with:
+          reason: "Gitleaks secret scan failed"

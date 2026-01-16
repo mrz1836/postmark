@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------------
 #  🏰 GoFortress - Enterprise-grade CI/CD fortress for Go applications
 #
-#  Version: 1.3.0 | Released: 2025-12-14
+#  Version: 1.4.0 | Released: 2026-01-16
 #
 #  Built Strong. Tested Harder.
 #
@@ -18,7 +18,7 @@
 #  🚀 Release Citadel: Automated deployments with GoReleaser and GoDocs
 #
 #  Maintainer: @mrz1836
-#  Repository: https://github.com/mrz1836/go-fortress
+#  Repository: https://github.com/mrz1836/postmark
 #
 #  Copyright 2025 @mrz1836
 #  SPDX-License-Identifier: MIT
@@ -170,6 +170,7 @@ jobs:
       needs.setup.outputs.is-fork-pr != 'true'
     permissions:
       contents: read # Read repository content for security scanning
+      actions: write # Required for workflow cancellation on failure
     uses: ./.github/workflows/fortress-security-scans.yml
     with:
       env-json: ${{ needs.load-env.outputs.env-json }}
@@ -198,6 +199,7 @@ jobs:
       needs.setup.outputs.pre-commit-enabled == 'true'
     permissions:
       contents: read # Read repository content for pre-commit checks
+      actions: write # Required for workflow cancellation on failure
     uses: ./.github/workflows/fortress-pre-commit.yml
     with:
       env-json: ${{ needs.load-env.outputs.env-json }}
@@ -218,6 +220,7 @@ jobs:
       (needs.warm-cache.result == 'success' || needs.warm-cache.result == 'skipped')
     permissions:
       contents: read # Read repository content for code quality checks
+      actions: write # Required for workflow cancellation on failure
     uses: ./.github/workflows/fortress-code-quality.yml
     with:
       env-json: ${{ needs.load-env.outputs.env-json }}
@@ -248,7 +251,7 @@ jobs:
       pages: write # Required: Coverage workflow needs to deploy to GitHub Pages
       id-token: write # Required: Coverage workflow needs GitHub Pages authentication
       statuses: write # Required: Coverage workflow needs to create commit status checks
-      actions: read # Required: Test validation workflow needs to access artifacts
+      actions: write # Required: Manage/cancel child test workflows (test matrix & fuzz tests); artifact access only needs actions: read
     uses: ./.github/workflows/fortress-test-suite.yml
     with:
       code-coverage-enabled: ${{ needs.setup.outputs.code-coverage-enabled }}
@@ -448,9 +451,10 @@ jobs:
     name: 📊 Workflow Completion Report
     if: |
       always() &&
-      needs.setup.outputs.completion-report-enabled == 'true' &&
-      !contains(fromJSON('["failure", "cancelled"]'), needs.setup.result) &&
-      !contains(fromJSON('["failure", "cancelled"]'), needs.test-magex.result)
+      needs.load-env.result == 'success' &&
+      needs.setup.result == 'success' &&
+      needs.test-magex.result == 'success' &&
+      needs.setup.outputs.completion-report-enabled == 'true'
     needs: [load-env, setup, test-magex, pre-commit, security, code-quality, test-suite, benchmarks, release, status-check]
     permissions:
       contents: read # Read repository content for completion report
