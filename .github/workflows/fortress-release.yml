@@ -173,7 +173,7 @@ jobs:
       # --------------------------------------------------------------------
       - name: 💾 Cache golangci-lint analysis
         id: cache-golangci-lint
-        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
         with:
           path: ${{ env.GOLANGCI_LINT_CACHE }}
           key: ${{ inputs.primary-runner }}-golangci-lint-analysis-${{ hashFiles('.golangci.json', env.GO_SUM_FILE) }}-${{ inputs.golangci-lint-version }}
