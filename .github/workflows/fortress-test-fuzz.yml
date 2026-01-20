@@ -223,27 +223,6 @@ jobs:
           fi
 
       # --------------------------------------------------------------------
-      # Generate fuzz test statistics using composite action
-      # --------------------------------------------------------------------
-      - name: 📊 Calculate fuzz test statistics
-        id: fuzz-summary
-        if: always()
-        uses: ./.github/actions/test-statistics
-        with:
-          matrix-name: "Fuzz Tests (${{ inputs.primary-runner }})"
-          matrix-os: ${{ inputs.primary-runner }}
-          matrix-go-version: ${{ inputs.go-primary-version }}
-          test-exit-code: ${{ steps.run-fuzz-tests.outputs.fuzz-exit-code || '0' }}
-          output-mode: "FULL"
-          job-status: ${{ job.status }}
-          test-start-time: ${{ steps.fuzz-timer.outputs.fuzz-start || '0' }}
-          race-detection-enabled: "false"
-          code-coverage-enabled: "false"
-          fuzz-run: "true"
-          failures-file: "fuzz-failures.txt"
-          output-file: "fuzz-output.log"
-
-      # --------------------------------------------------------------------
       # Collect performance cache statistics
       # --------------------------------------------------------------------
       - name: 📊 Collect performance cache statistics
