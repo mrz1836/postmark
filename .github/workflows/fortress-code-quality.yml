@@ -72,7 +72,7 @@ jobs:
       # Checkout code (required for local actions)
       # --------------------------------------------------------------------
       - name: 📥 Checkout code
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       # --------------------------------------------------------------------
       # Parse environment variables
@@ -118,9 +118,12 @@ jobs:
       # Run go vet with sequential execution to avoid memory issues
       # --------------------------------------------------------------------
       - name: 🔍 Go vet (sequential)
+        id: run-govet
+        continue-on-error: true
         run: |
           echo "🚀 Running static analysis with go vet (sequential mode)..."
           GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
+          GOVET_EXIT_CODE=0
 
           # Run go vet on packages sequentially to reduce memory usage
           if [ -n "$GO_MODULE_DIR" ]; then
@@ -135,37 +138,60 @@ jobs:
           # Discard stderr to avoid capturing download progress messages
           if ! PACKAGES=$(go list ./... 2>/dev/null | grep -v /vendor/); then
             # If command failed, re-run with stderr visible to show the error
-            echo "❌ go list command failed:"
-            go list ./... 2>&1 | head -20
-            exit 1
+            echo "❌ go list command failed:" | tee govet-output.log
+            go list ./... 2>&1 | head -20 | tee -a govet-output.log
+            echo "govet-exit-code=1" >> $GITHUB_OUTPUT
+            echo "govet-status=failure" >> $GITHUB_OUTPUT
+            exit 0  # Continue to allow summary generation
           fi
 
           TOTAL=$(echo "$PACKAGES" | grep -c . || echo 0)
           CURRENT=0
 
           echo "📦 Found $TOTAL packages to vet"
+          echo "📦 Found $TOTAL packages to vet" > govet-output.log
 
           if [ "$TOTAL" -eq 0 ]; then
-            echo "⚠️ No packages found to vet"
-            exit 1
+            echo "⚠️ No packages found to vet" | tee -a govet-output.log
+            echo "govet-exit-code=1" >> $GITHUB_OUTPUT
+            echo "govet-status=failure" >> $GITHUB_OUTPUT
+            exit 0  # Continue to allow summary generation
           fi
 
           for pkg in $PACKAGES; do
             CURRENT=$((CURRENT + 1))
             echo "[$CURRENT/$TOTAL] Vetting $pkg..."
-            if ! go vet "$pkg"; then
-              echo "❌ go vet failed on package: $pkg"
-              exit 1
+            if ! go vet "$pkg" 2>&1 | tee -a govet-output.log; then
+              echo "❌ go vet failed on package: $pkg" | tee -a govet-output.log
+              GOVET_EXIT_CODE=1
             fi
           done
 
-          echo "✅ Static analysis completed successfully"
+          echo "govet-exit-code=$GOVET_EXIT_CODE" >> $GITHUB_OUTPUT
+          if [[ $GOVET_EXIT_CODE -eq 0 ]]; then
+            echo "govet-status=success" >> $GITHUB_OUTPUT
+            echo "✅ Static analysis completed successfully"
+          else
+            echo "govet-status=failure" >> $GITHUB_OUTPUT
+            echo "❌ Static analysis completed with errors"
+          fi
+
+      # --------------------------------------------------------------------
+      # Create GitHub Annotations for failures
+      # --------------------------------------------------------------------
+      - name: 📋 Create GitHub Annotations
+        if: always() && steps.run-govet.outputs.govet-status == 'failure'
+        run: |
+          echo "::error title=Go Vet Failed::Static analysis issues detected - see job summary for details"
 
       # --------------------------------------------------------------------
       # Summary of Go vet results
       # --------------------------------------------------------------------
       - name: 📊 Job Summary
+        if: always()
         run: |
+          GOVET_STATUS="${{ steps.run-govet.outputs.govet-status }}"
+
           echo "## 📊 Go Vet Static Analysis Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Analysis Details | Status |" >> $GITHUB_STEP_SUMMARY
@@ -173,9 +199,40 @@ jobs:
           echo "| **Tool** | go vet (Official Go Static Analyzer) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Execution** | Sequential (memory-optimized) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Scope** | ./... (excludes dependencies) |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Result** | ✅ No issues found |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "🎯 **All packages passed static analysis checks.**" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "$GOVET_STATUS" == "success" ]]; then
+            echo "| **Result** | ✅ No issues found |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "🎯 **All packages passed static analysis checks.**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| **Result** | ❌ Issues detected |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            # Show failure details if applicable
+            if [[ -f govet-output.log ]]; then
+              echo "### 🚨 Error Details" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "<details>" >> $GITHUB_STEP_SUMMARY
+              echo "<summary>Click to expand full output</summary>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              head -200 govet-output.log >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              echo "</details>" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+      # --------------------------------------------------------------------
+      # Upload go vet results
+      # --------------------------------------------------------------------
+      - name: 📤 Upload go vet results
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: govet-results
+          path: govet-output.log
+          retention-days: 7
+          if-no-files-found: ignore
 
       # --------------------------------------------------------------------
       # Collect cache statistics
@@ -205,6 +262,15 @@ jobs:
           retention-days: 1
 
       # --------------------------------------------------------------------
+      # Fail job if issues found
+      # --------------------------------------------------------------------
+      - name: 🚨 Fail job if issues found
+        if: always() && steps.run-govet.outputs.govet-status == 'failure'
+        run: |
+          echo "❌ Go vet detected static analysis issues"
+          exit 1
+
+      # --------------------------------------------------------------------
       # Cancel workflow on failure (save CI resources)
       # --------------------------------------------------------------------
       - name: 🚨 Cancel workflow on failure
@@ -231,7 +297,7 @@ jobs:
       # Checkout code (required for local actions)
       # --------------------------------------------------------------------
       - name: 📥 Checkout code
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       # --------------------------------------------------------------------
       # Parse environment variables
@@ -350,6 +416,8 @@ jobs:
       # Run golangci-lint
       # --------------------------------------------------------------------
       - name: ✨ Run golangci-lint
+        id: run-lint
+        continue-on-error: true
         run: |
           echo "🧹 Running code linting with golangci-lint..."
           echo "💾 Golangci-lint cache location: $GOLANGCI_LINT_CACHE"
@@ -360,19 +428,39 @@ jobs:
 
           GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
 
+          set +e
           if [ "$ENABLE_MULTI_MODULE_TESTING" == "true" ]; then
             echo "🔧 Multi-module linting enabled - running from repository root"
             echo "📦 magex will discover all Go modules"
-            magex lint
+            magex lint 2>&1 | tee lint-output.log
+            LINT_EXIT_CODE=${PIPESTATUS[0]}
           elif [ -n "$GO_MODULE_DIR" ]; then
             echo "🔧 Running magex lint from directory: $GO_MODULE_DIR"
-            (cd "$GO_MODULE_DIR" && magex lint)
+            (cd "$GO_MODULE_DIR" && magex lint 2>&1 | tee ../lint-output.log)
+            LINT_EXIT_CODE=${PIPESTATUS[0]}
           else
             echo "🔧 Running magex lint from repository root"
-            magex lint
+            magex lint 2>&1 | tee lint-output.log
+            LINT_EXIT_CODE=${PIPESTATUS[0]}
+          fi
+          set -e
+
+          echo "lint-exit-code=$LINT_EXIT_CODE" >> $GITHUB_OUTPUT
+          if [[ $LINT_EXIT_CODE -eq 0 ]]; then
+            echo "lint-status=success" >> $GITHUB_OUTPUT
+            echo "✅ Code linting completed successfully"
+          else
+            echo "lint-status=failure" >> $GITHUB_OUTPUT
+            echo "❌ Code linting completed with errors (exit code: $LINT_EXIT_CODE)"
           fi
 
-          echo "✅ Code linting completed successfully"
+      # --------------------------------------------------------------------
+      # Create GitHub Annotations for failures
+      # --------------------------------------------------------------------
+      - name: 📋 Create GitHub Annotations
+        if: always() && steps.run-lint.outputs.lint-status == 'failure'
+        run: |
+          echo "::error title=Lint Failed::Linting issues detected - see job summary for details"
 
       # --------------------------------------------------------------------
       # Save golangci-lint binary to cache (on cache miss)
@@ -396,7 +484,10 @@ jobs:
       # Summary of golangci-lint results
       # --------------------------------------------------------------------
       - name: 📊 Job Summary
+        if: always()
         run: |
+          LINT_STATUS="${{ steps.run-lint.outputs.lint-status }}"
+
           echo "## ✨ Code Linting Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Linting Details | Status |" >> $GITHUB_STEP_SUMMARY
@@ -405,9 +496,40 @@ jobs:
           echo "| **Version** | ${{ steps.golangci-lint-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Binary Cache** | ${{ steps.cache-golangci-lint-binary.outputs.cache-hit == 'true' && '💚 Cache Hit' || '📦 Downloaded & Cached' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Analysis Cache** | 💾 Enabled |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Result** | ✅ All checks passed |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "🎯 **Code quality standards met - no linting issues found.**" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "$LINT_STATUS" == "success" ]]; then
+            echo "| **Result** | ✅ All checks passed |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "🎯 **Code quality standards met - no linting issues found.**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| **Result** | ❌ Issues detected |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            # Show failure details if applicable
+            if [[ -f lint-output.log ]]; then
+              echo "### 🚨 Linting Errors" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "<details>" >> $GITHUB_STEP_SUMMARY
+              echo "<summary>Click to expand full output</summary>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              head -200 lint-output.log >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              echo "</details>" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+      # --------------------------------------------------------------------
+      # Upload lint results
+      # --------------------------------------------------------------------
+      - name: 📤 Upload lint results
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: lint-results
+          path: lint-output.log
+          retention-days: 7
+          if-no-files-found: ignore
 
       # --------------------------------------------------------------------
       # Collect cache statistics
@@ -438,6 +560,15 @@ jobs:
           retention-days: 1
 
       # --------------------------------------------------------------------
+      # Fail job if lint errors found
+      # --------------------------------------------------------------------
+      - name: 🚨 Fail job if lint errors found
+        if: always() && steps.run-lint.outputs.lint-status == 'failure'
+        run: |
+          echo "❌ Lint detected code quality issues"
+          exit 1
+
+      # --------------------------------------------------------------------
       # Cancel workflow on failure (save CI resources)
       # --------------------------------------------------------------------
       - name: 🚨 Cancel workflow on failure
@@ -463,7 +594,7 @@ jobs:
       # Checkout code (required for local actions)
       # --------------------------------------------------------------------
       - name: 📥 Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       # --------------------------------------------------------------------
       # Parse environment variables
@@ -544,6 +675,8 @@ jobs:
       # Run MAGE-X format:check to validate formatting
       # --------------------------------------------------------------------
       - name: 🔍 Check YAML/JSON formatting with MAGE-X
+        id: run-format-check
+        continue-on-error: true
         run: |
           echo "🔍 Checking YAML/JSON file formatting with MAGE-X format:check..."
           echo "📄 Configuration file: .github/.yamlfmt"
@@ -552,50 +685,58 @@ jobs:
 
           GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
 
+          set +e
           # Run magex format:check to validate formatting without modifying files
           if [ -n "$GO_MODULE_DIR" ]; then
             echo "🔧 Running magex format:check from directory: $GO_MODULE_DIR"
-            if (cd "$GO_MODULE_DIR" && magex format:check); then
-              echo "✅ All YAML/JSON files are properly formatted"
-            else
-              echo "❌ YAML/JSON formatting issues detected"
-              echo ""
-              echo "🔧 To fix these issues locally, run:"
-              echo "    cd $GO_MODULE_DIR && magex format:fix"
-              echo ""
-              echo "📚 yamlfmt Configuration (.github/.yamlfmt):"
-              echo "    • Indent style: spaces (2 spaces)"
-              echo "    • End of line: LF"
-              echo "    • Final newline: required"
-              echo "    • Line breaks: preserved where sensible"
-              echo "    • Comment padding: 1 space after #"
-              exit 1
-            fi
+            (cd "$GO_MODULE_DIR" && magex format:check 2>&1 | tee ../format-output.log)
+            FORMAT_EXIT_CODE=${PIPESTATUS[0]}
           else
             echo "🔧 Running magex format:check from repository root"
-            if magex format:check; then
-              echo "✅ All YAML/JSON files are properly formatted"
-            else
-              echo "❌ YAML/JSON formatting issues detected"
-              echo ""
-              echo "🔧 To fix these issues locally, run:"
-              echo "    magex format:fix"
-              echo ""
-              echo "📚 yamlfmt Configuration (.github/.yamlfmt):"
-              echo "    • Indent style: spaces (2 spaces)"
-              echo "    • End of line: LF"
-              echo "    • Final newline: required"
-              echo "    • Line breaks: preserved where sensible"
-              echo "    • Comment padding: 1 space after #"
-              exit 1
-            fi
+            magex format:check 2>&1 | tee format-output.log
+            FORMAT_EXIT_CODE=${PIPESTATUS[0]}
           fi
+          set -e
+
+          echo "format-exit-code=$FORMAT_EXIT_CODE" >> $GITHUB_OUTPUT
+          if [[ $FORMAT_EXIT_CODE -eq 0 ]]; then
+            echo "format-status=success" >> $GITHUB_OUTPUT
+            echo "✅ All YAML/JSON files are properly formatted"
+          else
+            echo "format-status=failure" >> $GITHUB_OUTPUT
+            echo "❌ YAML/JSON formatting issues detected"
+            echo ""
+            echo "🔧 To fix these issues locally, run:"
+            if [ -n "$GO_MODULE_DIR" ]; then
+              echo "    cd $GO_MODULE_DIR && magex format:fix"
+            else
+              echo "    magex format:fix"
+            fi
+            echo ""
+            echo "📚 yamlfmt Configuration (.github/.yamlfmt):"
+            echo "    • Indent style: spaces (2 spaces)"
+            echo "    • End of line: LF"
+            echo "    • Final newline: required"
+            echo "    • Line breaks: preserved where sensible"
+            echo "    • Comment padding: 1 space after #"
+          fi
+
+      # --------------------------------------------------------------------
+      # Create GitHub Annotations for failures
+      # --------------------------------------------------------------------
+      - name: 📋 Create GitHub Annotations
+        if: always() && steps.run-format-check.outputs.format-status == 'failure'
+        run: |
+          echo "::error title=YAML/JSON Format Check Failed::Formatting issues detected - see job summary for details"
 
       # --------------------------------------------------------------------
       # Job Summary
       # --------------------------------------------------------------------
       - name: 📊 Job Summary
+        if: always()
         run: |
+          FORMAT_STATUS="${{ steps.run-format-check.outputs.format-status }}"
+
           echo "## 📐 YAML/JSON Format Validation Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Validation Details | Status |" >> $GITHUB_STEP_SUMMARY
@@ -604,7 +745,13 @@ jobs:
           echo "| **Version** | ${{ steps.yamlfmt-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Configuration** | .github/.yamlfmt |" >> $GITHUB_STEP_SUMMARY
           echo "| **Scope** | All .yml, .yaml, and .json files |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Result** | ✅ All files properly formatted |" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "$FORMAT_STATUS" == "success" ]]; then
+            echo "| **Result** | ✅ All files properly formatted |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| **Result** | ❌ Formatting issues detected |" >> $GITHUB_STEP_SUMMARY
+          fi
+
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### File Processing Statistics" >> $GITHUB_STEP_SUMMARY
           echo "- **Total files processed**: ${{ env.TOTAL_FILES }}" >> $GITHUB_STEP_SUMMARY
@@ -616,7 +763,44 @@ jobs:
           echo "- **Line Breaks**: Preserved where sensible" >> $GITHUB_STEP_SUMMARY
           echo "- **Comment Padding**: 1 space after #" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "🎯 **All YAML/JSON files meet formatting standards via MAGE-X.**" >> $GITHUB_STEP_SUMMARY
+
+          # Show failure details if applicable
+          if [[ "$FORMAT_STATUS" != "success" ]] && [[ -f format-output.log ]]; then
+            echo "### 🚨 Formatting Issues" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details>" >> $GITHUB_STEP_SUMMARY
+            echo "<summary>Click to expand full output</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            head -200 format-output.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "🔧 **To fix these issues locally, run:** \`magex format:fix\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "🎯 **All YAML/JSON files meet formatting standards via MAGE-X.**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # --------------------------------------------------------------------
+      # Upload format check results
+      # --------------------------------------------------------------------
+      - name: 📤 Upload format check results
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: format-check-results
+          path: format-output.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # --------------------------------------------------------------------
+      # Fail job if formatting issues found
+      # --------------------------------------------------------------------
+      - name: 🚨 Fail job if formatting issues found
+        if: always() && steps.run-format-check.outputs.format-status == 'failure'
+        run: |
+          echo "❌ Format check detected YAML/JSON formatting issues"
+          exit 1
 
       # --------------------------------------------------------------------
       # Cancel workflow on failure (save CI resources)
