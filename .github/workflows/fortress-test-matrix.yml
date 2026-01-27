@@ -452,3 +452,7 @@ jobs:
         uses: ./.github/actions/cancel-workflow-on-failure
         with:
           reason: "Test matrix failed (${{ matrix.name }})"
+          failed-job: "Test (${{ matrix.name }})"
+          failed-step: "🧪 Run tests"
+          failure-tool: "go test"
+          failure-summary: "Test failures detected on ${{ matrix.os }} Go ${{ matrix.go-version }}"

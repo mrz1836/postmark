@@ -58,6 +58,23 @@ inputs:
     description: "GitHub token with actions:write permission (defaults to GITHUB_TOKEN)"
     required: false
     default: ""
+  # Failure context inputs for enhanced job summary
+  failed-job:
+    description: "Name of the job that failed (for prominent display)"
+    required: false
+    default: ""
+  failed-step:
+    description: "Name of the step that failed"
+    required: false
+    default: ""
+  failure-tool:
+    description: "Tool that detected the failure (e.g., 'go vet', 'golangci-lint')"
+    required: false
+    default: ""
+  failure-summary:
+    description: "Brief summary of what failed (e.g., '3 issues detected')"
+    required: false
+    default: ""
 
 outputs:
   cancelled:
@@ -88,6 +105,11 @@ runs:
         GITHUB_JOB: ${{ github.job }}
         GITHUB_WORKFLOW: ${{ github.workflow }}
         GITHUB_API_URL: ${{ github.api_url }}
+        # Failure context for enhanced job summary
+        FAILED_JOB: ${{ inputs.failed-job }}
+        FAILED_STEP: ${{ inputs.failed-step }}
+        FAILURE_TOOL: ${{ inputs.failure-tool }}
+        FAILURE_SUMMARY: ${{ inputs.failure-summary }}
       run: |
         # Note: Using set -uo pipefail (but not -e):
         #   -e is avoided so we can handle errors (like curl failures and HTTP status codes) explicitly
@@ -261,19 +283,73 @@ runs:
           STATUS_CELL_VALUE="⚠️ HTTP $HTTP_STATUS"
         fi
 
+        # Derive summary heading from actual outcome
+        if [[ "$HTTP_STATUS" == "202" ]]; then
+          SUMMARY_HEADING="## 🚨 Workflow Cancelled: Critical Failure Detected"
+        else
+          SUMMARY_HEADING="## ⚠️ Cancellation Skipped: Critical Failure Detected"
+        fi
+
         # Add to job summary (always, regardless of success/failure)
+        # Enhanced summary with prominent failure origin when context is provided
         {
-          echo "## 🚨 Workflow Cancellation"
+          echo "$SUMMARY_HEADING"
+          echo ""
+
+          # Show prominent failure origin if context was provided
+          if [[ -n "$FAILED_JOB" || -n "$FAILED_STEP" || -n "$FAILURE_TOOL" || -n "$FAILURE_SUMMARY" ]]; then
+            echo "### ❌ Failure Origin"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            if [[ -n "$FAILED_JOB" ]]; then
+              # Escape markdown special characters in FAILED_JOB
+              FAILED_JOB_MD=$FAILED_JOB
+              FAILED_JOB_MD=${FAILED_JOB_MD//\\/\\\\}
+              FAILED_JOB_MD=${FAILED_JOB_MD//|/\\|}
+              FAILED_JOB_MD=${FAILED_JOB_MD//\`/\\\`}
+              echo "| **Job** | $FAILED_JOB_MD |"
+            fi
+            if [[ -n "$FAILED_STEP" ]]; then
+              # Escape markdown special characters in FAILED_STEP
+              FAILED_STEP_MD=$FAILED_STEP
+              FAILED_STEP_MD=${FAILED_STEP_MD//\\/\\\\}
+              FAILED_STEP_MD=${FAILED_STEP_MD//|/\\|}
+              FAILED_STEP_MD=${FAILED_STEP_MD//\`/\\\`}
+              echo "| **Step** | $FAILED_STEP_MD |"
+            fi
+            if [[ -n "$FAILURE_TOOL" ]]; then
+              # Escape markdown special characters in FAILURE_TOOL
+              FAILURE_TOOL_MD=$FAILURE_TOOL
+              FAILURE_TOOL_MD=${FAILURE_TOOL_MD//\\/\\\\}
+              FAILURE_TOOL_MD=${FAILURE_TOOL_MD//|/\\|}
+              FAILURE_TOOL_MD=${FAILURE_TOOL_MD//\`/\\\`}
+              echo "| **Tool** | $FAILURE_TOOL_MD |"
+            fi
+            if [[ -n "$FAILURE_SUMMARY" ]]; then
+              # Escape markdown special characters in FAILURE_SUMMARY
+              FAILURE_SUMMARY_MD=$FAILURE_SUMMARY
+              FAILURE_SUMMARY_MD=${FAILURE_SUMMARY_MD//\\/\\\\}
+              FAILURE_SUMMARY_MD=${FAILURE_SUMMARY_MD//|/\\|}
+              FAILURE_SUMMARY_MD=${FAILURE_SUMMARY_MD//\`/\\\`}
+              echo "| **Reason** | $FAILURE_SUMMARY_MD |"
+            fi
+            echo ""
+            echo "---"
+            echo ""
+          fi
+
+          echo "### Workflow Cancellation Details"
           echo ""
           echo "| Detail | Value |"
           echo "|--------|-------|"
-          echo "| **Reason** | $CANCEL_REASON_MD |"
           echo "| **Triggered by** | \`$GITHUB_JOB\` |"
           echo "| **Run ID** | $GITHUB_RUN_ID |"
           echo "| **Status** | $STATUS_CELL_VALUE |"
+          echo "| **Cancellation reason** | $CANCEL_REASON_MD |"
           echo ""
           if [[ "$HTTP_STATUS" == "202" ]]; then
-            echo "This cancellation was triggered to save CI resources after a critical failure."
+            echo "> This cancellation was triggered to save CI resources. Other parallel jobs were stopped."
           elif [[ "$HTTP_STATUS" == "403" ]]; then
             echo "⚠️ **Permission Issue**: Add \`actions: write\` permission to enable cancellation."
           elif [[ "$HTTP_STATUS" == "409" ]]; then

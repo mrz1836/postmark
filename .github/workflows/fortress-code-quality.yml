@@ -278,6 +278,10 @@ jobs:
         uses: ./.github/actions/cancel-workflow-on-failure
         with:
           reason: "Go vet static analysis failed"
+          failed-job: "Go Vet Static Analysis"
+          failed-step: "🔍 Go vet (sequential)"
+          failure-tool: "go vet"
+          failure-summary: "Static analysis issues detected"
 
   # ----------------------------------------------------------------------------------
   # Lint (Code Linting)
@@ -576,6 +580,10 @@ jobs:
         uses: ./.github/actions/cancel-workflow-on-failure
         with:
           reason: "Code linting (golangci-lint) failed"
+          failed-job: "Lint Code"
+          failed-step: "✨ Run golangci-lint"
+          failure-tool: "golangci-lint"
+          failure-summary: "Linting issues detected"
 
   # ----------------------------------------------------------------------------------
   # YAML/JSON Format Validation (MAGE-X)
@@ -810,3 +818,7 @@ jobs:
         uses: ./.github/actions/cancel-workflow-on-failure
         with:
           reason: "YAML/JSON format validation failed"
+          failed-job: "YAML/JSON Format Validation"
+          failed-step: "🔍 Check YAML/JSON formatting with MAGE-X"
+          failure-tool: "yamlfmt"
+          failure-summary: "Formatting issues detected"

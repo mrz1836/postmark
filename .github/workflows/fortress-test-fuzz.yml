@@ -269,3 +269,7 @@ jobs:
         uses: ./.github/actions/cancel-workflow-on-failure
         with:
           reason: "Fuzz tests failed"
+          failed-job: "Fuzz Tests"
+          failed-step: "🧪 Run fuzz tests"
+          failure-tool: "go test -fuzz"
+          failure-summary: "Fuzz testing detected issues"

@@ -267,6 +267,10 @@ jobs:
         uses: ./.github/actions/cancel-workflow-on-failure
         with:
           reason: "Nancy dependency security check failed"
+          failed-job: "Ask Nancy (Dependency Checks)"
+          failed-step: "🔍 Ask Nancy"
+          failure-tool: "nancy"
+          failure-summary: "Vulnerabilities detected in dependencies"
 
   # ----------------------------------------------------------------------------------
   # Govulncheck (Vulnerability Checks)
@@ -516,6 +520,10 @@ jobs:
         uses: ./.github/actions/cancel-workflow-on-failure
         with:
           reason: "Govulncheck vulnerability scan failed"
+          failed-job: "Run govulncheck (Vulnerability Scan)"
+          failed-step: "🔐 Run govulncheck"
+          failure-tool: "govulncheck"
+          failure-summary: "Go vulnerabilities detected"
 
   # ----------------------------------------------------------------------------------
   # Gitleaks (Secret Scanning)
@@ -658,3 +666,7 @@ jobs:
         uses: ./.github/actions/cancel-workflow-on-failure
         with:
           reason: "Gitleaks secret scan failed"
+          failed-job: "Run Gitleaks (Secret Scan)"
+          failed-step: "🔍 Run gitleaks scan"
+          failure-tool: "gitleaks"
+          failure-summary: "Secrets detected in repository"

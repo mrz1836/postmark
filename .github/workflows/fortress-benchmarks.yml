@@ -394,7 +394,7 @@ jobs:
         with:
           name: bench-stats-${{ matrix.os }}-${{ matrix.go-version }}
           path: bench-stats-${{ matrix.os }}-${{ matrix.go-version }}.json
-          retention-days: 1
+          retention-days: 7
 
       # --------------------------------------------------------------------
       # Upload raw benchmark results

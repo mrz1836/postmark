@@ -620,9 +620,9 @@ jobs:
           if [[ "${{ env.GO_PRE_COMMIT_ALL_FILES }}" == "true" ]]; then
             echo "🔍 Mode: All Files"
             echo "  • Executing checks on all repository files"
-            echo "  • Command: go-pre-commit run --all-files"
+            echo "  • Command: go-pre-commit run --skip lint --all-files"
             echo ""
-            CHECKS_OUTPUT=$("${{ env.GO_PRE_COMMIT_BINARY }}" run --all-files 2>&1) || CHECKS_EXIT=$?
+            CHECKS_OUTPUT=$("${{ env.GO_PRE_COMMIT_BINARY }}" run --skip lint --all-files 2>&1) || CHECKS_EXIT=$?
           elif [[ "${{ steps.detect-files.outputs.files_found }}" == "true" ]]; then
             CHANGED_FILES="${{ steps.detect-files.outputs.changed_files }}"
             DETECTION_METHOD="${{ steps.detect-files.outputs.detection_method }}"
@@ -657,8 +657,8 @@ jobs:
             done < "$TEMP_FILE_LIST"
 
             if [[ -n "$SAFE_FILE_LIST" ]]; then
-              echo "  • Command: go-pre-commit run --files <escaped_file_list>"
-              CHECKS_OUTPUT=$("${{ env.GO_PRE_COMMIT_BINARY }}" run --files "$SAFE_FILE_LIST" 2>&1) || CHECKS_EXIT=$?
+              echo "  • Command: go-pre-commit run --skip lint --files <escaped_file_list>"
+              CHECKS_OUTPUT=$("${{ env.GO_PRE_COMMIT_BINARY }}" run --skip lint --files "$SAFE_FILE_LIST" 2>&1) || CHECKS_EXIT=$?
             else
               echo "  • No valid files to process, skipping"
               CHECKS_OUTPUT="No files to process"
@@ -671,9 +671,9 @@ jobs:
             echo "🔍 Mode: Staged Files (Fallback)"
             echo "  • No changed files detected, falling back to staged files"
             echo "  • This will likely result in 'No files to check' in CI"
-            echo "  • Command: go-pre-commit run"
+            echo "  • Command: go-pre-commit run --skip lint"
             echo ""
-            CHECKS_OUTPUT=$("${{ env.GO_PRE_COMMIT_BINARY }}" run 2>&1) || CHECKS_EXIT=$?
+            CHECKS_OUTPUT=$("${{ env.GO_PRE_COMMIT_BINARY }}" run --skip lint 2>&1) || CHECKS_EXIT=$?
           fi
 
           # Clean and filter output (colors should be disabled but handle any remaining codes)
@@ -894,3 +894,7 @@ jobs:
         uses: ./.github/actions/cancel-workflow-on-failure
         with:
           reason: "Pre-commit checks failed"
+          failed-job: "Pre-commit Checks"
+          failed-step: "🚀 Run pre-commit checks"
+          failure-tool: "go-pre-commit"
+          failure-summary: "Pre-commit validation failed"

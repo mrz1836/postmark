@@ -465,7 +465,7 @@ jobs:
         with:
           artifact-name: "tests-section"
           artifact-path: "tests-section.md"
-          retention-days: "1"
+          retention-days: "7"
           if-no-files-found: "warn"
 
       - name: 📋 Set Output Content
