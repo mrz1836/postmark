@@ -697,7 +697,7 @@ jobs:
         with:
           artifact-name: "statistics-section"
           artifact-path: "statistics-section.md"
-          retention-days: "1"
+          retention-days: "7"
           if-no-files-found: "warn"
 
       - name: 📋 Set Output Content

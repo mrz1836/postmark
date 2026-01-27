@@ -51,6 +51,9 @@ on:
       CODECOV_TOKEN:
         description: "Codecov token for uploading coverage (required when coverage-provider is codecov)"
         required: false
+      GH_PAT_TOKEN:
+        description: "Personal access token for enhanced GitHub API access (optional, falls back to github-token)"
+        required: false
 
 # Security: Restrict default permissions (jobs must explicitly request what they need)
 permissions: {}
@@ -2511,4 +2514,4 @@ jobs:
         with:
           name: coverage-stats-codecov
           path: coverage-stats-codecov-*.json
-          retention-days: 1
+          retention-days: 7
