@@ -110,7 +110,6 @@ jobs:
     timeout-minutes: 30 # Prevent hung tests
     permissions:
       contents: read # Read repository content for testing
-      actions: write # Required for workflow cancellation on failure
     strategy:
       fail-fast: true
       matrix: ${{ fromJSON(inputs.test-matrix) }}
@@ -443,16 +442,3 @@ jobs:
           name: coverage-data
           path: coverage.txt
           retention-days: 1
-
-      # --------------------------------------------------------------------
-      # Cancel workflow on failure (save CI resources)
-      # --------------------------------------------------------------------
-      - name: 🚨 Cancel workflow on failure
-        if: failure()
-        uses: ./.github/actions/cancel-workflow-on-failure
-        with:
-          reason: "Test matrix failed (${{ matrix.name }})"
-          failed-job: "Test (${{ matrix.name }})"
-          failed-step: "🧪 Run tests"
-          failure-tool: "go test"
-          failure-summary: "Test failures detected on ${{ matrix.os }} Go ${{ matrix.go-version }}"

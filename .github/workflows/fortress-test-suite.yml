@@ -127,7 +127,6 @@ jobs:
     if: inputs.go-tests-enabled == 'true'
     permissions:
       contents: read
-      actions: write # Required for workflow cancellation on failure
     uses: ./.github/workflows/fortress-test-matrix.yml
     with:
       env-json: ${{ inputs.env-json }}
@@ -155,7 +154,6 @@ jobs:
     if: inputs.go-tests-enabled == 'true' && inputs.fuzz-testing-enabled == 'true'
     permissions:
       contents: read
-      actions: write # Required for workflow cancellation on failure
     uses: ./.github/workflows/fortress-test-fuzz.yml
     with:
       env-json: ${{ inputs.env-json }}

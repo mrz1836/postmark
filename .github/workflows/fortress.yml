@@ -170,7 +170,6 @@ jobs:
       needs.setup.outputs.is-fork-pr != 'true'
     permissions:
       contents: read # Read repository content for security scanning
-      actions: write # Required for workflow cancellation on failure
     uses: ./.github/workflows/fortress-security-scans.yml
     with:
       env-json: ${{ needs.load-env.outputs.env-json }}
@@ -199,7 +198,6 @@ jobs:
       needs.setup.outputs.pre-commit-enabled == 'true'
     permissions:
       contents: read # Read repository content for pre-commit checks
-      actions: write # Required for workflow cancellation on failure
     uses: ./.github/workflows/fortress-pre-commit.yml
     with:
       env-json: ${{ needs.load-env.outputs.env-json }}
@@ -220,7 +218,6 @@ jobs:
       (needs.warm-cache.result == 'success' || needs.warm-cache.result == 'skipped')
     permissions:
       contents: read # Read repository content for code quality checks
-      actions: write # Required for workflow cancellation on failure
     uses: ./.github/workflows/fortress-code-quality.yml
     with:
       env-json: ${{ needs.load-env.outputs.env-json }}
@@ -251,7 +248,7 @@ jobs:
       pages: write # Required: Coverage workflow needs to deploy to GitHub Pages
       id-token: write # Required: Coverage workflow needs GitHub Pages authentication
       statuses: write # Required: Coverage workflow needs to create commit status checks
-      actions: write # Required: Manage/cancel child test workflows (test matrix & fuzz tests); artifact access only needs actions: read
+      actions: read # Required: Coverage workflow needs to access artifacts from workflow runs
     uses: ./.github/workflows/fortress-test-suite.yml
     with:
       code-coverage-enabled: ${{ needs.setup.outputs.code-coverage-enabled }}
@@ -321,25 +318,87 @@ jobs:
     runs-on: ${{ needs.setup.outputs.primary-runner }}
     steps:
       # --------------------------------------------------------------------
-      # Build a summary table for the UI (always runs)
+      # Build results summary showing job statuses
       # --------------------------------------------------------------------
       - name: 📊 Build results summary
+        env:
+          SETUP_RESULT: ${{ needs.setup.result }}
+          MAGEX_RESULT: ${{ needs.test-magex.result }}
+          CACHE_RESULT: ${{ needs.warm-cache.result }}
+          SECURITY_RESULT: ${{ needs.security.result }}
+          QUALITY_RESULT: ${{ needs.code-quality.result }}
+          PRECOMMIT_RESULT: ${{ needs.pre-commit.result }}
+          TESTS_RESULT: ${{ needs.test-suite.result }}
+          BENCH_RESULT: ${{ needs.benchmarks.result }}
+          CACHE_ENABLED: ${{ needs.setup.outputs.cache-warming-enabled }}
+          PRECOMMIT_ENABLED: ${{ needs.setup.outputs.pre-commit-enabled }}
+          TESTS_ENABLED: ${{ needs.setup.outputs.go-tests-enabled }}
         run: |
           {
             echo "## 🚦 Workflow Results"
             echo ""
             echo "| Component | Result | Status |"
             echo "|-----------|--------|--------|"
-            echo "| 🎯 Setup | ${{ needs.setup.result }} | Required |"
-            echo "| 🪄 MAGE-X | ${{ needs.test-magex.result }} | Required |"
-            echo "| 💾 Warm Cache | ${{ needs.warm-cache.result }} | ${{ needs.setup.outputs.cache-warming-enabled == 'true' && 'Required' || 'Disabled' }} |"
-            echo "| 🔒 Security | ${{ needs.security.result }} | Required |"
-            echo "| 📊 Code Quality | ${{ needs.code-quality.result }} | Required |"
-            echo "| 🪝 Pre-commit | ${{ needs.pre-commit.result }} | ${{ needs.setup.outputs.pre-commit-enabled == 'true' && 'Required' || 'Skipped' }} |"
-            echo "| 🧪 Test Suite | ${{ needs.test-suite.result }} | ${{ needs.setup.outputs.go-tests-enabled == 'true' && 'Required' || 'Skipped' }} |"
-            echo "| 🏃 Benchmarks | ${{ needs.benchmarks.result }} | Optional ⚠️ |"
+
+            # Helper function to determine result display
+            get_result_display() {
+              local result="$1"
+
+              if [[ "$result" == "failure" ]]; then
+                echo "❌ **FAILED**"
+              elif [[ "$result" == "cancelled" ]]; then
+                echo "⏹️ cancelled"
+              elif [[ "$result" == "skipped" ]]; then
+                echo "⏭️ skipped"
+              elif [[ "$result" == "success" ]]; then
+                echo "✅ success"
+              else
+                echo "$result"
+              fi
+            }
+
+            # Setup
+            SETUP_DISPLAY=$(get_result_display "$SETUP_RESULT")
+            echo "| 🎯 Setup | $SETUP_DISPLAY | Required |"
+
+            # MAGE-X
+            MAGEX_DISPLAY=$(get_result_display "$MAGEX_RESULT")
+            echo "| 🪄 MAGE-X | $MAGEX_DISPLAY | Required |"
+
+            # Warm Cache
+            CACHE_REQ="Disabled"
+            [[ "$CACHE_ENABLED" == "true" ]] && CACHE_REQ="Required"
+            CACHE_DISPLAY=$(get_result_display "$CACHE_RESULT")
+            echo "| 💾 Warm Cache | $CACHE_DISPLAY | $CACHE_REQ |"
+
+            # Security
+            SECURITY_DISPLAY=$(get_result_display "$SECURITY_RESULT")
+            echo "| 🔒 Security | $SECURITY_DISPLAY | Required |"
+
+            # Code Quality
+            QUALITY_DISPLAY=$(get_result_display "$QUALITY_RESULT")
+            echo "| 📊 Code Quality | $QUALITY_DISPLAY | Required |"
+
+            # Pre-commit
+            PRECOMMIT_REQ="Skipped"
+            [[ "$PRECOMMIT_ENABLED" == "true" ]] && PRECOMMIT_REQ="Required"
+            PRECOMMIT_DISPLAY=$(get_result_display "$PRECOMMIT_RESULT")
+            echo "| 🪝 Pre-commit | $PRECOMMIT_DISPLAY | $PRECOMMIT_REQ |"
+
+            # Test Suite
+            TESTS_REQ="Skipped"
+            [[ "$TESTS_ENABLED" == "true" ]] && TESTS_REQ="Required"
+            TESTS_DISPLAY=$(get_result_display "$TESTS_RESULT")
+            echo "| 🧪 Test Suite | $TESTS_DISPLAY | $TESTS_REQ |"
+
+            # Benchmarks (always optional)
+            BENCH_DISPLAY=$(get_result_display "$BENCH_RESULT")
+            echo "| 🏃 Benchmarks | $BENCH_DISPLAY | Optional ⚠️ |"
+
             echo ""
-            if [[ "${{ needs.benchmarks.result }}" == "failure" ]]; then
+
+            # Add explanatory note if benchmarks failed
+            if [[ "$BENCH_RESULT" == "failure" ]]; then
               echo "⚠️ **Note**: Benchmarks failed but are currently non-blocking."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

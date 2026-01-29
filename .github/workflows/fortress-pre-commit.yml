@@ -54,7 +54,6 @@ jobs:
     runs-on: ${{ inputs.primary-runner }}
     permissions:
       contents: read
-      actions: write # Required for workflow cancellation on failure
     outputs:
       pre-commit-version: ${{ steps.pre-commit-version.outputs.version }}
       checks-executed: ${{ steps.run-checks.outputs.executed }}
@@ -885,16 +884,3 @@ jobs:
           artifact-name: cache-stats-pre-commit
           artifact-path: cache-stats-pre-commit.json
           retention-days: 1
-
-      # --------------------------------------------------------------------
-      # Cancel workflow on failure (save CI resources)
-      # --------------------------------------------------------------------
-      - name: 🚨 Cancel workflow on failure
-        if: failure()
-        uses: ./.github/actions/cancel-workflow-on-failure
-        with:
-          reason: "Pre-commit checks failed"
-          failed-job: "Pre-commit Checks"
-          failed-step: "🚀 Run pre-commit checks"
-          failure-tool: "go-pre-commit"
-          failure-summary: "Pre-commit validation failed"
