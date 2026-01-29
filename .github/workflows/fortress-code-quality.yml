@@ -66,7 +66,6 @@ jobs:
     runs-on: ${{ inputs.primary-runner }}
     permissions:
       contents: read
-      actions: write # Required for workflow cancellation on failure
     steps:
       # --------------------------------------------------------------------
       # Checkout code (required for local actions)
@@ -270,19 +269,6 @@ jobs:
           echo "❌ Go vet detected static analysis issues"
           exit 1
 
-      # --------------------------------------------------------------------
-      # Cancel workflow on failure (save CI resources)
-      # --------------------------------------------------------------------
-      - name: 🚨 Cancel workflow on failure
-        if: failure()
-        uses: ./.github/actions/cancel-workflow-on-failure
-        with:
-          reason: "Go vet static analysis failed"
-          failed-job: "Go Vet Static Analysis"
-          failed-step: "🔍 Go vet (sequential)"
-          failure-tool: "go vet"
-          failure-summary: "Static analysis issues detected"
-
   # ----------------------------------------------------------------------------------
   # Lint (Code Linting)
   # ----------------------------------------------------------------------------------
@@ -293,7 +279,6 @@ jobs:
     runs-on: ${{ inputs.primary-runner }}
     permissions:
       contents: read
-      actions: write # Required for workflow cancellation on failure
     outputs:
       golangci-lint-version: ${{ steps.golangci-lint-version.outputs.version }}
     steps:
@@ -572,19 +557,6 @@ jobs:
           echo "❌ Lint detected code quality issues"
           exit 1
 
-      # --------------------------------------------------------------------
-      # Cancel workflow on failure (save CI resources)
-      # --------------------------------------------------------------------
-      - name: 🚨 Cancel workflow on failure
-        if: failure()
-        uses: ./.github/actions/cancel-workflow-on-failure
-        with:
-          reason: "Code linting (golangci-lint) failed"
-          failed-job: "Lint Code"
-          failed-step: "✨ Run golangci-lint"
-          failure-tool: "golangci-lint"
-          failure-summary: "Linting issues detected"
-
   # ----------------------------------------------------------------------------------
   # YAML/JSON Format Validation (MAGE-X)
   # ----------------------------------------------------------------------------------
@@ -594,7 +566,6 @@ jobs:
     runs-on: ${{ inputs.primary-runner }}
     permissions:
       contents: read
-      actions: write # Required for workflow cancellation on failure
     outputs:
       yamlfmt-version: ${{ steps.yamlfmt-version.outputs.version }}
     steps:
@@ -809,16 +780,3 @@ jobs:
         run: |
           echo "❌ Format check detected YAML/JSON formatting issues"
           exit 1
-
-      # --------------------------------------------------------------------
-      # Cancel workflow on failure (save CI resources)
-      # --------------------------------------------------------------------
-      - name: 🚨 Cancel workflow on failure
-        if: failure()
-        uses: ./.github/actions/cancel-workflow-on-failure
-        with:
-          reason: "YAML/JSON format validation failed"
-          failed-job: "YAML/JSON Format Validation"
-          failed-step: "🔍 Check YAML/JSON formatting with MAGE-X"
-          failure-tool: "yamlfmt"
-          failure-summary: "Formatting issues detected"

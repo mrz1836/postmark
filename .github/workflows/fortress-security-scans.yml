@@ -71,7 +71,6 @@ jobs:
     if: ${{ inputs.enable-nancy }}
     permissions:
       contents: read
-      actions: write # Required for workflow cancellation on failure
     steps:
       # --------------------------------------------------------------------
       # Checkout code (required for local actions)
@@ -259,19 +258,6 @@ jobs:
           echo "❌ Nancy detected vulnerabilities in dependencies"
           exit 1
 
-      # --------------------------------------------------------------------
-      # Cancel workflow on failure (save CI resources)
-      # --------------------------------------------------------------------
-      - name: 🚨 Cancel workflow on failure
-        if: failure()
-        uses: ./.github/actions/cancel-workflow-on-failure
-        with:
-          reason: "Nancy dependency security check failed"
-          failed-job: "Ask Nancy (Dependency Checks)"
-          failed-step: "🔍 Ask Nancy"
-          failure-tool: "nancy"
-          failure-summary: "Vulnerabilities detected in dependencies"
-
   # ----------------------------------------------------------------------------------
   # Govulncheck (Vulnerability Checks)
   # ----------------------------------------------------------------------------------
@@ -281,7 +267,6 @@ jobs:
     if: ${{ inputs.enable-govulncheck }}
     permissions:
       contents: read
-      actions: write # Required for workflow cancellation on failure
     steps:
       # --------------------------------------------------------------------
       # Checkout code (required for local actions)
@@ -512,19 +497,6 @@ jobs:
           echo "❌ Govulncheck detected vulnerabilities in dependencies"
           exit 1
 
-      # --------------------------------------------------------------------
-      # Cancel workflow on failure (save CI resources)
-      # --------------------------------------------------------------------
-      - name: 🚨 Cancel workflow on failure
-        if: failure()
-        uses: ./.github/actions/cancel-workflow-on-failure
-        with:
-          reason: "Govulncheck vulnerability scan failed"
-          failed-job: "Run govulncheck (Vulnerability Scan)"
-          failed-step: "🔐 Run govulncheck"
-          failure-tool: "govulncheck"
-          failure-summary: "Go vulnerabilities detected"
-
   # ----------------------------------------------------------------------------------
   # Gitleaks (Secret Scanning)
   # ----------------------------------------------------------------------------------
@@ -534,7 +506,6 @@ jobs:
     if: ${{ inputs.enable-gitleaks }}
     permissions:
       contents: read
-      actions: write # Required for workflow cancellation on failure
     steps:
       # --------------------------------------------------------------------
       # Checkout code (required for local actions)
@@ -657,16 +628,3 @@ jobs:
         run: |
           echo "❌ Gitleaks detected secrets in the repository"
           exit 1
-
-      # --------------------------------------------------------------------
-      # Cancel workflow on failure (save CI resources)
-      # --------------------------------------------------------------------
-      - name: 🚨 Cancel workflow on failure
-        if: failure()
-        uses: ./.github/actions/cancel-workflow-on-failure
-        with:
-          reason: "Gitleaks secret scan failed"
-          failed-job: "Run Gitleaks (Secret Scan)"
-          failed-step: "🔍 Run gitleaks scan"
-          failure-tool: "gitleaks"
-          failure-summary: "Secrets detected in repository"

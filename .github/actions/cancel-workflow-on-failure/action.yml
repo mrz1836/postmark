@@ -1,6 +1,13 @@
 # ------------------------------------------------------------------------------------
 #  Cancel Workflow On Failure (Composite Action) (GoFortress)
 #
+#  NOTE: This action is currently NOT IN USE. It was disabled because GitHub's
+#  cancel API overwrites the "failed" status with "cancelled" on the job that
+#  triggered it, making it impossible to identify which job actually failed.
+#
+#  The action is kept for potential future use in scenarios where the trade-off
+#  (faster cancellation vs clear failure visibility) is acceptable.
+#
 #  Purpose: Provide a reusable action that cancels the entire workflow run when
 #  a critical job fails. This prevents wasting CI resources on parallel jobs
 #  that will ultimately be invalidated by an earlier failure.
