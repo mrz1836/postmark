@@ -110,7 +110,7 @@ jobs:
       # --------------------------------------------------------------------
       - name: 💾 Restore golangci-lint analysis cache
         id: cache-golangci-lint-analysis
-        uses: actions/cache/restore@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: ${{ env.GOLANGCI_LINT_CACHE }}
           key: ${{ inputs.primary-runner }}-golangci-lint-analysis-${{ hashFiles('.golangci.json', env.GO_SUM_FILE) }}-${{ env.GO_PRE_COMMIT_GOLANGCI_LINT_VERSION }}
@@ -125,7 +125,7 @@ jobs:
       - name: 💾 Restore go-pre-commit binary cache
         id: go-pre-commit-cache
         if: env.GO_PRE_COMMIT_USE_LOCAL != 'true'
-        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: |
             ~/.cache/go-pre-commit-bin
@@ -139,7 +139,7 @@ jobs:
       # --------------------------------------------------------------------
       - name: 💾 Restore go-pre-commit tools cache
         id: go-pre-commit-tools-cache
-        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: |
             ~/.cache/go-pre-commit-tools
@@ -690,6 +690,8 @@ jobs:
 
           if [ "${CHECKS_EXIT:-0}" -ne 0 ]; then
             echo "❌ Pre-commit checks failed with exit code: ${CHECKS_EXIT}"
+            # Emit GitHub annotation for visibility at top of summary
+            echo "::error title=Pre-commit Checks Failed::Code quality issues detected - formatting, linting, or other pre-commit checks failed"
             exit ${CHECKS_EXIT}
           fi
 

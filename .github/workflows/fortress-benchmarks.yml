@@ -264,7 +264,7 @@ jobs:
 
           # Fail the step if benchmarks failed or contained errors
           if [ "$BENCH_STATUS" = "failure" ]; then
-            echo "::error::Benchmark execution failed or contained errors"
+            echo "::error title=Benchmark Failed::Benchmark execution failed or contained errors (panic, fatal, or timeout) - see job summary for details"
             exit 1
           fi
 
