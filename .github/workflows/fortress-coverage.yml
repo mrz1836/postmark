@@ -192,7 +192,7 @@ jobs:
       - name: 💾 Restore go-coverage binary cache (production)
         id: go-coverage-cache
         if: env.GO_COVERAGE_USE_LOCAL != 'true'
-        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: |
             ~/.cache/go-coverage-bin
@@ -203,7 +203,7 @@ jobs:
       - name: 💾 Restore go-coverage binary cache (local)
         id: go-coverage-local-cache
         if: env.GO_COVERAGE_USE_LOCAL == 'true'
-        uses: actions/cache@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: |
             ~/.cache/go-coverage-local

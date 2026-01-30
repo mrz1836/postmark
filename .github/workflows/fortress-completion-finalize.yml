@@ -72,13 +72,31 @@ jobs:
           TIMING_DATA: ${{ inputs.timing-data }}
         run: |
           echo "📋 Parsing workflow inputs..."
-          echo "$ALL_INPUTS" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
-            echo "INPUT_$key=$value" >> $GITHUB_ENV
+          # Note: Replace hyphens with underscores in keys for GitHub Actions expression compatibility
+          # Use heredoc syntax to safely handle multiline values (e.g., env-json)
+          echo "$ALL_INPUTS" | jq -r 'to_entries | .[] | @base64' | while read -r entry; do
+            decoded=$(echo "$entry" | base64 -d)
+            key=$(echo "$decoded" | jq -r '.key')
+            value=$(echo "$decoded" | jq -r '.value')
+            normalized_key=$(echo "$key" | tr '-' '_')
+            {
+              echo "INPUT_$normalized_key<<EOF_INPUT_$normalized_key"
+              echo "$value"
+              echo "EOF_INPUT_$normalized_key"
+            } >> $GITHUB_ENV
           done
 
           echo "📋 Parsing timing data..."
-          echo "$TIMING_DATA" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
-            echo "TIMING_$key=$value" >> $GITHUB_ENV
+          echo "$TIMING_DATA" | jq -r 'to_entries | .[] | @base64' | while read -r entry; do
+            decoded=$(echo "$entry" | base64 -d)
+            key=$(echo "$decoded" | jq -r '.key')
+            value=$(echo "$decoded" | jq -r '.value')
+            normalized_key=$(echo "$key" | tr '-' '_')
+            {
+              echo "TIMING_$normalized_key<<EOF_TIMING_$normalized_key"
+              echo "$value"
+              echo "EOF_TIMING_$normalized_key"
+            } >> $GITHUB_ENV
           done
 
       # --------------------------------------------------------------------
@@ -109,39 +127,101 @@ jobs:
           continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
 
       # --------------------------------------------------------------------
-      # Initialize final report with header
+      # Initialize final report with STATUS BANNER FIRST
       # --------------------------------------------------------------------
       - name: 📝 Initialize Final Report
         run: |
-          # Create the initial completion report with professional structure
+          # Determine overall workflow status
+          WORKFLOW_FAILED=false
+          FAILED_JOBS=""
+
+          # Check each critical job result
+          if [[ "${{ env.INPUT_setup_result }}" != "success" && "${{ env.INPUT_setup_result }}" != "skipped" ]]; then
+            WORKFLOW_FAILED=true
+            FAILED_JOBS="$FAILED_JOBS- ❌ Setup Configuration\n"
+          fi
+          if [[ "${{ env.INPUT_test_magex_result }}" != "success" && "${{ env.INPUT_test_magex_result }}" != "skipped" ]]; then
+            WORKFLOW_FAILED=true
+            FAILED_JOBS="$FAILED_JOBS- ❌ Test MAGE-X\n"
+          fi
+          if [[ "${{ env.INPUT_pre_commit_result }}" != "success" && "${{ env.INPUT_pre_commit_result }}" != "skipped" ]]; then
+            WORKFLOW_FAILED=true
+            FAILED_JOBS="$FAILED_JOBS- ❌ Pre-commit Checks\n"
+          fi
+          if [[ "${{ env.INPUT_security_result }}" != "success" && "${{ env.INPUT_security_result }}" != "skipped" ]]; then
+            WORKFLOW_FAILED=true
+            FAILED_JOBS="$FAILED_JOBS- ❌ Security Scans\n"
+          fi
+          if [[ "${{ env.INPUT_code_quality_result }}" != "success" && "${{ env.INPUT_code_quality_result }}" != "skipped" ]]; then
+            WORKFLOW_FAILED=true
+            FAILED_JOBS="$FAILED_JOBS- ❌ Code Quality\n"
+          fi
+          if [[ "${{ env.INPUT_test_suite_result }}" != "success" && "${{ env.INPUT_test_suite_result }}" != "skipped" ]]; then
+            WORKFLOW_FAILED=true
+            FAILED_JOBS="$FAILED_JOBS- ❌ Test Suite\n"
+          fi
+          if [[ "${{ env.INPUT_benchmarks_result }}" != "success" && "${{ env.INPUT_benchmarks_result }}" != "skipped" ]]; then
+            WORKFLOW_FAILED=true
+            FAILED_JOBS="$FAILED_JOBS- ❌ Benchmarks\n"
+          fi
+          if [[ "${{ env.INPUT_release_result }}" != "success" && "${{ env.INPUT_release_result }}" != "skipped" ]]; then
+            WORKFLOW_FAILED=true
+            FAILED_JOBS="$FAILED_JOBS- ❌ Release\n"
+          fi
+
           SUMMARY_TIME=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
 
           {
-            echo "# 🏰 GoFortress Workflow Completion Report"
-            echo "_Generated at: ${SUMMARY_TIME}_"
+            # =================================================================
+            # STATUS BANNER (Always visible at top - immediate failure visibility)
+            # =================================================================
+            echo "# 🏁 Workflow Complete"
             echo ""
-            echo "**GoFortress System Version:** \`${{ env.INPUT_gofortress-version }}\` | **Released:** ${{ env.INPUT_gofortress-released }}"
+
+            if [[ "$WORKFLOW_FAILED" == "true" ]]; then
+              echo "> [!CAUTION]"
+              echo "> ## 🔴 WORKFLOW FAILED"
+              echo ">"
+              echo "> **Failed Jobs:**"
+              echo -e "$FAILED_JOBS" | while IFS= read -r line; do echo "> $line"; done
+              echo ""
+            else
+              echo "> [!TIP]"
+              echo "> ## 🟢 ALL CHECKS PASSED"
+            fi
             echo ""
-            echo "---"
+            echo "| Job | Result |"
+            echo "|-----|--------|"
+            echo "| Setup Configuration | $([ "${{ env.INPUT_setup_result }}" = "success" ] && echo "✅ Passed" || ([ "${{ env.INPUT_setup_result }}" = "skipped" ] && echo "⏭️ Skipped" || echo "❌ Failed")) |"
+            echo "| Test MAGE-X | $([ "${{ env.INPUT_test_magex_result }}" = "success" ] && echo "✅ Passed" || ([ "${{ env.INPUT_test_magex_result }}" = "skipped" ] && echo "⏭️ Skipped" || echo "❌ Failed")) |"
+            echo "| Pre-commit Checks | $([ "${{ env.INPUT_pre_commit_result }}" = "success" ] && echo "✅ Passed" || ([ "${{ env.INPUT_pre_commit_result }}" = "skipped" ] && echo "⏭️ Skipped" || echo "❌ Failed")) |"
+            echo "| Security Scans | $([ "${{ env.INPUT_security_result }}" = "success" ] && echo "✅ Passed" || ([ "${{ env.INPUT_security_result }}" = "skipped" ] && echo "⏭️ Skipped" || echo "❌ Failed")) |"
+            echo "| Code Quality | $([ "${{ env.INPUT_code_quality_result }}" = "success" ] && echo "✅ Passed" || ([ "${{ env.INPUT_code_quality_result }}" = "skipped" ] && echo "⏭️ Skipped" || echo "❌ Failed")) |"
+            echo "| Test Suite | $([ "${{ env.INPUT_test_suite_result }}" = "success" ] && echo "✅ Passed" || ([ "${{ env.INPUT_test_suite_result }}" = "skipped" ] && echo "⏭️ Skipped" || echo "❌ Failed")) |"
+            # Only show benchmarks if attempted
+            if [[ "${{ env.INPUT_benchmarks_result }}" != "skipped" ]]; then
+              echo "| Benchmarks | $([ "${{ env.INPUT_benchmarks_result }}" = "success" ] && echo "✅ Passed" || echo "❌ Failed") |"
+            fi
+            # Only show release if attempted
+            if [[ "${{ env.INPUT_release_result }}" != "skipped" ]]; then
+              echo "| Release | $([ "${{ env.INPUT_release_result }}" = "success" ] && echo "✅ Passed" || echo "❌ Failed") |"
+            fi
             echo ""
-            echo "## 🏁 Workflow Summary"
+            echo "**Duration:** ${TIMING_total_minutes:-0}m ${TIMING_total_seconds:-0}s"
             echo ""
-            echo "### ⏱️ Execution Timeline"
-            echo "| Metric | Value |"
-            echo "|--------|-------|"
-            echo "| **Total Duration** | ${TIMING_total_minutes:-0}m ${TIMING_total_seconds:-0}s |"
-            echo "| **Start Time** | ${{ env.INPUT_start-time }} |"
-            echo "| **End Time** | $(date -u +"%Y-%m-%dT%H:%M:%SZ") |"
-            echo "| **Workflow** | ${{ github.workflow }} |"
-            echo "| **Run Number** | ${{ github.run_number }} |"
-            echo "| **Trigger** | ${{ github.event_name }} |"
-            echo "| **Source** | ${{ github.event.pull_request.head.repo && github.event.pull_request.head.repo.full_name == github.repository && 'Internal' || 'Fork' }} |"
+            echo "**Generated:** $SUMMARY_TIME"
             echo ""
-            echo "<br><br>"
+
+            # =================================================================
+            # DETAILED SECTIONS (Collapsed by default)
+            # =================================================================
+            echo "<details>"
+            echo "<summary>📊 Statistics (Cache, Coverage, LOC)</summary>"
+            echo ""
           } > final-report.md
 
       # --------------------------------------------------------------------
-      # Append report sections from sub-workflows
+      # Append report sections from sub-workflows (inside collapsed details)
       # --------------------------------------------------------------------
       - name: 📄 Append Statistics Section
         if: always()
@@ -155,6 +235,15 @@ jobs:
           ${{ inputs.statistics-report }}
           EOF
           fi
+          # Close statistics details, open tests details
+          {
+            echo ""
+            echo "</details>"
+            echo ""
+            echo "<details>"
+            echo "<summary>🧪 Test Analysis</summary>"
+            echo ""
+          } >> final-report.md
 
       - name: 📄 Append Tests Section
         if: always()
@@ -168,100 +257,57 @@ jobs:
           ${{ inputs.tests-report }}
           EOF
           fi
+          # Close tests details
+          echo "" >> final-report.md
+          echo "</details>" >> final-report.md
+          echo "" >> final-report.md
 
       # --------------------------------------------------------------------
-      # Generate job results summary
+      # Generate Job Results Summary
       # --------------------------------------------------------------------
       - name: 🔧 Generate Job Results Summary
         id: job-results
         run: |
-          {
-            echo ""
-            echo "<br><br>"
-            echo ""
-            echo "### ✅ Workflow Status Overview"
-            echo "| Job | Status | Result |"
-            echo "|-----|--------|--------|"
-            echo "| 🎯 Setup Configuration | ${{ env.INPUT_setup-result }} | $([ "${{ env.INPUT_setup-result }}" = "success" ] && echo "✅" || echo "❌") |"
-            echo "| 🪄 Test MAGE-X | ${{ env.INPUT_test-magex-result }} | $([ "${{ env.INPUT_test-magex-result }}" = "success" ] && echo "✅" || echo "❌") |"
-            echo "| 🪝 Pre-commit Checks | ${{ env.INPUT_pre-commit-result }} | $([ "${{ env.INPUT_pre-commit-result }}" = "success" ] && echo "✅" || echo "❌") |"
-            echo "| 🔒 Security Scans | ${{ env.INPUT_security-result }} | $([ "${{ env.INPUT_security-result }}" = "success" ] && echo "✅" || echo "❌") |"
-            echo "| 📊 Code Quality | ${{ env.INPUT_code-quality-result }} | $([ "${{ env.INPUT_code-quality-result }}" = "success" ] && echo "✅" || echo "❌") |"
-            echo "| 🧪 Test Suite | ${{ env.INPUT_test-suite-result }} | $([ "${{ env.INPUT_test-suite-result }}" = "success" ] && echo "✅" || ([ "${{ env.INPUT_test-suite-result }}" = "skipped" ] && echo "⏭️" || echo "❌")) |"
-          } >> final-report.md
-
-          # Only show benchmarks row if it was attempted
-          if [[ "${{ env.INPUT_benchmarks-result }}" != "skipped" ]]; then
-            echo "| 🏃 Benchmarks | ${{ env.INPUT_benchmarks-result }} | $([ "${{ env.INPUT_benchmarks-result }}" = "success" ] && echo "✅" || echo "❌") |" >> final-report.md
-          fi
-
-          # Always show status-check result
-          echo "| 🎯 All Tests Passed | ${{ env.INPUT_status-check-result }} | $([ "${{ env.INPUT_status-check-result }}" = "success" ] && echo "✅" || echo "❌") |" >> final-report.md
-
-          # Only show release row if it was attempted
-          if [[ "${{ env.INPUT_release-result }}" != "skipped" ]]; then
-            echo "| 🚀 Release | ${{ env.INPUT_release-result }} | $([ "${{ env.INPUT_release-result }}" = "success" ] && echo "✅" || echo "❌") |" >> final-report.md
-          fi
-
-          echo "" >> final-report.md
-
-          # Add fork PR specific information if this is a fork PR
-          if [[ "${{ env.INPUT_is-fork-pr }}" == "true" ]]; then
+          # Add fork PR specific information if this is a fork PR (collapsed by default)
+          if [[ "${{ env.INPUT_is_fork_pr }}" == "true" ]]; then
             {
-              echo ""
-              echo "## 🔐 Fork PR Security Status"
+              echo "<details>"
+              echo "<summary>🔐 Fork PR Security Status</summary>"
               echo ""
               echo "⚠️ **This workflow ran on a FORK Pull Request**"
               echo ""
-              echo "**Security Mode:** \`${{ env.INPUT_fork-security-mode }}\`"
+              echo "**Security Mode:** \`${{ env.INPUT_fork_security_mode }}\`"
               echo ""
-              echo "### Jobs Status for Fork PR"
-              echo "**✅ Jobs That Ran Successfully:**"
-              echo "- Setup & Configuration"
-              echo "- MAGE-X Testing"
-              echo "- Code Quality Checks"
-              echo "- Pre-Commit System"
-              echo "- $([ "${{ env.INPUT_benchmarks-result }}" != "skipped" ] && echo "Benchmarks" || echo "_(Benchmarks were skipped)_")"
+              echo "**Jobs That Ran:** Setup, MAGE-X Testing, Code Quality, Pre-Commit$([ "${{ env.INPUT_benchmarks_result }}" != "skipped" ] && echo ", Benchmarks")"
               echo ""
-              echo "**⛔ Jobs Skipped for Security:**"
-              echo "- **Security Scans** - Requires secrets (\`OSSI_TOKEN\`, \`OSSI_USERNAME\`, \`GITLEAKS_LICENSE\`)"
-              echo "- **Test Suite** - Requires \`CODECOV_TOKEN\` for coverage uploads"
-              echo "- **Release** - PRs cannot trigger releases (tags only)"
+              echo "**Jobs Skipped (Require Secrets):** Security Scans, Test Suite with Coverage, Release"
               echo ""
-              echo "### Why Were Jobs Skipped?"
-              echo "Fork PRs have restricted access to repository secrets for security:"
-              echo "- ✅ Prevents credential theft from malicious fork PRs"
-              echo "- ✅ Protects external service tokens (OSSI, Codecov)"
-              echo "- ✅ Prevents unauthorized access through workflow modifications"
+              echo "</details>"
               echo ""
-              echo "**Note for Fork Contributors:**"
-              echo "Repository maintainers will review your PR and can manually run security scans if needed."
-              echo "All code quality checks and tests that don't require secrets have already run successfully!"
             } >> final-report.md
           fi
 
           # Add release-specific information if this was a tag push
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             {
-              echo ""
-              echo "## 📦 Release Information"
+              echo "### 📦 Release Information"
             } >> final-report.md
 
-            if [[ "${{ env.INPUT_release-result }}" == "success" ]]; then
+            if [[ "${{ env.INPUT_release_result }}" == "success" ]]; then
               {
                 echo "✅ Release ${{ github.ref_name }} created successfully!"
                 echo "[View Release](https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }})"
               } >> final-report.md
-            elif [[ "${{ env.INPUT_release-result }}" == "skipped" ]]; then
+            elif [[ "${{ env.INPUT_release_result }}" == "skipped" ]]; then
               echo "⏭️ Release was skipped (likely due to test failures)" >> final-report.md
-            elif [[ "${{ env.INPUT_release-result }}" == "failure" ]]; then
+            elif [[ "${{ env.INPUT_release_result }}" == "failure" ]]; then
               echo "❌ Release creation failed - check logs for details" >> final-report.md
             fi
             echo "" >> final-report.md
           fi
 
       # --------------------------------------------------------------------
-      # Generate performance insights
+      # Generate performance insights (collapsed)
       # --------------------------------------------------------------------
       - name: 🚀 Generate Performance Insights
         id: performance-insights
@@ -271,70 +317,40 @@ jobs:
           TOTAL_SECONDS=${TIMING_total_seconds:-0}
 
           {
-            echo "<br><br>"
+            echo "<details>"
+            echo "<summary>⏱️ Performance Insights</summary>"
             echo ""
-            echo "### 📊 Workflow Analytics & Insights"
           } >> final-report.md
 
           # Overall timing insights
           if [[ $TOTAL_DURATION -gt 600 ]]; then
-            echo "- ⚠️  **Warning**: Workflow took longer than 10 minutes (${TOTAL_MINUTES}m ${TOTAL_SECONDS}s)" >> final-report.md
+            echo "- ⚠️ Workflow took longer than 10 minutes (${TOTAL_MINUTES}m ${TOTAL_SECONDS}s)" >> final-report.md
           elif [[ $TOTAL_DURATION -gt 300 && $TOTAL_DURATION -le 600 ]]; then
-            echo "- ℹ️  Workflow completed in ${TOTAL_MINUTES}m ${TOTAL_SECONDS}s." >> final-report.md
+            echo "- ℹ️ Workflow completed in ${TOTAL_MINUTES}m ${TOTAL_SECONDS}s" >> final-report.md
           elif [[ $TOTAL_DURATION -gt 180 && $TOTAL_DURATION -le 300 ]]; then
-            echo "- 🎉  **Great Performance**: Workflow completed in under 5 minutes (${TOTAL_MINUTES}m ${TOTAL_SECONDS}s)!" >> final-report.md
+            echo "- 🎉 Great: Under 5 minutes (${TOTAL_MINUTES}m ${TOTAL_SECONDS}s)" >> final-report.md
           elif [[ $TOTAL_DURATION -le 180 ]]; then
-            echo "- 🚀  **Excellent Performance**: Workflow completed in under 3 minutes!" >> final-report.md
+            echo "- 🚀 Excellent: Under 3 minutes!" >> final-report.md
           fi
 
           # Standard insights
           {
-            echo "- **Parallel Jobs**: Multiple jobs ran in parallel to optimize execution time"
-            echo "- **Matrix Strategy**: Tests ran across $(echo '${{ env.INPUT_test-matrix }}' | jq '.include | length') configurations"
+            echo "- **Parallel Jobs**: Multiple jobs ran in parallel"
+            echo "- **Matrix Strategy**: $(echo '${{ env.INPUT_test_matrix }}' | jq '.include | length') configurations"
           } >> final-report.md
 
-          if [ "${{ env.ENABLE_VERBOSE_TEST_OUTPUT }}" != "true" ]; then
-            echo "- **Verbose Output**: Disabled to speed up test execution" >> final-report.md
-          else
-            echo "- **Verbose Output**: Enabled for detailed test logs" >> final-report.md
-          fi
-
-          # Add failure analysis if any job failed
-          FAILED_JOBS=""
-          [ "${{ env.INPUT_setup-result }}" != "success" ] && [ "${{ env.INPUT_setup-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Setup Configuration, "
-          [ "${{ env.INPUT_test-magex-result }}" != "success" ] && [ "${{ env.INPUT_test-magex-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Test MAGE-X, "
-          [ "${{ env.INPUT_pre-commit-result }}" != "success" ] && [ "${{ env.INPUT_pre-commit-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Pre-commit Checks, "
-          [ "${{ env.INPUT_security-result }}" != "success" ] && [ "${{ env.INPUT_security-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Security Scans, "
-          [ "${{ env.INPUT_code-quality-result }}" != "success" ] && [ "${{ env.INPUT_code-quality-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Code Quality, "
-          [ "${{ env.INPUT_test-suite-result }}" != "success" ] && [ "${{ env.INPUT_test-suite-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Test Suite, "
-          [ "${{ env.INPUT_benchmarks-result }}" != "success" ] && [ "${{ env.INPUT_benchmarks-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Benchmarks, "
-          [ "${{ env.INPUT_status-check-result }}" != "success" ] && [ "${{ env.INPUT_status-check-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Status Check, "
-          [ "${{ env.INPUT_release-result }}" != "success" ] && [ "${{ env.INPUT_release-result }}" != "skipped" ] && FAILED_JOBS="${FAILED_JOBS}Release, "
-
-          if [ -n "$FAILED_JOBS" ]; then
-            FAILED_JOBS=${FAILED_JOBS%, }  # Remove trailing comma
-            {
-              echo "<br><br>"
-              echo ""
-              echo "### ⚠️ Failed Components"
-              echo "The following jobs did not complete successfully:"
-              echo "- ${FAILED_JOBS}"
-            } >> final-report.md
-          fi
+          echo "" >> final-report.md
+          echo "</details>" >> final-report.md
+          echo "" >> final-report.md
 
       # --------------------------------------------------------------------
-      # Add professional footer
+      # Add compact footer
       # --------------------------------------------------------------------
       - name: ✅ Add Report Footer
         run: |
-          # Add professional footer before finalizing
           {
-            echo "<br><br>"
-            echo ""
             echo "---"
-            echo "🎯 **Workflow completed** at $(date -u +"%H:%M:%S UTC")"
-            echo ""
-            echo "_GoFortress CI/CD Pipeline - Built Strong. Tested Harder._"
+            echo "_🎯 Workflow completed at $(date -u +"%H:%M:%S UTC") — GoFortress CI/CD Pipeline_"
           } >> final-report.md
 
       # --------------------------------------------------------------------

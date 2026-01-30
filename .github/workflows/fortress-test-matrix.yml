@@ -280,6 +280,11 @@ jobs:
           echo "test-exit-code=$TEST_EXIT_CODE" >> $GITHUB_OUTPUT
           echo "🏁 Test execution completed with exit code: $TEST_EXIT_CODE"
 
+          # Emit GitHub annotation for test failures (surfaces at top of Actions UI)
+          if [[ "$TEST_EXIT_CODE" != "0" ]]; then
+            echo "::error title=Test Suite Failed (${{ matrix.name }})::Tests failed on ${{ matrix.os }} with Go ${{ matrix.go-version }} - see job summary for details"
+          fi
+
           # Calculate duration
           TEST_END=$(date +%s)
           TEST_DURATION=$((TEST_END - ${{ steps.test-timer.outputs.test-start }}))
