@@ -696,6 +696,11 @@ jobs:
             --input "$COVERAGE_FILE" \
             --output "$OUTPUT_DIR"; then
             echo "✅ Main coverage processing completed successfully"
+
+            # Copy raw coverage file for main download
+            echo "📥 Copying coverage.out for main download..."
+            cp "$COVERAGE_FILE" "$OUTPUT_DIR/coverage.out"
+            echo "✅ coverage.out copied to main directory"
           else
             echo "❌ Main coverage processing failed"
             exit 1
@@ -791,6 +796,11 @@ jobs:
             --input "$COVERAGE_FILE" \
             --output "$BRANCH_OUTPUT_DIR"; then
             echo "✅ Branch-specific coverage processing completed successfully"
+
+            # Copy raw coverage file for branch download
+            echo "📥 Copying coverage.out for branch download..."
+            cp "$COVERAGE_FILE" "$BRANCH_OUTPUT_DIR/coverage.out"
+            echo "✅ coverage.out copied to branch directory"
           else
             echo "❌ Branch-specific coverage processing failed"
             exit 1
@@ -866,6 +876,78 @@ jobs:
               echo "   This indicates the deployment contains too many files"
               echo "   Expected size: <100KB for coverage files only"
             fi
+          fi
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # --------------------------------------------------------------------
+      # Enforce Coverage Threshold
+      # Fails the build if coverage drops below GO_COVERAGE_THRESHOLD
+      # Exclusions are already applied during coverage generation
+      # --------------------------------------------------------------------
+      - name: 🎯 Enforce Coverage Threshold
+        if: env.GO_COVERAGE_THRESHOLD != '' && env.GO_COVERAGE_THRESHOLD != '0' && env.GO_COVERAGE_THRESHOLD != '0.0'
+        run: |
+          echo "🎯 Enforcing coverage threshold..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          THRESHOLD="${{ env.GO_COVERAGE_THRESHOLD }}"
+          echo "📊 Coverage threshold: ${THRESHOLD}%"
+
+          # Find coverage file
+          REPO_ROOT="$(pwd)"
+          COVERAGE_FILE=""
+          COVERAGE_LOCATIONS=(
+            "$REPO_ROOT/coverage-artifacts/coverage-data/${{ inputs.coverage-file }}"
+            "$REPO_ROOT/coverage-artifacts/${{ inputs.coverage-file }}"
+            "$REPO_ROOT/${{ inputs.coverage-file }}"
+          )
+
+          for location in "${COVERAGE_LOCATIONS[@]}"; do
+            if [[ -f "$location" ]]; then
+              COVERAGE_FILE="$location"
+              break
+            fi
+          done
+
+          if [[ -z "$COVERAGE_FILE" ]]; then
+            echo "⚠️ Coverage file not found for threshold check"
+            echo "🔍 Searched in:"
+            for location in "${COVERAGE_LOCATIONS[@]}"; do
+              echo "  - $location"
+            done
+            echo "❌ Cannot enforce threshold without coverage data"
+            exit 1
+          fi
+
+          echo "📄 Coverage file: $COVERAGE_FILE"
+          echo ""
+
+          # Use go-coverage parse to check threshold
+          # This command returns non-zero exit code if coverage is below threshold
+          echo "🔍 Checking coverage against threshold..."
+          if "$GO_COVERAGE_BINARY" parse \
+            --file "$COVERAGE_FILE" \
+            --threshold "$THRESHOLD"; then
+            echo ""
+            echo "✅ Coverage threshold check PASSED"
+          else
+            EXIT_CODE=$?
+            echo ""
+            echo "❌ Coverage threshold check FAILED"
+            echo ""
+            echo "🚨 BUILD FAILURE: Coverage is below the required threshold of ${THRESHOLD}%"
+            echo ""
+            echo "📝 To fix this:"
+            echo "  1. Add more tests to increase coverage"
+            echo "  2. Or adjust GO_COVERAGE_THRESHOLD in .env.base/.env.custom"
+            echo ""
+            echo "📊 Coverage exclusions (applied during test generation):"
+            echo "  - GO_COVERAGE_EXCLUDE_PATHS: ${{ env.GO_COVERAGE_EXCLUDE_PATHS }}"
+            echo "  - GO_COVERAGE_EXCLUDE_FILES: ${{ env.GO_COVERAGE_EXCLUDE_FILES }}"
+            echo "  - GO_COVERAGE_EXCLUDE_TESTS: ${{ env.GO_COVERAGE_EXCLUDE_TESTS }}"
+            echo "  - GO_COVERAGE_EXCLUDE_GENERATED: ${{ env.GO_COVERAGE_EXCLUDE_GENERATED }}"
+            exit $EXIT_CODE
           fi
 
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1143,6 +1225,7 @@ jobs:
             "coverage-flat.svg"
             "coverage-flat-square.svg"
             "coverage-for-the-badge.svg"
+            "coverage.out"
           )
 
           # Selectively copy coverage files to avoid nested directory structures
@@ -1198,6 +1281,7 @@ jobs:
               "coverage-flat-square.svg"
               "coverage-for-the-badge.svg"
               "coverage.html"
+              "coverage.out"
               "index.html"
               "dashboard.html"
               "coverage-data.json"
@@ -1666,7 +1750,7 @@ jobs:
             echo "📋 Updating root coverage files for main branch (with filtering)..."
 
             # Define allowed root files explicitly
-            ALLOWED_ROOT_FILES=("index.html" "coverage.html" "coverage.svg" "coverage-flat.svg" "coverage-flat-square.svg" "coverage-for-the-badge.svg" ".nojekyll" "data" "assets")
+            ALLOWED_ROOT_FILES=("index.html" "coverage.html" "coverage.svg" "coverage-flat.svg" "coverage-flat-square.svg" "coverage-for-the-badge.svg" "coverage.out" ".nojekyll" "data" "assets")
 
             # Copy only allowed root files
             for file in "${ALLOWED_ROOT_FILES[@]}"; do
@@ -1731,7 +1815,7 @@ jobs:
           rm -rf "$TEMP_STAGING"/*
 
           # Define allowed branch files
-          ALLOWED_BRANCH_FILES=("index.html" "coverage.html" "coverage.svg" "coverage-flat.svg" "coverage-flat-square.svg" "coverage-for-the-badge.svg" "data" "assets")
+          ALLOWED_BRANCH_FILES=("index.html" "coverage.html" "coverage.svg" "coverage-flat.svg" "coverage-flat-square.svg" "coverage-for-the-badge.svg" "coverage.out" "data" "assets")
 
           # Copy branch-specific files from deployment directory to staging first
           if [[ -d "$DEPLOY_DIR/coverage/branch/$BRANCH_NAME" ]]; then
