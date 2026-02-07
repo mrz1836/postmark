@@ -333,40 +333,12 @@ magex help
 </details>
 
 <details>
-<summary><strong><code>GitHub Workflows</code></strong></summary>
+<summary><strong>GitHub Workflows</strong></summary>
 <br/>
 
+All workflows are driven by modular configuration in [`.github/env/`](.github/env/README.md) — no YAML editing required.
 
-### 🎛️ The Workflow Control Center
-
-All GitHub Actions workflows in this repository are powered by configuration files: [**.env.base**](.github/.env.base) (default configuration) and optionally **.env.custom** (project-specific overrides) – your one-stop shop for tweaking CI/CD behavior without touching a single YAML file! 🎯
-
-**Configuration Files:**
-- **[.env.base](.github/.env.base)** – Default configuration that works for most Go projects
-- **[.env.custom](.github/.env.custom)** – Optional project-specific overrides
-
-This magical file controls everything from:
-- **🚀 Go version matrix** (test on multiple versions or just one)
-- **🏃 Runner selection** (Ubuntu or macOS, your wallet decides)
-- **🔬 Feature toggles** (coverage, fuzzing, linting, race detection, benchmarks)
-- **🛡️ Security tool versions** (gitleaks, nancy, govulncheck)
-- **🤖 Auto-merge behaviors** (how aggressive should the bots be?)
-- **🏷️ PR management rules** (size labels, auto-assignment, welcome messages)
-
-> **Pro tip:** Want to disable code coverage? Just add `ENABLE_CODE_COVERAGE=false` to your .env.custom to override the default in .env.base and push. No YAML archaeology required!
-
-<br/>
-
-| Workflow Name                                                                      | Description                                                                                                            |
-|------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
-| [auto-merge-on-approval.yml](.github/workflows/auto-merge-on-approval.yml)         | Automatically merges PRs after approval and all required checks, following strict rules.                               |
-| [codeql-analysis.yml](.github/workflows/codeql-analysis.yml)                       | Analyzes code for security vulnerabilities using [GitHub CodeQL](https://codeql.github.com/).                          |
-| [dependabot-auto-merge.yml](.github/workflows/dependabot-auto-merge.yml)           | Automatically merges [Dependabot](https://github.com/dependabot) PRs that meet all requirements.                       |
-| [fortress.yml](.github/workflows/fortress.yml)                                     | Runs the GoFortress security and testing workflow, including linting, testing, releasing, and vulnerability checks.    |
-| [pull-request-management.yml](.github/workflows/pull-request-management.yml)       | Labels PRs by branch prefix, assigns a default user if none is assigned, and welcomes new contributors with a comment. |
-| [scorecard.yml](.github/workflows/scorecard.yml)                                   | Runs [OpenSSF](https://openssf.org/) Scorecard to assess supply chain security.                                        |
-| [stale.yml](.github/workflows/stale-check.yml)                                     | Warns about (and optionally closes) inactive issues and PRs on a schedule or manual trigger.                           |
-| [sync-labels.yml](.github/workflows/sync-labels.yml)                               | Keeps GitHub labels in sync with the declarative manifest at [`.github/labels.yml`](./.github/labels.yml).             |
+**[View all workflows and the control center →](.github/docs/workflows.md)**
 
 </details>
 
