@@ -31,7 +31,7 @@ docs(README): improve installation instructions
 
 ## 📝 go-pre-commit System (Optional)
 
-To ensure consistent commit messages and code quality, we use the external **go-pre-commit** tool that checks formatting, linting, and other standards before allowing a commit. The system is configured via `.github/.env.base` and can be installed with:
+To ensure consistent commit messages and code quality, we use the external **go-pre-commit** tool that checks formatting, linting, and other standards before allowing a commit. The system is configured via `.github/env/` and can be installed with:
 
 ```bash
 # Install the external tool

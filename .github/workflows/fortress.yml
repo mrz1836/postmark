@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------------
 #  🏰 GoFortress - Enterprise-grade CI/CD fortress for Go applications
 #
-#  Version: 1.6.0 | Released: 2026-01-29
+#  Version: 1.7.0 | Released: 2026-02-06
 #
 #  Built Strong. Tested Harder.
 #
@@ -18,7 +18,7 @@
 #  🚀 Release Citadel: Automated deployments with GoReleaser and GoDocs
 #
 #  Maintainer: @mrz1836
-#  Repository: https://github.com/mrz1836/go-fortress
+#  Repository: https://github.com/mrz1836/go-broadcast
 #
 #  Copyright 2025 @mrz1836
 #  SPDX-License-Identifier: MIT
@@ -81,11 +81,8 @@ jobs:
     outputs:
       env-json: ${{ steps.load-env.outputs.env-json }}
       primary-runner: ${{ steps.load-env.outputs.primary-runner }}
-      base-file-found: ${{ steps.load-env.outputs.base-file-found }}
-      custom-file-found: ${{ steps.load-env.outputs.custom-file-found }}
-      base-var-count: ${{ steps.load-env.outputs.base-var-count }}
-      custom-var-count: ${{ steps.load-env.outputs.custom-var-count }}
-      config-mode: ${{ steps.load-env.outputs.config-mode }}
+      env-file-count: ${{ steps.load-env.outputs.env-file-count }}
+      var-count: ${{ steps.load-env.outputs.var-count }}
     steps:
       # --------------------------------------------------------------------
       # Check out code to access env file
@@ -94,8 +91,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
-            .github/.env.base
-            .github/.env.custom
+            .github/env
             .github/actions/load-env
 
       # --------------------------------------------------------------------
@@ -117,11 +113,8 @@ jobs:
     with:
       env-json: ${{ needs.load-env.outputs.env-json }}
       primary-runner: ${{ needs.load-env.outputs.primary-runner }}
-      base-file-found: ${{ needs.load-env.outputs.base-file-found }}
-      custom-file-found: ${{ needs.load-env.outputs.custom-file-found }}
-      base-var-count: ${{ needs.load-env.outputs.base-var-count }}
-      custom-var-count: ${{ needs.load-env.outputs.custom-var-count }}
-      config-mode: ${{ needs.load-env.outputs.config-mode }}
+      env-file-count: ${{ needs.load-env.outputs.env-file-count }}
+      var-count: ${{ needs.load-env.outputs.var-count }}
     secrets:
       github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
   # ----------------------------------------------------------------------------------

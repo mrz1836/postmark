@@ -20,31 +20,16 @@ on:
         description: "Primary runner OS"
         required: true
         type: string
-      base-file-found:
-        description: "Whether .env.base file was found"
-        required: false
-        type: string
-        default: "false"
-      custom-file-found:
-        description: "Whether .env.custom file was found"
-        required: false
-        type: string
-        default: "false"
-      base-var-count:
-        description: "Number of variables loaded from .env.base"
+      env-file-count:
+        description: "Number of env files loaded"
         required: false
         type: string
         default: "0"
-      custom-var-count:
-        description: "Number of variables loaded from .env.custom"
+      var-count:
+        description: "Total number of variables loaded"
         required: false
         type: string
         default: "0"
-      config-mode:
-        description: "Configuration mode: new or base-only"
-        required: false
-        type: string
-        default: "new"
     secrets:
       github-token:
         description: "GitHub token for API access"
@@ -630,16 +615,10 @@ jobs:
           echo "- **Workflow Start Time**: ${{ steps.timer.outputs.start-time }}" >> $GITHUB_STEP_SUMMARY
 
           # Configuration File Discovery
-          BASE_FOUND="${{ inputs.base-file-found }}"
-          CUSTOM_FOUND="${{ inputs.custom-file-found }}"
-          BASE_COUNT="${{ inputs.base-var-count }}"
-          CUSTOM_COUNT="${{ inputs.custom-var-count }}"
+          ENV_FILE_COUNT="${{ inputs.env-file-count }}"
+          VAR_COUNT="${{ inputs.var-count }}"
 
-          if [[ "$CUSTOM_FOUND" == "true" ]]; then
-            echo "- **Configuration Sources**: Base (\`.env.base\`: $BASE_COUNT vars) + Custom (\`.env.custom\`: $CUSTOM_COUNT overrides)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- **Configuration Sources**: Base only (\`.env.base\`: $BASE_COUNT variables)" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "- **Configuration Sources**: Modular env files ($ENV_FILE_COUNT files, $VAR_COUNT variables)" >> $GITHUB_STEP_SUMMARY
 
           echo "- **Total Environment Variables**: $ENV_COUNT" >> $GITHUB_STEP_SUMMARY
           echo "- **Enabled Features**: $ENABLED_FEATURES" >> $GITHUB_STEP_SUMMARY

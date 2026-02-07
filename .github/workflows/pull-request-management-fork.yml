@@ -3,7 +3,7 @@
 #
 #  Purpose: Automate labeling, assignment, and welcoming of pull requests for forked PRs.
 #
-#  Configuration: All settings are loaded from .env.base and .env.custom files for
+#  Configuration: All settings are loaded from modular .github/env/ files for
 #  centralized management across all workflows.
 #
 #  Triggers: Pull request events (opened, reopened, ready for review, closed, synchronize)
@@ -27,25 +27,25 @@
 #
 #  ┌─────────────────────────────────────────────────────────────────────────────┐
 #  │ WHY pull_request_target IS SAFE HERE:                                       │
-#  │                                                                              │
+#  │                                                                             │
 #  │  ✅ Uses pull_request_target trigger for write permissions                  │
 #  │     (Required for: labels, comments, assignees)                             │
-#  │                                                                              │
+#  │                                                                             │
 #  │  ✅ CRITICAL: Only checks out BASE branch code, NEVER PR head               │
 #  │     (Prevents malicious code execution from untrusted forks)                │
-#  │                                                                              │
+#  │                                                                             │
 #  │  ✅ Fork detection uses full_name comparison for accuracy                   │
 #  │     (Not owner.login which fails for org members)                           │
-#  │                                                                              │
+#  │                                                                             │
 #  │  ✅ All code execution happens from trusted base repository                 │
 #  │     (No code from PR is ever executed)                                      │
-#  │                                                                              │
+#  │                                                                             │
 #  │  ✅ No secrets exposed to fork PRs (GITHUB_TOKEN only)                      │
 #  │     (No custom secrets accessible to malicious actors)                      │
-#  │                                                                              │
+#  │                                                                             │
 #  │  ✅ Sparse checkout minimizes attack surface                                │
 #  │     (Only config files checked out, no executable code)                     │
-#  │                                                                              │
+#  │                                                                             │
 #  │  ✅ Least-privilege permissions model                                       │
 #  │     (Jobs get elevated permissions only where absolutely needed)            │
 #  └─────────────────────────────────────────────────────────────────────────────┘
@@ -108,7 +108,7 @@ concurrency:
 # --------------------------------------------------------------------
 # Environment Variables
 # --------------------------------------------------------------------
-# Note: Configuration variables are loaded from .env.base and .env.custom files
+# Note: Configuration variables are loaded from modular .github/env/ files
 
 jobs:
   # ------------------------------------------------------------
@@ -117,6 +117,8 @@ jobs:
   load-env:
     name: 🌍 Load Environment (Base Repo)
     runs-on: ubuntu-latest
+    # Early exit: Skip entire workflow for same-repo PRs (handled by main workflow)
+    if: github.event.pull_request.head.repo.full_name != github.repository
     # No write perms here
     permissions:
       contents: read
@@ -125,14 +127,14 @@ jobs:
     steps:
       # ┌─────────────────────────────────────────────────────────────────────┐
       # │ SECURITY SCANNERS: This checkout is SAFE despite pull_request_target│
-      # │                                                                      │
-      # │ Justification:                                                       │
+      # │                                                                     │
+      # │ Justification:                                                      │
       # │  - Only checks out TRUSTED base branch (ref: github.base_ref)       │
       # │  - NEVER checks out PR head code from untrusted fork                │
       # │  - Implements recommended two-workflow security pattern             │
       # │  - Uses sparse checkout (minimal attack surface)                    │
       # │  - No executable code from PR is ever run                           │
-      # │                                                                      │
+      # │                                                                     │
       # │ Pattern: Two-workflow security model (see SECURITY.md)              │
       # │ References: githubactions:S7631, semgrep:github-actions-checkout    │
       # └─────────────────────────────────────────────────────────────────────┘
@@ -162,8 +164,7 @@ jobs:
           ref: ${{ github.base_ref }}
           fetch-depth: 1
           sparse-checkout: |
-            .github/.env.base
-            .github/.env.custom
+            .github/env
             .github/actions/load-env
 
       - name: 🌍 Load environment variables

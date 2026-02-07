@@ -333,7 +333,7 @@ jobs:
               if [[ "${{ env.ENABLE_GO_TESTS }}" == "false" ]]; then
                 echo "| **Test Suite** | ❌ Disabled - Set ENABLE_GO_TESTS=true to enable |"
                 echo "| **Reason** | Tests are disabled via configuration flag |"
-                echo "| **Note** | Enable ENABLE_GO_TESTS in .env.custom or .env.base to run tests |"
+                echo "| **Note** | Enable ENABLE_GO_TESTS in .github/env/00-core.env to run tests |"
               else
                 echo "| **Test Suite** | ⚠️ Skipped - No test statistics available |"
                 echo "| **Reason** | Tests may have been skipped for fork PR security restrictions |"

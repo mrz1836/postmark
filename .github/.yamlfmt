@@ -74,6 +74,7 @@ exclude:
   - "**/*.swo"
   - "**/*~"
 
-  # Build configs
+  # Environment files
+  - "**/env/**"
   - "**/.env.base"
   - "**/.env.custom"

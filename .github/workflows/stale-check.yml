@@ -5,7 +5,7 @@
 #  This workflow identifies stale items, marks them with a label, and eventually closes
 #  them if no activity occurs within the configured timeframe.
 #
-#  Configuration: All settings are loaded from .env.base and .env.custom files for
+#  Configuration: All settings are loaded from modular .github/env/ files for
 #  centralized management across all workflows.
 #
 #  Triggers:
@@ -56,8 +56,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
-            .github/.env.base
-            .github/.env.custom
+            .github/env
             .github/actions/load-env
 
       # --------------------------------------------------------------------

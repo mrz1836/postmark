@@ -1,16 +1,15 @@
 # ------------------------------------------------------------------------------------
 #  Load Environment Variables Composite Action
 #
-#  Purpose: Loads and parses environment configuration from .env.base and .env.custom
+#  Purpose: Loads and parses environment configuration from modular .github/env/
 #           files into JSON format for use across all GitHub Actions workflows.
 #
 #  Loading Strategy:
-#    1. Load .env.base (required) - contains default configuration
-#    2. Load .env.custom (optional) - project-specific overrides
-#    3. Merge with custom values taking precedence
+#    1. Run .github/env/load-env.sh to load all modular env files
+#    2. Extract exported variables to JSON for workflow compatibility
 #
 #  Outputs:
-#    env-json: JSON object containing all merged environment variables
+#    env-json: JSON object containing all environment variables
 #
 #  Usage:
 #    - uses: ./.github/actions/load-env
@@ -21,7 +20,7 @@
 # ------------------------------------------------------------------------------------
 
 name: "Load Environment Variables"
-description: "Loads and merges environment variables from .env.base and .env.custom files"
+description: "Loads environment variables from modular .github/env/ files"
 
 outputs:
   env-json:
@@ -30,154 +29,70 @@ outputs:
   primary-runner:
     description: "Primary runner OS extracted from environment variables"
     value: ${{ steps.load-env.outputs.primary-runner }}
-  base-file-found:
-    description: "Whether .env.base file was found"
-    value: ${{ steps.load-env.outputs.base-file-found }}
-  custom-file-found:
-    description: "Whether .env.custom file was found"
-    value: ${{ steps.load-env.outputs.custom-file-found }}
-  base-var-count:
-    description: "Number of variables loaded from .env.base"
-    value: ${{ steps.load-env.outputs.base-var-count }}
-  custom-var-count:
-    description: "Number of variables loaded from .env.custom"
-    value: ${{ steps.load-env.outputs.custom-var-count }}
-  config-mode:
-    description: "Configuration mode: new (base+custom) or base-only"
-    value: ${{ steps.load-env.outputs.config-mode }}
+  env-file-count:
+    description: "Number of env files loaded"
+    value: ${{ steps.load-env.outputs.env-file-count }}
+  var-count:
+    description: "Total number of variables loaded"
+    value: ${{ steps.load-env.outputs.var-count }}
 
 runs:
   using: "composite"
   steps:
     # --------------------------------------------------------------------
-    # Load and merge environment configuration files
+    # Load environment configuration from modular env files
     # --------------------------------------------------------------------
-    - name: 🔧 Load environment variables
+    - name: 🌍 Load environment variables
       id: load-env
       shell: bash
       run: |
         echo "📋 Loading environment configuration..."
 
-        # Function to parse .env file to JSON
-        parse_env_file() {
-          local file="$1"
-          if [[ -f "$file" ]]; then
-            cat "$file" | \
-              grep -v '^#' | \
-              grep -v '^$' | \
-              sed 's/#.*$//' | \
-              sed 's/[[:space:]]*$//' | \
-              jq -Rs 'split("\n") | map(select(length > 0) | split("=") | select(length == 2) | {(.[0]): .[1]}) | add // {}'
-          else
-            echo "{}"
-          fi
-        }
+        LOADER_SCRIPT=".github/env/load-env.sh"
 
-        # Function to validate environment variable names and values
-        validate_env_vars() {
-          local json="$1"
-          local source="$2"
-
-          echo "🔒 Validating environment variables from $source..."
-
-          # Extract all keys and values
-          local keys=$(echo "$json" | jq -r 'keys[]')
-
-          while IFS= read -r key; do
-            # Skip empty keys
-            [[ -z "$key" ]] && continue
-
-            # Validate key name: must match ^[A-Z_][A-Z0-9_]*$
-            if ! echo "$key" | grep -qE '^[A-Z_][A-Z0-9_]*$'; then
-              echo "❌ ERROR: Invalid environment variable name in $source: '$key'" >&2
-              echo "   Variable names must start with uppercase letter or underscore" >&2
-              echo "   and contain only uppercase letters, numbers, and underscores" >&2
-              exit 1
-            fi
-
-            # Get the value for this key
-            local value=$(echo "$json" | jq -r --arg k "$key" '.[$k]')
-
-            # Validate value length (max 10000 chars to prevent DoS)
-            if [[ ${#value} -gt 10000 ]]; then
-              echo "❌ ERROR: Environment variable value too long in $source: '$key'" >&2
-              echo "   Maximum length is 10000 characters, got ${#value}" >&2
-              exit 1
-            fi
-
-            # Check for suspicious command injection patterns
-            if echo "$value" | grep -qE '`|\$\(|\$\{|;|&|\||<\(|>|<|\\|'"'"'|"|\x00|[[:cntrl:]]'; then
-              echo "⚠️  WARNING: Potentially unsafe characters in $source variable '$key'" >&2
-              echo "   Value contains backticks, command substitution, or shell metacharacters" >&2
-              echo "   Value will be treated as a literal string during extraction" >&2
-            fi
-
-          done <<< "$keys"
-
-          echo "✅ All variables in $source passed validation"
-        }
-
-        # Load configuration files in order of precedence
-        BASE_JSON="{}"
-        CUSTOM_JSON="{}"
-
-        # 1. Load base configuration (required)
-        if [[ -f ".github/.env.base" ]]; then
-          echo "📂 Loading base configuration from .env.base..."
-          BASE_JSON=$(parse_env_file ".github/.env.base")
-          BASE_COUNT=$(echo "$BASE_JSON" | jq 'keys | length')
-          echo "✅ Loaded $BASE_COUNT base configuration variables"
-
-          # Validate base configuration
-          validate_env_vars "$BASE_JSON" ".env.base"
-        else
-          echo "❌ ERROR: Required .env.base file not found!" >&2
+        if [[ ! -f "$LOADER_SCRIPT" ]]; then
+          echo "❌ ERROR: Environment loader not found at $LOADER_SCRIPT" >&2
           exit 1
         fi
 
-        # 2. Load custom overrides (optional)
-        if [[ -f ".github/.env.custom" ]]; then
-          echo "🎨 Loading custom configuration from .env.custom..."
-          CUSTOM_JSON=$(parse_env_file ".github/.env.custom")
-          CUSTOM_COUNT=$(echo "$CUSTOM_JSON" | jq 'keys | length')
-          echo "✅ Loaded $CUSTOM_COUNT custom override variables"
-
-          # Validate custom configuration
-          validate_env_vars "$CUSTOM_JSON" ".env.custom"
-        else
-          echo "ℹ️  No custom configuration file found (this is optional)"
+        # Source the loader script with verbose output
+        echo "🔄 Loading modular environment files..."
+        if ! source "$LOADER_SCRIPT" --verbose; then
+          echo "❌ ERROR: Failed to load environment configuration" >&2
+          exit 1
         fi
 
-        # 3. Merge configurations with precedence: custom > base
-        echo "🔀 Merging configuration files..."
-        ENV_JSON=$(echo "$BASE_JSON $CUSTOM_JSON" | jq -s 'add')
+        # Extract all exported variables to JSON for workflow compatibility
+        echo "📦 Extracting environment variables to JSON..."
+        ENV_JSON=$(env | grep -E '^[A-Z_][A-Z0-9_]*=' | while IFS='=' read -r key value; do
+          # Escape special characters in value for JSON
+          escaped_value=$(printf '%s' "$value" | jq -Rs '.')
+          echo "{\"$key\": $escaped_value}"
+        done | jq -s 'add // {}')
+
+        TOTAL_COUNT=$(echo "$ENV_JSON" | jq 'keys | length')
+        echo "✅ Extracted $TOTAL_COUNT variables"
+
+        # Count env files loaded
+        ENV_FILE_COUNT=$(ls -1 .github/env/*.env 2>/dev/null | wc -l | tr -d ' ')
 
         # Validate merged configuration
         if [[ -z "$ENV_JSON" ]] || [[ "$ENV_JSON" == "null" ]] || [[ "$ENV_JSON" == "{}" ]]; then
           echo "❌ ERROR: No valid environment variables found!" >&2
-          echo "   Please ensure .env.base exists with valid configuration." >&2
           exit 1
         fi
 
-        # Output final merged configuration
+        # Output final configuration
         echo "env-json<<EOF" >> $GITHUB_OUTPUT
         echo "$ENV_JSON" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
 
         # Log summary
-        TOTAL_COUNT=$(echo "$ENV_JSON" | jq 'keys | length')
         echo "✅ Environment configuration loaded successfully"
         echo "📊 Total variables: $TOTAL_COUNT"
+        echo "📁 Env files loaded: $ENV_FILE_COUNT"
 
-        # Show merge summary if both files were used
-        if [[ -f ".github/.env.custom" ]] && [[ "$CUSTOM_COUNT" -gt 0 ]]; then
-          echo "📊 Configuration sources:"
-          echo "   - Base (.env.base): $BASE_COUNT variables"
-          echo "   - Custom (.env.custom): $CUSTOM_COUNT overrides"
-          echo "   - Total merged: $TOTAL_COUNT variables"
-        fi
-
-        # Extract and validate PRIMARY_RUNNER for backward compatibility
+        # Extract and validate PRIMARY_RUNNER
         PRIMARY_RUNNER=$(echo "$ENV_JSON" | jq -r '.PRIMARY_RUNNER')
         if [[ -z "$PRIMARY_RUNNER" ]] || [[ "$PRIMARY_RUNNER" == "null" ]]; then
           echo "❌ ERROR: PRIMARY_RUNNER is not set in the configuration!" >&2
@@ -186,33 +101,6 @@ runs:
         echo "primary-runner=$PRIMARY_RUNNER" >> $GITHUB_OUTPUT
         echo "🖥️  Primary runner: $PRIMARY_RUNNER"
 
-        # Output configuration file discovery information
-        BASE_FOUND="false"
-        CUSTOM_FOUND="false"
-        CONFIG_MODE="new"
-
-        if [[ -f ".github/.env.base" ]]; then
-          BASE_FOUND="true"
-        fi
-
-        if [[ -f ".github/.env.custom" ]]; then
-          CUSTOM_FOUND="true"
-        fi
-
-        # Determine configuration mode
-        if [[ "$CUSTOM_FOUND" == "true" ]]; then
-          CONFIG_MODE="new"
-        else
-          CONFIG_MODE="base-only"
-        fi
-
-        # Set default counts for missing variables
-        BASE_COUNT=${BASE_COUNT:-0}
-        CUSTOM_COUNT=${CUSTOM_COUNT:-0}
-
-        # Output all the discovery information
-        echo "base-file-found=$BASE_FOUND" >> $GITHUB_OUTPUT
-        echo "custom-file-found=$CUSTOM_FOUND" >> $GITHUB_OUTPUT
-        echo "base-var-count=$BASE_COUNT" >> $GITHUB_OUTPUT
-        echo "custom-var-count=$CUSTOM_COUNT" >> $GITHUB_OUTPUT
-        echo "config-mode=$CONFIG_MODE" >> $GITHUB_OUTPUT
+        # Output counts
+        echo "env-file-count=$ENV_FILE_COUNT" >> $GITHUB_OUTPUT
+        echo "var-count=$TOTAL_COUNT" >> $GITHUB_OUTPUT

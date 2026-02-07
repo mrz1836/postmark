@@ -56,7 +56,7 @@ That's it! The pre-commit hooks are now active and will run on every commit.
 
 ## Configuration
 
-go-pre-commit uses environment variables for all configuration, typically stored in `.github/.env.base` for team-wide settings and optionally `.github/.env.custom` for local overrides.
+go-pre-commit uses environment variables for all configuration, stored in `.github/env/` as modular files. Use `10-pre-commit.env` for team-wide settings and `90-project.env` for project-specific overrides.
 
 ### Basic Configuration
 
@@ -264,7 +264,7 @@ The project has migrated from the embedded GoFortress pre-commit system (`.githu
    go-pre-commit install
    ```
 
-3. **Update configuration** (already done in `.github/.env.base`):
+3. **Update configuration** (in `.github/env/10-pre-commit.env`):
    ```bash
    # Configuration now uses GO_PRE_COMMIT_ prefixes
    ENABLE_GO_PRE_COMMIT=true
@@ -372,10 +372,10 @@ magex tidy      # Test mod-tidy integration
 ### Team Setup
 
 **Repository Configuration:**
-1. Pin tool version in `.github/.env.base`: `GO_PRE_COMMIT_VERSION=v1.1.11`
+1. Pin tool version in `.github/env/10-pre-commit.env`: `GO_PRE_COMMIT_VERSION=v1.1.11`
 2. Document installation in README or onboarding guides
 3. Set up CI/CD integration for consistent enforcement
-4. Use `.github/.env.custom` for developer-specific overrides
+4. Use `.github/env/99-local.env` for developer-specific overrides (gitignored)
 
 **Developer Onboarding:**
 ```bash
@@ -391,7 +391,7 @@ go-pre-commit install
 # Update go-pre-commit itself
 go install github.com/mrz1836/go-pre-commit/cmd/go-pre-commit@latest
 
-# Update tool versions in .env.base
+# Update tool versions in 10-pre-commit.env
 GO_PRE_COMMIT_GOLANGCI_LINT_VERSION=v2.6.0
 GO_PRE_COMMIT_FUMPT_VERSION=v0.9.0
 ```
