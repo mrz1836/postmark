@@ -101,18 +101,29 @@ runs:
           # Check if artifacts exist first (avoid unnecessary retries)
           echo "🔍 Checking artifact availability..."
 
-          # Fetch artifacts list, handling API errors gracefully
+          # Fetch artifacts list (best-effort). In some workflow contexts GitHub will
+          # block listing artifacts via API even though direct downloads work.
+          # So: if listing fails, we fall back to attempting the download directly.
           ARTIFACTS_JSON=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts 2>&1) || {
             API_ERROR=$?
             echo "⚠️ Failed to fetch artifacts list (exit code: $API_ERROR)"
             echo "   Response: $ARTIFACTS_JSON"
+            echo "↪ Falling back to direct download attempt (skipping preflight list)"
+
+            DOWNLOAD_CMD="gh run download ${{ github.run_id }} --pattern \"$ARTIFACT_PATTERN\" --dir \"$ARTIFACT_PATH\""
+            if timeout "$DOWNLOAD_TIMEOUT" bash -c "$DOWNLOAD_CMD"; then
+              echo "✅ Successfully downloaded artifacts via fallback"
+              DOWNLOAD_SUCCESS=true
+              ARTIFACTS_FOUND=1
+              break
+            fi
 
             if [ "$CONTINUE_ON_ERROR" = "true" ]; then
-              echo "::warning title=Artifact API Error::Failed to fetch artifacts list - API may be unavailable or credentials invalid"
+              echo "::warning title=Artifact API Error::Failed to list/download artifacts - API may be unavailable or credentials invalid"
               DOWNLOAD_SUCCESS=false
               break
             else
-              echo "::error title=Artifact API Error::Failed to fetch artifacts list - API may be unavailable or credentials invalid"
+              echo "::error title=Artifact API Error::Failed to list/download artifacts - API may be unavailable or credentials invalid"
               exit 1
             fi
           }
@@ -121,6 +132,15 @@ runs:
           if ! echo "$ARTIFACTS_JSON" | jq -e '.artifacts' > /dev/null 2>&1; then
             echo "⚠️ Invalid API response (not valid artifacts JSON)"
             echo "   Response: $ARTIFACTS_JSON"
+            echo "↪ Falling back to direct download attempt (skipping preflight list)"
+
+            DOWNLOAD_CMD="gh run download ${{ github.run_id }} --pattern \"$ARTIFACT_PATTERN\" --dir \"$ARTIFACT_PATH\""
+            if timeout "$DOWNLOAD_TIMEOUT" bash -c "$DOWNLOAD_CMD"; then
+              echo "✅ Successfully downloaded artifacts via fallback"
+              DOWNLOAD_SUCCESS=true
+              ARTIFACTS_FOUND=1
+              break
+            fi
 
             if [ "$CONTINUE_ON_ERROR" = "true" ]; then
               echo "::warning title=Invalid API Response::Artifacts API returned invalid response"

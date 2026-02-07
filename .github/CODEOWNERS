@@ -6,7 +6,10 @@
 * @mrz1836
 
 # GitHub Actions workflows
+.github/actions/* @mrz1836
+.github/scripts/* @mrz1836
 .github/workflows/* @mrz1836
+.github/env/* @mrz1836
 .github/.env.base @mrz1836
 .github/.env.custom @mrz1836
 
@@ -37,7 +40,6 @@ codecov.yml @mrz1836
 .github/AGENTS.md @mrz1836
 .cursorrules @mrz1836
 .github/CLAUDE.md @mrz1836
-sweep.yml @mrz1836
 
 # Security and configuration files
 .github/SECURITY.md @mrz1836
@@ -46,3 +48,16 @@ sweep.yml @mrz1836
 # Repository configuration
 .github/labels.yml @mrz1836
 .github/dependabot.yml @mrz1836
+
+# Tech Conventions
+.github/tech-conventions/* @mrz1836
+
+# Cursor Rules
+.cursorrules @mrz1836
+
+# Devcontainer configuration
+.devcontainer/* @mrz1836
+.devcontainer.json @mrz1836
+
+# Gitpod configuration
+.gitpod.yml @mrz1836

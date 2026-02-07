@@ -940,7 +940,7 @@ jobs:
             echo ""
             echo "📝 To fix this:"
             echo "  1. Add more tests to increase coverage"
-            echo "  2. Or adjust GO_COVERAGE_THRESHOLD in .env.base/.env.custom"
+            echo "  2. Or adjust GO_COVERAGE_THRESHOLD in .github/env/10-coverage.env"
             echo ""
             echo "📊 Coverage exclusions (applied during test generation):"
             echo "  - GO_COVERAGE_EXCLUDE_PATHS: ${{ env.GO_COVERAGE_EXCLUDE_PATHS }}"
@@ -2313,7 +2313,7 @@ jobs:
             if [[ "$FAIL_ON_ERRORS" == "true" ]]; then
               echo ""
               echo "💡 To allow the job to continue despite URL verification failures, set:"
-              echo "   GO_COVERAGE_FAIL_ON_URL_ERRORS=false in .github/.env.custom"
+              echo "   GO_COVERAGE_FAIL_ON_URL_ERRORS=false in .github/env/10-coverage.env"
               exit 1
             else
               echo ""

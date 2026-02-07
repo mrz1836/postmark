@@ -64,7 +64,7 @@ jobs:
         with:
           fetch-depth: 0 # Required for sparse checkout
           sparse-checkout: |
-            .github/.env.base
+            .github/env
             .github/actions/setup-magex
             .mage.yaml
             go.mod

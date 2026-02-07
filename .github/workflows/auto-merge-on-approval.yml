@@ -5,14 +5,14 @@
 #           and readiness conditions are met. GitHub handles the actual merge
 #           when all status checks pass.
 #
-#  Configuration: All settings are loaded from .env.base and .env.custom files for
+#  Configuration: All settings are loaded from modular .github/env/ files for
 #  centralized management across all workflows.
 #
 #  Triggers:
 #  - Pull request reviews (submitted)
 #  - Pull request state changes (ready_for_review, review_request_removed)
 #
-#  Auto-merge Rules (configurable via .env.base/.env.custom):
+#  Auto-merge Rules (configurable via .github/env/):
 #  - Minimum number of approvals
 #  - No requested reviewers remaining (if configured)
 #  - No "Changes Requested" reviews
@@ -47,7 +47,7 @@ concurrency:
 # --------------------------------------------------------------------
 # Environment Variables
 # --------------------------------------------------------------------
-# Note: Configuration variables are loaded from .env.base and .env.custom files
+# Note: Configuration variables are loaded from modular .github/env/ files
 
 jobs:
   # ----------------------------------------------------------------------------------
@@ -68,8 +68,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
-            .github/.env.base
-            .github/.env.custom
+            .github/env
             .github/actions/load-env
 
       # --------------------------------------------------------------------

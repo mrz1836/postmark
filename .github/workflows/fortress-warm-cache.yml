@@ -122,7 +122,7 @@ jobs:
             .github/actions/cache-redis-image
             .github/actions/setup-go-with-cache
             .github/actions/setup-magex
-            .github/.env.base
+            .github/env
             ${{ steps.module-paths.outputs.go_mod_file }}
             ${{ inputs.go-sum-file }}
             .mage.yaml

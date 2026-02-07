@@ -5,7 +5,7 @@
 #           assignments, size analysis, welcomes for new contributors, and cleanup
 #           tasks when PRs are closed. All configuration is centralized and customizable.
 #
-#  Configuration: All settings are loaded from .env.base and .env.custom files for
+#  Configuration: All settings are loaded from modular .github/env/ files for
 #  centralized management across all workflows.
 #
 #  Triggers: Pull request events (opened, reopened, ready for review, closed, synchronize)
@@ -51,7 +51,7 @@ concurrency:
 # --------------------------------------------------------------------
 # Environment Variables
 # --------------------------------------------------------------------
-# Note: Configuration variables are loaded from .env.base and .env.custom files
+# Note: Configuration variables are loaded from modular .github/env/ files
 
 jobs:
   # ----------------------------------------------------------------------------------
@@ -60,6 +60,8 @@ jobs:
   load-env:
     name: 🌍 Load Environment Variables
     runs-on: ubuntu-latest
+    # Early exit: Skip entire workflow for fork PRs (handled by fork workflow)
+    if: github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read # Required: Read repository content for sparse checkout
     outputs:
@@ -72,8 +74,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
-            .github/.env.base
-            .github/.env.custom
+            .github/env
             .github/actions/load-env
 
       # --------------------------------------------------------------------
