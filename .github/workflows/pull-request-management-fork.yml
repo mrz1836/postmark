@@ -3,7 +3,7 @@
 #
 #  Purpose: Automate labeling, assignment, and welcoming of pull requests for forked PRs.
 #
-#  Configuration: All settings are loaded from modular .github/env/ files for
+#  Configuration: All settings are loaded from .env.base and .env.custom files for
 #  centralized management across all workflows.
 #
 #  Triggers: Pull request events (opened, reopened, ready for review, closed, synchronize)
@@ -108,7 +108,7 @@ concurrency:
 # --------------------------------------------------------------------
 # Environment Variables
 # --------------------------------------------------------------------
-# Note: Configuration variables are loaded from modular .github/env/ files
+# Note: Configuration variables are loaded from .env.base and .env.custom files
 
 jobs:
   # ------------------------------------------------------------
@@ -117,8 +117,6 @@ jobs:
   load-env:
     name: 🌍 Load Environment (Base Repo)
     runs-on: ubuntu-latest
-    # Early exit: Skip entire workflow for same-repo PRs (handled by main workflow)
-    if: github.event.pull_request.head.repo.full_name != github.repository
     # No write perms here
     permissions:
       contents: read
@@ -127,14 +125,14 @@ jobs:
     steps:
       # ┌─────────────────────────────────────────────────────────────────────┐
       # │ SECURITY SCANNERS: This checkout is SAFE despite pull_request_target│
-      # │                                                                     │
-      # │ Justification:                                                      │
+      # │                                                                      │
+      # │ Justification:                                                       │
       # │  - Only checks out TRUSTED base branch (ref: github.base_ref)       │
       # │  - NEVER checks out PR head code from untrusted fork                │
       # │  - Implements recommended two-workflow security pattern             │
       # │  - Uses sparse checkout (minimal attack surface)                    │
       # │  - No executable code from PR is ever run                           │
-      # │                                                                     │
+      # │                                                                      │
       # │ Pattern: Two-workflow security model (see SECURITY.md)              │
       # │ References: githubactions:S7631, semgrep:github-actions-checkout    │
       # └─────────────────────────────────────────────────────────────────────┘

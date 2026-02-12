@@ -104,7 +104,7 @@ runs:
           # Fetch artifacts list (best-effort). In some workflow contexts GitHub will
           # block listing artifacts via API even though direct downloads work.
           # So: if listing fails, we fall back to attempting the download directly.
-          ARTIFACTS_JSON=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts 2>&1) || {
+          ARTIFACTS_JSON=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts --paginate 2>&1) || {
             API_ERROR=$?
             echo "⚠️ Failed to fetch artifacts list (exit code: $API_ERROR)"
             echo "   Response: $ARTIFACTS_JSON"

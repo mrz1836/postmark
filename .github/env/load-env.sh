@@ -24,6 +24,7 @@ _env_loader_dir() {
         [[ "$source" != /* ]] && source="$dir/$source"
     done
     cd -P "$(dirname "$source")" && pwd
+    return $?
 }
 
 # Main loader logic

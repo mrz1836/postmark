@@ -405,7 +405,7 @@ jobs:
             echo ""
             echo "🔍 Checking run $run_id for coverage history artifacts..."
 
-            ARTIFACTS=$(gh api repos/${{ github.repository }}/actions/runs/$run_id/artifacts \
+            ARTIFACTS=$(gh api repos/${{ github.repository }}/actions/runs/$run_id/artifacts --paginate \
               --jq '.artifacts[] | select(.name | startswith("coverage-history-")) | .archive_download_url' \
               2>/dev/null || echo "")
 
@@ -1078,7 +1078,7 @@ jobs:
                   echo "🔍 Checking run $run_id for coverage artifacts..."
 
                   # Look for coverage-data artifact
-                  COVERAGE_ARTIFACTS=$(gh api repos/${{ github.repository }}/actions/runs/$run_id/artifacts \
+                  COVERAGE_ARTIFACTS=$(gh api repos/${{ github.repository }}/actions/runs/$run_id/artifacts --paginate \
                     --jq '.artifacts[] | select(.name == "coverage-data") | .archive_download_url' \
                     2>/dev/null || echo "")
 
