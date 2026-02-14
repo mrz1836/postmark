@@ -248,8 +248,8 @@ jobs:
             echo "🏁 Running tests with race detection (timeout: $TEST_TIMEOUT)..."
           else
             TEST_TIMEOUT="${TEST_TIMEOUT_UNIT:-20m}"
-            TEST_TYPE="unit"
-            echo "🏁 Running tests without coverage or race detection (timeout: $TEST_TIMEOUT)..."
+            TEST_TYPE="short"
+            echo "🏁 Running short tests (skipping integration tests) (timeout: $TEST_TIMEOUT)..."
           fi
 
           # magex CI mode auto-detects GitHub Actions and produces structured output

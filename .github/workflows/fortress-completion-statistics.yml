@@ -538,6 +538,12 @@ jobs:
           LOC_OUTPUT=$(magex metrics:loc json 2>&1 || true)
           LOC_FOUND=false
 
+          # Save raw JSON for loc-stats artifact (consumed by go-broadcast analytics)
+          if [[ -n "$LOC_OUTPUT" ]] && echo "$LOC_OUTPUT" | jq empty 2>/dev/null; then
+            echo "$LOC_OUTPUT" > loc-stats.json
+            echo "📦 Saved loc-stats.json for artifact upload"
+          fi
+
           if [[ -n "$LOC_OUTPUT" ]]; then
             echo "📋 magex metrics:loc json output:"
             echo "$LOC_OUTPUT"
@@ -677,6 +683,14 @@ jobs:
       # --------------------------------------------------------------------
       # Upload statistics section
       # --------------------------------------------------------------------
+      - name: 📤 Upload LOC Stats JSON
+        if: always() && hashFiles('loc-stats.json') != ''
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: loc-stats
+          path: loc-stats.json
+          retention-days: 7
+
       - name: 📤 Upload Statistics Section
         id: upload-section
         if: always()
