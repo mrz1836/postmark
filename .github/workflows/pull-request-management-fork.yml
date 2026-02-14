@@ -3,7 +3,7 @@
 #
 #  Purpose: Automate labeling, assignment, and welcoming of pull requests for forked PRs.
 #
-#  Configuration: All settings are loaded from .env.base and .env.custom files for
+#  Configuration: All settings are loaded from modular .github/env/*.env files for
 #  centralized management across all workflows.
 #
 #  Triggers: Pull request events (opened, reopened, ready for review, closed, synchronize)
@@ -108,7 +108,7 @@ concurrency:
 # --------------------------------------------------------------------
 # Environment Variables
 # --------------------------------------------------------------------
-# Note: Configuration variables are loaded from .env.base and .env.custom files
+# Note: Configuration variables are loaded from modular .github/env/*.env files
 
 jobs:
   # ------------------------------------------------------------
@@ -117,6 +117,8 @@ jobs:
   load-env:
     name: 🌍 Load Environment (Base Repo)
     runs-on: ubuntu-latest
+    # Only run for fork PRs - same-repo PRs are handled by pull-request-management.yml
+    if: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
     # No write perms here
     permissions:
       contents: read
@@ -175,6 +177,8 @@ jobs:
   detect-fork:
     name: 🔍 Detect Fork PR
     runs-on: ubuntu-latest
+    # Only run for fork PRs - same-repo PRs are handled by pull-request-management.yml
+    if: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
     permissions:
       contents: read
     outputs:
@@ -476,7 +480,8 @@ jobs:
   summary:
     name: 📊 Summary
     runs-on: ubuntu-latest
-    if: always()
+    # Only run for fork PRs, but always show summary regardless of job status
+    if: always() && github.event.pull_request.head.repo.full_name != github.repository
     needs: [load-env, detect-fork, handle-fork, clean-cache]
     steps:
       - name: 📄 Write summary
