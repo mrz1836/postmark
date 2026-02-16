@@ -117,6 +117,15 @@ jobs:
           echo "🕒 Fuzz test timer started at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
       # --------------------------------------------------------------------
+      # Clean fuzz cache to prevent accumulated corpus timeouts
+      # --------------------------------------------------------------------
+      - name: 🧹 Clean fuzz cache
+        run: |
+          echo "🧹 Cleaning accumulated fuzz corpus to prevent timeout..."
+          go clean -fuzzcache
+          echo "✅ Fuzz cache cleaned"
+
+      # --------------------------------------------------------------------
       # Run fuzz tests
       # --------------------------------------------------------------------
       - name: 🧪 Run fuzz tests
