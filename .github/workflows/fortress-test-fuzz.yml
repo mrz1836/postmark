@@ -257,5 +257,5 @@ jobs:
           path: |
             .mage-x/ci-results-fuzz.jsonl
             fuzz-output.log
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: ignore

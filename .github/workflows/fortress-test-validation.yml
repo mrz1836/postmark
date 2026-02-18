@@ -416,5 +416,5 @@ jobs:
         with:
           name: validation-summary
           path: ci-results/
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: ignore

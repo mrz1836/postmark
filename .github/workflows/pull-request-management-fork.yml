@@ -118,7 +118,7 @@ jobs:
     name: 🌍 Load Environment (Base Repo)
     runs-on: ubuntu-latest
     # Only run for fork PRs - same-repo PRs are handled by pull-request-management.yml
-    if: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+    if: ${{ github.event.pull_request.head.repo && github.event.pull_request.head.repo.full_name != github.repository }}
     # No write perms here
     permissions:
       contents: read
@@ -178,7 +178,7 @@ jobs:
     name: 🔍 Detect Fork PR
     runs-on: ubuntu-latest
     # Only run for fork PRs - same-repo PRs are handled by pull-request-management.yml
-    if: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+    if: ${{ github.event.pull_request.head.repo && github.event.pull_request.head.repo.full_name != github.repository }}
     permissions:
       contents: read
     outputs:
@@ -481,7 +481,7 @@ jobs:
     name: 📊 Summary
     runs-on: ubuntu-latest
     # Only run for fork PRs, but always show summary regardless of job status
-    if: always() && github.event.pull_request.head.repo.full_name != github.repository
+    if: always() && github.event.pull_request.head.repo && github.event.pull_request.head.repo.full_name != github.repository
     needs: [load-env, detect-fork, handle-fork, clean-cache]
     steps:
       - name: 📄 Write summary

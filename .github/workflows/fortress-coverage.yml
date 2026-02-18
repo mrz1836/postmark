@@ -2382,7 +2382,7 @@ jobs:
         with:
           name: coverage-stats-internal
           path: coverage-stats-internal-*.json
-          retention-days: 1
+          retention-days: 7
 
       # --------------------------------------------------------------------
       # Upload coverage history for future runs (WORKING SYSTEM - PRESERVED)
