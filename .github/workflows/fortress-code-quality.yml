@@ -226,11 +226,11 @@ jobs:
       # --------------------------------------------------------------------
       - name: 📤 Upload go vet results
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: ./.github/actions/upload-artifact-resilient
         with:
-          name: govet-results
-          path: govet-output.log
-          retention-days: 7
+          artifact-name: govet-results
+          artifact-path: govet-output.log
+          retention-days: "7"
           if-no-files-found: ignore
 
       # --------------------------------------------------------------------
@@ -513,11 +513,11 @@ jobs:
       # --------------------------------------------------------------------
       - name: 📤 Upload lint results
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: ./.github/actions/upload-artifact-resilient
         with:
-          name: lint-results
-          path: lint-output.log
-          retention-days: 7
+          artifact-name: lint-results
+          artifact-path: lint-output.log
+          retention-days: "7"
           if-no-files-found: ignore
 
       # --------------------------------------------------------------------
@@ -765,11 +765,11 @@ jobs:
       # --------------------------------------------------------------------
       - name: 📤 Upload format check results
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: ./.github/actions/upload-artifact-resilient
         with:
-          name: format-check-results
-          path: format-output.log
-          retention-days: 7
+          artifact-name: format-check-results
+          artifact-path: format-output.log
+          retention-days: "7"
           if-no-files-found: ignore
 
       # --------------------------------------------------------------------

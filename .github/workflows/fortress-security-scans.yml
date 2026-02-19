@@ -219,11 +219,11 @@ jobs:
       # --------------------------------------------------------------------
       - name: 📤 Upload Nancy scan results
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: ./.github/actions/upload-artifact-resilient
         with:
-          name: nancy-scan-results
-          path: nancy-output.log
-          retention-days: 7
+          artifact-name: nancy-scan-results
+          artifact-path: nancy-output.log
+          retention-days: "7"
           if-no-files-found: ignore
 
       # --------------------------------------------------------------------
@@ -458,11 +458,11 @@ jobs:
       # --------------------------------------------------------------------
       - name: 📤 Upload govulncheck results
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: ./.github/actions/upload-artifact-resilient
         with:
-          name: govulncheck-scan-results
-          path: govulncheck-output.log
-          retention-days: 7
+          artifact-name: govulncheck-scan-results
+          artifact-path: govulncheck-output.log
+          retention-days: "7"
           if-no-files-found: ignore
 
       # --------------------------------------------------------------------

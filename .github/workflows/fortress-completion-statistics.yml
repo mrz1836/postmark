@@ -685,11 +685,11 @@ jobs:
       # --------------------------------------------------------------------
       - name: 📤 Upload LOC Stats JSON
         if: always() && hashFiles('loc-stats.json') != ''
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: ./.github/actions/upload-artifact-resilient
         with:
-          name: loc-stats
-          path: loc-stats.json
-          retention-days: 7
+          artifact-name: loc-stats
+          artifact-path: loc-stats.json
+          retention-days: "7"
 
       - name: 📤 Upload Statistics Section
         id: upload-section

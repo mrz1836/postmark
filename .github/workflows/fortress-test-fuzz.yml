@@ -251,11 +251,11 @@ jobs:
       # --------------------------------------------------------------------
       - name: 📤 Upload fuzz test outputs
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: ./.github/actions/upload-artifact-resilient
         with:
-          name: test-results-fuzz-${{ inputs.primary-runner }}-${{ inputs.go-primary-version }}
-          path: |
+          artifact-name: test-results-fuzz-${{ inputs.primary-runner }}-${{ inputs.go-primary-version }}
+          artifact-path: |
             .mage-x/ci-results-fuzz.jsonl
             fuzz-output.log
-          retention-days: 7
+          retention-days: "7"
           if-no-files-found: ignore

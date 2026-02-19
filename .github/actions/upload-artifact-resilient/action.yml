@@ -1,0 +1,120 @@
+# ------------------------------------------------------------------------------------
+#  Upload Artifact with Resilience (Composite Action) (GoFortress)
+#
+#  Purpose: Provide resilient artifact uploads with step-level retry logic to handle
+#  transient GitHub infrastructure failures (including non-retryable 403 errors from
+#  CDN/proxy intermediaries during artifact finalization).
+#
+#  This action handles:
+#    - Step-level retry (3 attempts) to recover from non-retryable errors (e.g., 403)
+#    - Escalating delays (10s, 30s) between retries for transient infrastructure issues
+#    - overwrite: true on all attempts to handle partially-finalized artifacts
+#    - ACTIONS_UPLOAD_RETRY_COUNT=3 for defense-in-depth against 5xx errors
+#    - Configurable continue-on-error for critical vs non-critical artifacts
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: "Upload Artifact with Resilience"
+description: "Uploads GitHub Actions artifacts with step-level retry logic for transient infrastructure failures"
+
+inputs:
+  artifact-name:
+    description: "Name of the artifact (will be displayed in GitHub UI)"
+    required: true
+  artifact-path:
+    description: "Path to the artifact file(s) to upload"
+    required: true
+  retention-days:
+    description: "Number of days to retain the artifact (1-90 days)"
+    required: false
+    default: "7"
+  if-no-files-found:
+    description: "Behavior when no files match the path (warn, error, ignore)"
+    required: false
+    default: "ignore"
+  compression-level:
+    description: "Compression level for the artifact (0-9, 6 is default)"
+    required: false
+    default: "6"
+  continue-on-error:
+    description: "Continue workflow if all upload attempts fail (true for non-critical artifacts)"
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    # ------------------------------------------------------------------
+    # Attempt 1
+    # ------------------------------------------------------------------
+    - name: "📤 Upload ${{ inputs.artifact-name }} (attempt 1)"
+      id: attempt1
+      continue-on-error: true
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.artifact-path }}
+        retention-days: ${{ inputs.retention-days }}
+        if-no-files-found: ${{ inputs.if-no-files-found }}
+        compression-level: ${{ inputs.compression-level }}
+        overwrite: true
+      env:
+        ACTIONS_UPLOAD_RETRY_COUNT: 3
+
+    # ------------------------------------------------------------------
+    # Delay before retry
+    # ------------------------------------------------------------------
+    - name: "⏳ Wait before retry (${{ inputs.artifact-name }})"
+      if: steps.attempt1.outcome == 'failure'
+      shell: bash
+      run: |
+        echo "::warning::Upload attempt 1 for '${{ inputs.artifact-name }}' failed, retrying in 10s..."
+        sleep 10
+
+    # ------------------------------------------------------------------
+    # Attempt 2
+    # ------------------------------------------------------------------
+    - name: "📤 Upload ${{ inputs.artifact-name }} (attempt 2)"
+      id: attempt2
+      if: steps.attempt1.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.artifact-path }}
+        retention-days: ${{ inputs.retention-days }}
+        if-no-files-found: ${{ inputs.if-no-files-found }}
+        compression-level: ${{ inputs.compression-level }}
+        overwrite: true
+      env:
+        ACTIONS_UPLOAD_RETRY_COUNT: 3
+
+    # ------------------------------------------------------------------
+    # Delay before final retry
+    # ------------------------------------------------------------------
+    - name: "⏳ Wait before final retry (${{ inputs.artifact-name }})"
+      if: steps.attempt1.outcome == 'failure' && steps.attempt2.outcome == 'failure'
+      shell: bash
+      run: |
+        echo "::warning::Upload attempt 2 for '${{ inputs.artifact-name }}' failed, retrying in 30s..."
+        sleep 30
+
+    # ------------------------------------------------------------------
+    # Attempt 3 (final -- continue-on-error depends on criticality input)
+    # ------------------------------------------------------------------
+    - name: "📤 Upload ${{ inputs.artifact-name }} (attempt 3 - final)"
+      id: attempt3
+      if: steps.attempt1.outcome == 'failure' && steps.attempt2.outcome == 'failure'
+      continue-on-error: ${{ inputs.continue-on-error == 'true' }}
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.artifact-path }}
+        retention-days: ${{ inputs.retention-days }}
+        if-no-files-found: ${{ inputs.if-no-files-found }}
+        compression-level: ${{ inputs.compression-level }}
+        overwrite: true
+      env:
+        ACTIONS_UPLOAD_RETRY_COUNT: 3

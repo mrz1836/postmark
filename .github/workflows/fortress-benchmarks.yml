@@ -390,19 +390,19 @@ jobs:
       # --------------------------------------------------------------------
       - name: 📤 Upload benchmark statistics
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: ./.github/actions/upload-artifact-resilient
         with:
-          name: bench-stats-${{ matrix.os }}-${{ matrix.go-version }}
-          path: bench-stats-${{ matrix.os }}-${{ matrix.go-version }}.json
-          retention-days: 7
+          artifact-name: bench-stats-${{ matrix.os }}-${{ matrix.go-version }}
+          artifact-path: bench-stats-${{ matrix.os }}-${{ matrix.go-version }}.json
+          retention-days: "7"
 
       # --------------------------------------------------------------------
       # Upload raw benchmark results
       # --------------------------------------------------------------------
       - name: 📤 Upload benchmark results
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: ./.github/actions/upload-artifact-resilient
         with:
-          name: bench-results-${{ matrix.os }}-${{ matrix.go-version }}
-          path: bench-results-${{ matrix.os }}-${{ matrix.go-version }}.txt
-          retention-days: 7 # Keep raw results longer for analysis
+          artifact-name: bench-results-${{ matrix.os }}-${{ matrix.go-version }}
+          artifact-path: bench-results-${{ matrix.os }}-${{ matrix.go-version }}.txt
+          retention-days: "7"

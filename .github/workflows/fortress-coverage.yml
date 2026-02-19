@@ -2367,22 +2367,22 @@ jobs:
       # --------------------------------------------------------------------
       - name: 📤 Upload performance cache statistics
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: ./.github/actions/upload-artifact-resilient
         with:
-          name: cache-stats-coverage
-          path: cache-stats-coverage.json
-          retention-days: 1
+          artifact-name: cache-stats-coverage
+          artifact-path: cache-stats-coverage.json
+          retention-days: "1"
 
       # --------------------------------------------------------------------
       # Upload coverage statistics for completion report
       # --------------------------------------------------------------------
       - name: 📤 Upload coverage statistics
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: ./.github/actions/upload-artifact-resilient
         with:
-          name: coverage-stats-internal
-          path: coverage-stats-internal-*.json
-          retention-days: 7
+          artifact-name: coverage-stats-internal
+          artifact-path: coverage-stats-internal-*.json
+          retention-days: "7"
 
       # --------------------------------------------------------------------
       # Upload coverage history for future runs (WORKING SYSTEM - PRESERVED)
@@ -2410,13 +2410,12 @@ jobs:
       - name: 📤 Upload coverage history artifacts
         # Upload history for all branches to preserve trend data
         if: github.event_name == 'push'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: ./.github/actions/upload-artifact-resilient
         with:
-          name: coverage-history-${{ inputs.commit-sha }}
-          path: .github/coverage/history/*.json
-          retention-days: 90
-          compression-level: 9
-        continue-on-error: true
+          artifact-name: coverage-history-${{ inputs.commit-sha }}
+          artifact-path: .github/coverage/history/*.json
+          retention-days: "90"
+          compression-level: "9"
   # ----------------------------------------------------------------------------------
   # Upload Coverage to Codecov (External Provider)
   # ----------------------------------------------------------------------------------
@@ -2594,8 +2593,8 @@ jobs:
 
       - name: 📤 Upload coverage statistics (Codecov)
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: ./.github/actions/upload-artifact-resilient
         with:
-          name: coverage-stats-codecov
-          path: coverage-stats-codecov-*.json
-          retention-days: 7
+          artifact-name: coverage-stats-codecov
+          artifact-path: coverage-stats-codecov-*.json
+          retention-days: "7"
