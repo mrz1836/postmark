@@ -167,6 +167,7 @@ jobs:
       needs.setup.outputs.is-fork-pr != 'true'
     permissions:
       contents: read # Read repository content for security scanning
+      pull-requests: write # Required: gitleaks needs to create PR comments
     uses: ./.github/workflows/fortress-security-scans.yml
     with:
       env-json: ${{ needs.load-env.outputs.env-json }}
