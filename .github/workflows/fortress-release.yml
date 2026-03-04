@@ -91,6 +91,7 @@ jobs:
           go-secondary-version: ${{ inputs.go-primary-version }}
           go-sum-file: ${{ inputs.go-sum-file }}
           enable-multi-module: ${{ env.ENABLE_MULTI_MODULE_TESTING }}
+          github-token: ${{ secrets.github-token }}
 
       # --------------------------------------------------------------------
       # Validate version tag format

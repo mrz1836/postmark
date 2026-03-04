@@ -33,6 +33,10 @@ on:
         description: "Path to go.sum file for dependency verification"
         required: true
         type: string
+    secrets:
+      github-token:
+        description: "GitHub token for private module authentication (optional, only needed when GOPRIVATE is set)"
+        required: false
     outputs:
       pre-commit-version:
         description: "Version of go-pre-commit used"
@@ -87,6 +91,7 @@ jobs:
           go-secondary-version: ${{ inputs.go-primary-version }}
           go-sum-file: ${{ env.GO_SUM_FILE }}
           enable-multi-module: ${{ env.ENABLE_MULTI_MODULE_TESTING }}
+          github-token: ${{ secrets.github-token }}
 
       # --------------------------------------------------------------------
       # Extract Go module directory from GO_SUM_FILE path
@@ -690,6 +695,14 @@ jobs:
 
           if [ "${CHECKS_EXIT:-0}" -ne 0 ]; then
             echo "❌ Pre-commit checks failed with exit code: ${CHECKS_EXIT}"
+            # Persist cleaned output to log file for summary and artifact upload
+            # Use printf to avoid echo misinterpreting leading -n/-e in output
+            printf '%s\n' "$CHECKS_OUTPUT" | \
+              sed -E 's/\x1b\[[0-9;]*[mGKH]//g' | \
+              sed 's/\xc2\x9b\[[0-9;]*[mGKH]//g' | \
+              sed 's/�\[[0-9;]*[mGKH]//g' | \
+              sed 's/�//g' | \
+              tr -d '\033' > pre-commit-output.log
             # Emit GitHub annotation for visibility at top of summary
             echo "::error title=Pre-commit Checks Failed::Code quality issues detected - formatting, linting, or other pre-commit checks failed"
             exit ${CHECKS_EXIT}
@@ -843,15 +856,35 @@ jobs:
               fi
             done
             echo "" >> $GITHUB_STEP_SUMMARY
-            if [[ "${{ env.GO_PRE_COMMIT_ALL_FILES }}" == "true" ]]; then
-              echo "🎯 **All pre-commit checks passed successfully on all repository files.**" >> $GITHUB_STEP_SUMMARY
-            elif [[ "${{ steps.detect-files.outputs.files_found }}" == "true" ]]; then
-              FILE_COUNT=$(echo "${{ steps.detect-files.outputs.changed_files }}" | wc -l | tr -d ' ')
-              echo "🎯 **All pre-commit checks passed successfully on $FILE_COUNT changed files.**" >> $GITHUB_STEP_SUMMARY
+            # Show failure details or success summary based on run-checks outcome + log presence
+            if [[ -f pre-commit-output.log ]]; then
+              # Normal failure: log file was created, show full error details
+              echo "### 🚨 Error Details" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
-              echo "⚡ **Performance**: Fast CI execution by checking only changed files instead of entire repository." >> $GITHUB_STEP_SUMMARY
+              echo "<details>" >> $GITHUB_STEP_SUMMARY
+              echo "<summary>Click to expand full output</summary>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              head -200 pre-commit-output.log >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              echo "</details>" >> $GITHUB_STEP_SUMMARY
+            elif [[ "${{ steps.run-checks.outcome }}" == "failure" ]]; then
+              # Early failure: step failed before the log file could be written
+              # (e.g. invalid binary path, mktemp failure, etc.)
+              echo "### 🚨 Error Details" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "Pre-commit checks failed before an output log could be generated. Review the **Run pre-commit checks** step logs for details." >> $GITHUB_STEP_SUMMARY
             else
-              echo "🎯 **Pre-commit checks completed (no files required checking).**" >> $GITHUB_STEP_SUMMARY
+              if [[ "${{ env.GO_PRE_COMMIT_ALL_FILES }}" == "true" ]]; then
+                echo "🎯 **All pre-commit checks passed successfully on all repository files.**" >> $GITHUB_STEP_SUMMARY
+              elif [[ "${{ steps.detect-files.outputs.files_found }}" == "true" ]]; then
+                FILE_COUNT=$(echo "${{ steps.detect-files.outputs.changed_files }}" | wc -l | tr -d ' ')
+                echo "🎯 **All pre-commit checks passed successfully on $FILE_COUNT changed files.**" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "⚡ **Performance**: Fast CI execution by checking only changed files instead of entire repository." >> $GITHUB_STEP_SUMMARY
+              else
+                echo "🎯 **Pre-commit checks completed (no files required checking).**" >> $GITHUB_STEP_SUMMARY
+              fi
             fi
           else
             echo "### ⚠️ Fallback Mode" >> $GITHUB_STEP_SUMMARY
@@ -859,6 +892,18 @@ jobs:
             echo "- ✅ magex lint" >> $GITHUB_STEP_SUMMARY
             echo "- ✅ magex tidy" >> $GITHUB_STEP_SUMMARY
           fi
+
+      # --------------------------------------------------------------------
+      # Upload pre-commit results (only present on failure)
+      # --------------------------------------------------------------------
+      - name: 📤 Upload pre-commit results
+        if: always()
+        uses: ./.github/actions/upload-artifact-resilient
+        with:
+          artifact-name: pre-commit-results
+          artifact-path: pre-commit-output.log
+          retention-days: "7"
+          if-no-files-found: ignore
 
       # --------------------------------------------------------------------
       # Collect cache statistics

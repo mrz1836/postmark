@@ -94,6 +94,7 @@ jobs:
           go-secondary-version: ${{ inputs.go-primary-version }}
           go-sum-file: ${{ env.GO_SUM_FILE }}
           enable-multi-module: ${{ env.ENABLE_MULTI_MODULE_TESTING }}
+          github-token: ${{ secrets.github-token }}
 
       # --------------------------------------------------------------------
       # Extract Go module directory from GO_SUM_FILE path
@@ -316,6 +317,7 @@ jobs:
           go-secondary-version: ${{ inputs.go-primary-version }}
           go-sum-file: ${{ env.GO_SUM_FILE }}
           enable-multi-module: ${{ env.ENABLE_MULTI_MODULE_TESTING }}
+          github-token: ${{ secrets.github-token }}
 
       # --------------------------------------------------------------------
       # Extract Go module directory from GO_SUM_FILE path
@@ -596,6 +598,7 @@ jobs:
           go-secondary-version: ${{ inputs.go-primary-version }}
           go-sum-file: ${{ env.GO_SUM_FILE }}
           enable-multi-module: ${{ env.ENABLE_MULTI_MODULE_TESTING }}
+          github-token: ${{ secrets.github-token }}
 
       # --------------------------------------------------------------------
       # Extract Go module directory from GO_SUM_FILE path

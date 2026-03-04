@@ -568,6 +568,13 @@ jobs:
           echo "| **Features** | $ENABLED_FEATURES enabled · $DISABLED_FEATURES disabled |" >> $GITHUB_STEP_SUMMARY
           echo "| **Test Matrix** | $MATRIX_COUNT combinations |" >> $GITHUB_STEP_SUMMARY
           echo "| **Go Versions** | $(echo "$UNIQUE_GO_VERSIONS" | jq -r 'join(", ")') |" >> $GITHUB_STEP_SUMMARY
+
+          # Show private module status if GOPRIVATE is configured
+          GOPRIVATE_VAL=$(echo "$ENV_JSON" | jq -r '.GOPRIVATE // ""')
+          if [ -n "$GOPRIVATE_VAL" ]; then
+            echo "| **Private Modules** | \`$GOPRIVATE_VAL\` |" >> $GITHUB_STEP_SUMMARY
+          fi
+
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Fork PR Warning (if applicable) - this stays visible

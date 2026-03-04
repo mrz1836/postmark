@@ -48,6 +48,10 @@ on:
         description: "Path to go.sum file for dependency verification"
         required: true
         type: string
+    secrets:
+      github-token:
+        description: "GitHub token for private module authentication (optional, only needed when GOPRIVATE is set)"
+        required: false
 
 # Security: Restrict default permissions (jobs must explicitly request what they need)
 permissions: {}
@@ -153,3 +157,4 @@ jobs:
           redis-cache-force-pull: ${{ inputs.redis-cache-force-pull }}
           go-sum-file: ${{ inputs.go-sum-file }}
           enable-multi-module: ${{ steps.extract.outputs.enable_multi_module }}
+          github-token: ${{ secrets.github-token }}
