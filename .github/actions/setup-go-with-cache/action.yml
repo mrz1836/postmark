@@ -47,6 +47,10 @@ inputs:
     description: "Enable multi-module mode - uses pattern **/go.sum to hash all go.sum files for cache keys, skips root go.sum validation"
     required: false
     default: "false"
+  github-token:
+    description: "GitHub token for private module authentication (only used when GOPRIVATE is set in environment)"
+    required: false
+    default: ""
 
 outputs:
   go-version-actual:
@@ -442,6 +446,29 @@ runs:
       with:
         go-version: ${{ inputs.go-version }}
         cache: false # we handle caches ourselves
+
+    # --------------------------------------------------------------------
+    # Configure git authentication for private Go modules (conditional)
+    # Only runs when GOPRIVATE is set AND a github-token is provided
+    # --------------------------------------------------------------------
+    - name: 🔐 Configure private module authentication
+      if: ${{ inputs.github-token != '' && env.GOPRIVATE != '' }}
+      shell: bash
+      env:
+        PRIVATE_MODULE_TOKEN: ${{ inputs.github-token }}
+      run: |
+        echo "🔐 Configuring git authentication for private Go modules..."
+        echo "📋 GOPRIVATE=$GOPRIVATE"
+
+        # Configure git to use the token for HTTPS URLs
+        git config --global url."https://x-access-token:${PRIVATE_MODULE_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+        # Set GONOSUMDB to match GOPRIVATE if not explicitly set
+        if [ -z "$GONOSUMDB" ]; then
+          echo "GONOSUMDB=$GOPRIVATE" >> $GITHUB_ENV
+        fi
+
+        echo "✅ Private module authentication configured"
 
     # --------------------------------------------------------------------
     # Summary and validation

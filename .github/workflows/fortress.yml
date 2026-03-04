@@ -30,8 +30,10 @@
 #  This workflow intelligently handles fork PRs by detecting fork status during setup
 #  and conditionally skipping jobs that require repository secrets. Jobs are categorized:
 #
-#  FORK-SAFE (Always run - no secrets required):
+#  FORK-SAFE (Always run - secrets optional for private module auth):
 #    ✅ setup, test-magex, warm-cache, code-quality, pre-commit, benchmarks, status-check
+#    Note: These jobs receive github-token for private Go module authentication (GOPRIVATE).
+#    On fork PRs, private module auth is skipped but jobs still run for public dependencies.
 #
 #  FORK-UNSAFE (Skipped on fork PRs - require secrets):
 #    ⛔ security (OSSI_TOKEN, OSSI_USERNAME, GITLEAKS_LICENSE)
@@ -116,7 +118,7 @@ jobs:
       env-file-count: ${{ needs.load-env.outputs.env-file-count }}
       var-count: ${{ needs.load-env.outputs.var-count }}
     secrets:
-      github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+      github-token: ${{ github.event.pull_request.head.repo.fork != true && (secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN) || '' }}
   # ----------------------------------------------------------------------------------
   # Test MAGE-X
   # ----------------------------------------------------------------------------------
@@ -130,7 +132,7 @@ jobs:
       env-json: ${{ needs.load-env.outputs.env-json }}
       primary-runner: ${{ needs.setup.outputs.primary-runner }}
   # ----------------------------------------------------------------------------------
-  # Warm Go Caches (FORK-SAFE: No secrets required)
+  # Warm Go Caches (Secrets optional: only needed when GOPRIVATE is set for private modules)
   # ----------------------------------------------------------------------------------
   warm-cache:
     name: 💾 Warm Cache
@@ -148,6 +150,8 @@ jobs:
       redis-version: ${{ needs.setup.outputs.redis-version }}
       redis-cache-force-pull: ${{ needs.setup.outputs.redis-cache-force-pull }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
+    secrets:
+      github-token: ${{ github.event.pull_request.head.repo.fork != true && (secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN) || '' }}
   # ----------------------------------------------------------------------------------
   # Security Scans (FORK-UNSAFE: Requires secrets - skipped on fork PRs)
   # ----------------------------------------------------------------------------------
@@ -173,12 +177,12 @@ jobs:
       primary-runner: ${{ needs.setup.outputs.primary-runner }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
-      github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+      github-token: ${{ github.event.pull_request.head.repo.fork != true && (secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN) || '' }}
       gitleaks-license: ${{ secrets.GITLEAKS_LICENSE }}
       ossi-token: ${{ secrets.OSSI_TOKEN }}
       ossi-username: ${{ secrets.OSSI_USERNAME }}
   # ----------------------------------------------------------------------------------
-  # Pre-commit Checks (FORK-SAFE: No secrets required)
+  # Pre-commit Checks (Secrets optional: only needed when GOPRIVATE is set for private modules)
   # ----------------------------------------------------------------------------------
   pre-commit:
     name: 🪝 Pre-commit Checks
@@ -198,8 +202,10 @@ jobs:
       go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
       pre-commit-enabled: ${{ needs.setup.outputs.pre-commit-enabled }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
+    secrets:
+      github-token: ${{ github.event.pull_request.head.repo.fork != true && (secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN) || '' }}
   # ----------------------------------------------------------------------------------
-  # Code Quality Checks (FORK-SAFE: No secrets required)
+  # Code Quality Checks (Secrets optional: only needed when GOPRIVATE is set for private modules)
   # ----------------------------------------------------------------------------------
   code-quality:
     name: 📊 Code Quality
@@ -221,7 +227,7 @@ jobs:
       static-analysis-enabled: ${{ needs.setup.outputs.static-analysis-enabled }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
-      github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+      github-token: ${{ github.event.pull_request.head.repo.fork != true && (secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN) || '' }}
   # ----------------------------------------------------------------------------------
   # Test Suite (FORK-UNSAFE: Requires CODECOV_TOKEN for coverage - skipped on fork PRs)
   # ----------------------------------------------------------------------------------
@@ -264,10 +270,10 @@ jobs:
       redis-trust-service-health: ${{ needs.setup.outputs.redis-trust-service-health }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
-      github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+      github-token: ${{ github.event.pull_request.head.repo.fork != true && (secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN) || '' }}
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
   # ----------------------------------------------------------------------------------
-  # Benchmark Suite (FORK-SAFE: No secrets required)
+  # Benchmark Suite (Secrets optional: only needed when GOPRIVATE is set for private modules)
   # ----------------------------------------------------------------------------------
   benchmarks:
     name: 🏃 Benchmarks
@@ -298,7 +304,7 @@ jobs:
       redis-trust-service-health: ${{ needs.setup.outputs.redis-trust-service-health }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
-      github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+      github-token: ${{ github.event.pull_request.head.repo.fork != true && (secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN) || '' }}
   # ----------------------------------------------------------------------------------
   # Final Status Check
   # ----------------------------------------------------------------------------------
@@ -492,7 +498,7 @@ jobs:
       golangci-lint-version: ${{ needs.code-quality.outputs.golangci-lint-version }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
-      github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+      github-token: ${{ github.event.pull_request.head.repo.fork != true && (secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN) || '' }}
       slack-webhook: ${{ secrets.SLACK_WEBHOOK || '' }}
     permissions:
       contents: write # Required: goreleaser needs to create GitHub releases

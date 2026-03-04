@@ -145,6 +145,8 @@ jobs:
       redis-health-timeout: ${{ inputs.redis-health-timeout }}
       redis-trust-service-health: ${{ inputs.redis-trust-service-health }}
       go-sum-file: ${{ inputs.go-sum-file }}
+    secrets:
+      github-token: ${{ secrets.github-token }}
 
   # ----------------------------------------------------------------------------------
   # Fuzz Testing Execution (Primary platform only)
@@ -162,6 +164,8 @@ jobs:
       go-secondary-version: ${{ inputs.go-secondary-version }}
       fuzz-testing-enabled: ${{ inputs.fuzz-testing-enabled }}
       go-sum-file: ${{ inputs.go-sum-file }}
+    secrets:
+      github-token: ${{ secrets.github-token }}
 
   # ----------------------------------------------------------------------------------
   # Test Results Validation (Aggregate all test results)

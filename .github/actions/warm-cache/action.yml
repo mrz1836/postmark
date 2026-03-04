@@ -53,6 +53,10 @@ inputs:
     description: "Enable multi-module mode - uses hash of all go.sum files for cache keys"
     required: false
     default: "false"
+  github-token:
+    description: "GitHub token for private module authentication (only used when GOPRIVATE is set)"
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -96,6 +100,7 @@ runs:
         go-secondary-version: ${{ inputs.go-secondary-version }}
         go-sum-file: ${{ inputs.go-sum-file }}
         enable-multi-module: ${{ inputs.enable-multi-module }}
+        github-token: ${{ inputs.github-token }}
 
     # ────────────────────────────────────────────────────────────────────────────
     # Setup MAGE-X (required for magex commands in cache warming)
