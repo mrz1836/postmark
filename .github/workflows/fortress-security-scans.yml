@@ -508,6 +508,7 @@ jobs:
     if: ${{ inputs.enable-gitleaks }}
     permissions:
       contents: read
+      pull-requests: write
     steps:
       # --------------------------------------------------------------------
       # Checkout code (required for local actions)
@@ -563,7 +564,7 @@ jobs:
         continue-on-error: true
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
-          GITHUB_TOKEN: ${{ secrets.github-token }}
+          GITHUB_TOKEN: ${{ github.token }}
           GITLEAKS_LICENSE: ${{ secrets.gitleaks-license }}
           GITLEAKS_NOTIFY_USER_LIST: ${{ env.GITLEAKS_NOTIFY_USER_LIST }}
           GITLEAKS_ENABLE_COMMENTS: "true"
