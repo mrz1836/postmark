@@ -5,7 +5,7 @@
 **Postmark Go Library** - Unofficial Go client for Postmark email API with comprehensive coverage and minimal dependencies.
 
 **Key Info:**
-- Go 1.21+, single dependency: `testify` for testing
+- Go 1.23+, single dependency: `testify` for testing
 - Context-aware API with Server/Account token auth
 - 38 Go files covering complete Postmark API surface
 - Test-driven with custom TestRouter for HTTP mocking
