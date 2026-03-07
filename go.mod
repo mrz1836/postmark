@@ -1,6 +1,6 @@
 module github.com/mrz1836/postmark
 
-go 1.20
+go 1.21
 
 require github.com/stretchr/testify v1.11.1
 
