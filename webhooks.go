@@ -11,7 +11,7 @@ type WebhookHTTPAuth struct {
 	// HTTP Auth username.
 	Username string `json:"Username"`
 	// HTTP Auth password.
-	Password string `json:"Password"` //nolint:gosec // G117: field is part of webhook HTTP auth configuration
+	Password string `json:"Password"`
 }
 
 // WebhookTriggerEnabled holds configuration for webhooks which can only be

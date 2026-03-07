@@ -1,6 +1,7 @@
 package postmark
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -28,7 +29,7 @@ func TestTestRouter_Get(t *testing.T) {
 	assert.Equal(t, http.MethodGet, router.routes[0].method)
 	assert.Equal(t, "/test", router.routes[0].pattern)
 
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -45,7 +46,7 @@ func TestTestRouter_Post(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/test", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -62,7 +63,7 @@ func TestTestRouter_Put(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodPut, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPut, "/test", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -79,7 +80,7 @@ func TestTestRouter_Delete(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	req := httptest.NewRequest(http.MethodDelete, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/test", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -96,7 +97,7 @@ func TestTestRouter_Patch(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodPatch, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPatch, "/test", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -111,7 +112,7 @@ func TestTestRouter_404NotFound(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/nonexistent", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -126,7 +127,7 @@ func TestTestRouter_MethodNotMatched(t *testing.T) {
 	})
 
 	// Try POST on GET-only route
-	req := httptest.NewRequest(http.MethodPost, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/test", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -142,7 +143,7 @@ func TestTestRouter_PathParameters(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/users/12345", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/users/12345", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -160,7 +161,7 @@ func TestTestRouter_MultiplePathParameters(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/domains/456/records/789", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/domains/456/records/789", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -178,7 +179,7 @@ func TestGetPathParam_NotFound(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -266,7 +267,7 @@ func TestTestRouter_MultipleRoutes(t *testing.T) {
 	})
 
 	// Test route 1
-	req1 := httptest.NewRequest(http.MethodGet, "/route1", nil)
+	req1 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/route1", nil)
 	w1 := httptest.NewRecorder()
 	router.ServeHTTP(w1, req1)
 
@@ -275,7 +276,7 @@ func TestTestRouter_MultipleRoutes(t *testing.T) {
 
 	// Reset and test route 2
 	route1Called = false
-	req2 := httptest.NewRequest(http.MethodGet, "/route2", nil)
+	req2 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/route2", nil)
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
 
@@ -299,7 +300,7 @@ func TestTestRouter_SamePathDifferentMethods(t *testing.T) {
 	})
 
 	// Test GET
-	req1 := httptest.NewRequest(http.MethodGet, "/resource", nil)
+	req1 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/resource", nil)
 	w1 := httptest.NewRecorder()
 	router.ServeHTTP(w1, req1)
 
@@ -308,7 +309,7 @@ func TestTestRouter_SamePathDifferentMethods(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w1.Code)
 
 	// Test POST
-	req2 := httptest.NewRequest(http.MethodPost, "/resource", nil)
+	req2 := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/resource", nil)
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
 
@@ -343,7 +344,7 @@ func TestMatchExactRoute(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/exact/path/here", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/exact/path/here", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -352,7 +353,7 @@ func TestMatchExactRoute(t *testing.T) {
 
 	// Test non-exact match
 	called = false
-	req2 := httptest.NewRequest(http.MethodGet, "/exact/path/there", nil)
+	req2 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/exact/path/there", nil)
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
 
@@ -362,7 +363,7 @@ func TestMatchExactRoute(t *testing.T) {
 
 func TestGetPathParam_EmptyContext(t *testing.T) {
 	// Create a request without any context values
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 
 	result := GetPathParam(req, "anyParam")
 	assert.Empty(t, result, "Should return empty string when param not in context")
@@ -377,7 +378,7 @@ func TestTestRouter_HandleFunc(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	req := httptest.NewRequest(http.MethodOptions, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodOptions, "/test", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -394,7 +395,7 @@ func TestTestRouter_PathParamsWithSlashes(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v2/users", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v2/users", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 

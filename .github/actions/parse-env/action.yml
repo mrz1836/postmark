@@ -36,11 +36,10 @@ runs:
     # --------------------------------------------------------------------
     - name: 🔧 Parse environment variables
       shell: bash
+      env:
+        ENV_JSON: ${{ inputs.env-json }}
       run: |
         echo "📋 Setting environment variables..."
-
-        # Get the input JSON
-        ENV_JSON='${{ inputs.env-json }}'
 
         # Validate JSON format before processing
         if ! echo "$ENV_JSON" | jq empty 2>/dev/null; then
