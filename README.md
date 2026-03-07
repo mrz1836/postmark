@@ -361,7 +361,7 @@ This command ensures all dependencies are brought up to date in a single step, i
 ## Examples & Tests
 ## 🧪 Examples & Tests
 
-All unit tests and fuzz tests run via [GitHub Actions](https://github.com/mrz1836/postmark/actions) and use [Go version 1.18.x](https://go.dev/doc/go1.18). View the [configuration file](.github/workflows/fortress.yml).
+All unit tests and fuzz tests run via [GitHub Actions](https://github.com/mrz1836/postmark/actions) and use [Go version 1.20.x](https://go.dev/doc/go1.20). View the [configuration file](.github/workflows/fortress.yml).
 
 Run all tests (fast):
 
