@@ -242,7 +242,7 @@ func (s *PostmarkTestSuite) TestServerMarshalJSON() {
 			// TrackLinks and DeliveryType are empty
 		}
 
-		data, err := json.Marshal(server)
+		data, err := json.Marshal(server) //nolint:gosec // G117: marshaling test server struct for field value verification
 		s.Require().NoError(err, "unexpected error during marshal")
 
 		var result map[string]interface{}
@@ -261,7 +261,7 @@ func (s *PostmarkTestSuite) TestServerMarshalJSON() {
 			DeliveryType: "Sandbox",
 		}
 
-		data, err := json.Marshal(server)
+		data, err := json.Marshal(server) //nolint:gosec // G117: marshaling test server struct for field value verification
 		s.Require().NoError(err, "unexpected error during marshal")
 
 		var result map[string]interface{}

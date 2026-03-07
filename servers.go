@@ -14,7 +14,7 @@ type Server struct {
 	// Name of server
 	Name string `json:"Name"`
 	// APITokens associated with server.
-	APITokens []string `json:"ApiTokens"` //nolint:gosec // G117: field is part of Postmark API response struct
+	APITokens []string `json:"ApiTokens"`
 	// ServerLink to your server overview page in Postmark.
 	ServerLink string `json:"ServerLink"`
 	// Color of the server in the rack screen. Purple Blue Turquoise Green Red Yellow Grey

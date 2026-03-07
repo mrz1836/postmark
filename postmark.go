@@ -110,7 +110,7 @@ func (client *Client) doRequest(ctx context.Context, method, path string, payloa
 	}
 
 	var res *http.Response
-	if res, err = client.HTTPClient.Do(req); err != nil { //nolint:gosec // G704: URL is constructed internally by the library
+	if res, err = client.HTTPClient.Do(req); err != nil {
 		return err
 	}
 
