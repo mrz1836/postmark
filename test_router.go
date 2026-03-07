@@ -57,6 +57,14 @@ func (tr *TestRouter) HandleFunc(method, pattern string, handler http.HandlerFun
 		r.regex, r.params = compilePattern(pattern)
 	}
 
+	// Replace existing route with same method+pattern
+	for i, existing := range tr.routes {
+		if existing.method == method && existing.pattern == pattern {
+			tr.routes[i] = r
+			return
+		}
+	}
+
 	tr.routes = append(tr.routes, r)
 }
 
