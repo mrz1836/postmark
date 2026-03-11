@@ -267,7 +267,7 @@ runs:
     # ────────────────────────────────────────────────────────────────────────────
     - name: 📥 Full checkout for module download (module cache miss)
       if: steps.setup-go.outputs.module-cache-hit != 'true'
-      uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         persist-credentials: false
 
@@ -306,7 +306,7 @@ runs:
     # ────────────────────────────────────────────────────────────────────────────
     - name: 📥 Full checkout for build warming (module hit, build miss)
       if: steps.setup-go.outputs.module-cache-hit == 'true' && steps.setup-go.outputs.build-cache-hit != 'true'
-      uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         persist-credentials: false
 
@@ -360,7 +360,7 @@ runs:
     # ────────────────────────────────────────────────────────────────────────────
     - name: 💾 Save Go build cache
       if: steps.setup-go.outputs.build-cache-hit != 'true'
-      uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.0.2
+      uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
       with:
         path: |
           ~/.cache/go-build
@@ -372,7 +372,7 @@ runs:
     # ────────────────────────────────────────────────────────────────────────────
     - name: 💾 Save Go module cache
       if: steps.setup-go.outputs.module-cache-hit != 'true'
-      uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.0.2
+      uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
       with:
         path: ~/go/pkg/mod
         key: ${{ steps.cache-keys.outputs.module-key }}
@@ -437,7 +437,7 @@ runs:
     # --------------------------------------------------------------------
     - name: 📤 Upload cache statistics
       if: always()
-      uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
       with:
         name: cache-stats-${{ inputs.matrix-os }}-${{ inputs.go-version }}
         path: cache-stats-*.json
