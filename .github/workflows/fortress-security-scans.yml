@@ -562,6 +562,9 @@ jobs:
         id: run-gitleaks
         if: steps.repo-check.outputs.is_same_repo == 'true'
         continue-on-error: true
+        # NOTE: gitleaks/gitleaks-action@v2.3.9 is the latest release and still uses Node.js 20.
+        # This will trigger a "Node.js 20 actions are deprecated" warning until the gitleaks
+        # maintainers release a new version with Node.js 24 support. Expected and harmless for now.
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ github.token }}

@@ -2484,6 +2484,9 @@ jobs:
       # --------------------------------------------------------------------
       # Upload to Codecov
       # --------------------------------------------------------------------
+      # NOTE: codecov/codecov-action@v5.5.2 is the latest release and still uses Node.js 20.
+      # This will trigger a "Node.js 20 actions are deprecated" warning until Codecov
+      # releases a new version with Node.js 24 support. Expected and harmless for now.
       - name: 📈 Upload coverage to Codecov
         uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         with:

@@ -52,7 +52,7 @@ runs:
     - name: "📤 Upload ${{ inputs.artifact-name }} (attempt 1)"
       id: attempt1
       continue-on-error: true
-      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
       with:
         name: ${{ inputs.artifact-name }}
         path: ${{ inputs.artifact-path }}
@@ -80,7 +80,7 @@ runs:
       id: attempt2
       if: steps.attempt1.outcome == 'failure'
       continue-on-error: true
-      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
       with:
         name: ${{ inputs.artifact-name }}
         path: ${{ inputs.artifact-path }}
@@ -108,7 +108,7 @@ runs:
       id: attempt3
       if: steps.attempt1.outcome == 'failure' && steps.attempt2.outcome == 'failure'
       continue-on-error: ${{ inputs.continue-on-error == 'true' }}
-      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
       with:
         name: ${{ inputs.artifact-name }}
         path: ${{ inputs.artifact-path }}
