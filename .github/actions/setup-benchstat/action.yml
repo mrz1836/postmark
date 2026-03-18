@@ -33,7 +33,7 @@ inputs:
     description: "Runner OS for cache key (e.g., ubuntu-latest, mac-latest)"
     required: true
   go-version:
-    description: "Go version being used (e.g., 1.24.x, 1.22). Benchstat requires Go 1.23+"
+    description: "Go version being used (e.g., 1.25.x, 1.24). Benchstat requires Go 1.25+"
     required: true
 
 outputs:
@@ -44,14 +44,14 @@ outputs:
     description: "How benchstat was obtained: cached, fresh, or skipped"
     value: ${{ steps.installation-summary.outputs.method }}
   skipped:
-    description: "Whether benchstat installation was skipped due to Go version < 1.23"
+    description: "Whether benchstat installation was skipped due to Go version < 1.25"
     value: ${{ steps.version-check.outputs.skip }}
 
 runs:
   using: "composite"
   steps:
     # --------------------------------------------------------------------
-    # Check Go version compatibility (benchstat requires Go 1.23+)
+    # Check Go version compatibility (benchstat requires Go 1.25+)
     # --------------------------------------------------------------------
     - name: 🔍 Check Go version compatibility
       id: version-check
@@ -67,17 +67,17 @@ runs:
         MINOR=$(echo "$GO_VERSION" | sed -E 's/^[0-9]+\.([0-9]+).*/\1/')
 
         if [ -z "$MAJOR" ] || [ -z "$MINOR" ] || ! [[ "$MAJOR" =~ ^[0-9]+$ ]] || ! [[ "$MINOR" =~ ^[0-9]+$ ]]; then
-          echo "❌ Could not parse Go version '$GO_VERSION'. Please provide a valid Go version (e.g., '1.23', '1.24.x')." >&2
+          echo "❌ Could not parse Go version '$GO_VERSION'. Please provide a valid Go version (e.g., '1.25', '1.26.x')." >&2
           exit 1
         elif [ "$MAJOR" -gt 1 ]; then
-          # Any Go major version > 1 is considered compatible with the 1.23+ requirement
-          echo "✅ Go $GO_VERSION >= 1.23: proceeding with benchstat installation"
+          # Any Go major version > 1 is considered compatible with the 1.25+ requirement
+          echo "✅ Go $GO_VERSION >= 1.25: proceeding with benchstat installation"
           echo "skip=false" >> $GITHUB_OUTPUT
-        elif [ "$MAJOR" -eq 1 ] && [ "$MINOR" -lt 23 ]; then
-          echo "⚠️ Go $GO_VERSION < 1.23: skipping benchstat installation (requires Go 1.23+)"
+        elif [ "$MAJOR" -eq 1 ] && [ "$MINOR" -lt 25 ]; then
+          echo "⚠️ Go $GO_VERSION < 1.25: skipping benchstat installation (requires Go 1.25+)"
           echo "skip=true" >> $GITHUB_OUTPUT
         else
-          echo "✅ Go $GO_VERSION >= 1.23: proceeding with benchstat installation"
+          echo "✅ Go $GO_VERSION >= 1.25: proceeding with benchstat installation"
           echo "skip=false" >> $GITHUB_OUTPUT
         fi
 
@@ -140,7 +140,7 @@ runs:
       run: |
         # Check if installation was skipped due to Go version
         if [[ "${{ steps.version-check.outputs.skip }}" == "true" ]]; then
-          echo "⏭️ Benchstat installation skipped (Go version < 1.23)"
+          echo "⏭️ Benchstat installation skipped (Go version < 1.25)"
           echo "method=skipped" >> $GITHUB_OUTPUT
           echo "📋 Installation method: Skipped"
           exit 0
