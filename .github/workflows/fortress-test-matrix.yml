@@ -177,7 +177,7 @@ jobs:
 
       # --------------------------------------------------------------------
       # Setup benchstat (required for benchmark comparison tests)
-      # Note: benchstat requires Go 1.23+, action will skip for older versions
+      # Note: benchstat requires Go 1.25+, action will skip for older versions
       # --------------------------------------------------------------------
       - name: 📊 Setup benchstat
         uses: ./.github/actions/setup-benchstat
