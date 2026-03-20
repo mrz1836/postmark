@@ -350,7 +350,7 @@ jobs:
       # --------------------------------------------------------------------
       - name: 💾 Restore golangci-lint binary cache
         id: cache-golangci-lint-binary
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: ~/.cache/golangci-lint-bin
           key: ${{ inputs.primary-runner }}-golangci-lint-binary-${{ env.MAGE_X_GOLANGCI_LINT_VERSION }}
@@ -379,7 +379,7 @@ jobs:
       # --------------------------------------------------------------------
       - name: 💾 Cache golangci-lint build cache
         id: cache-golangci-lint-build
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: ~/.cache/go-build
           key: ${{ inputs.primary-runner }}-go-build-golangci-${{ env.MAGE_X_GOLANGCI_LINT_VERSION }}-${{ hashFiles('**/*.go') }}
@@ -391,7 +391,7 @@ jobs:
       # --------------------------------------------------------------------
       - name: 💾 Cache golangci-lint analysis
         id: cache-golangci-lint
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: ${{ env.GOLANGCI_LINT_CACHE }}
           key: ${{ inputs.primary-runner }}-golangci-lint-analysis-${{ hashFiles('.golangci.json', env.GO_SUM_FILE) }}-${{ steps.golangci-lint-version.outputs.version }}

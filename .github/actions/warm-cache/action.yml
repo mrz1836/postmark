@@ -319,6 +319,15 @@ runs:
       run: |
         set -euo pipefail
         GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
+        BUILD_STRATEGY="${MAGE_X_BUILD_STRATEGY:-smart}"
+
+        # Allow skipping pre-build entirely (useful when packages OOM on standard runners)
+        if [ "$BUILD_STRATEGY" == "skip" ]; then
+          echo "⏭️ Build pre-compilation skipped (MAGE_X_BUILD_STRATEGY=skip)"
+          echo "ℹ️  Module cache is still warmed — build cache will populate on first real build"
+          exit 0
+        fi
+
         echo "🔧 Build cache miss - pre-building packages..."
 
         echo "============================================================"
@@ -333,21 +342,21 @@ runs:
           echo "🔧 Multi-module mode - running build commands from repository root"
           echo "📦 magex will discover all Go modules and pre-build packages"
           # Use configured parallelism to avoid OOM on GitHub Actions runners
-          magex build:prebuild p="$PARALLEL_JOBS" strategy="${MAGE_X_BUILD_STRATEGY:-smart}" batch_size="${MAGE_X_BUILD_BATCH_SIZE:-20}" batch_delay="${MAGE_X_BUILD_BATCH_DELAY_MS:-0}" exclude="${MAGE_X_BUILD_EXCLUDE_PATTERN:-}"
+          magex build:prebuild p="$PARALLEL_JOBS" strategy="${BUILD_STRATEGY}" batch_size="${MAGE_X_BUILD_BATCH_SIZE:-20}" batch_delay="${MAGE_X_BUILD_BATCH_DELAY_MS:-0}" exclude="${MAGE_X_BUILD_EXCLUDE_PATTERN:-}"
 
           echo "🏗️ Building stdlib for host platform..."
           magex install:stdlib
         elif [ -n "$GO_MODULE_DIR" ]; then
           echo "🔧 Running build commands from directory: $GO_MODULE_DIR"
           # Use configured parallelism to avoid OOM on GitHub Actions runners
-          (cd "$GO_MODULE_DIR" && magex build:prebuild p="$PARALLEL_JOBS" strategy="${MAGE_X_BUILD_STRATEGY:-smart}" batch_size="${MAGE_X_BUILD_BATCH_SIZE:-20}" batch_delay="${MAGE_X_BUILD_BATCH_DELAY_MS:-0}" exclude="${MAGE_X_BUILD_EXCLUDE_PATTERN:-}")
+          (cd "$GO_MODULE_DIR" && magex build:prebuild p="$PARALLEL_JOBS" strategy="${BUILD_STRATEGY}" batch_size="${MAGE_X_BUILD_BATCH_SIZE:-20}" batch_delay="${MAGE_X_BUILD_BATCH_DELAY_MS:-0}" exclude="${MAGE_X_BUILD_EXCLUDE_PATTERN:-}")
 
           echo "🏗️ Building stdlib for host platform..."
           (cd "$GO_MODULE_DIR" && magex install:stdlib)
         else
           echo "🔧 Running build commands from repository root"
           # Use configured parallelism to avoid OOM on GitHub Actions runners
-          magex build:prebuild p="$PARALLEL_JOBS" strategy="${MAGE_X_BUILD_STRATEGY:-smart}" batch_size="${MAGE_X_BUILD_BATCH_SIZE:-20}" batch_delay="${MAGE_X_BUILD_BATCH_DELAY_MS:-0}" exclude="${MAGE_X_BUILD_EXCLUDE_PATTERN:-}"
+          magex build:prebuild p="$PARALLEL_JOBS" strategy="${BUILD_STRATEGY}" batch_size="${MAGE_X_BUILD_BATCH_SIZE:-20}" batch_delay="${MAGE_X_BUILD_BATCH_DELAY_MS:-0}" exclude="${MAGE_X_BUILD_EXCLUDE_PATTERN:-}"
 
           echo "🏗️ Building stdlib for host platform..."
           magex install:stdlib
@@ -360,7 +369,7 @@ runs:
     # ────────────────────────────────────────────────────────────────────────────
     - name: 💾 Save Go build cache
       if: steps.setup-go.outputs.build-cache-hit != 'true'
-      uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
       with:
         path: |
           ~/.cache/go-build
@@ -372,7 +381,7 @@ runs:
     # ────────────────────────────────────────────────────────────────────────────
     - name: 💾 Save Go module cache
       if: steps.setup-go.outputs.module-cache-hit != 'true'
-      uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
       with:
         path: ~/go/pkg/mod
         key: ${{ steps.cache-keys.outputs.module-key }}

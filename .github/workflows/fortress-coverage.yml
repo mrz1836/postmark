@@ -193,7 +193,7 @@ jobs:
       - name: 💾 Restore go-coverage binary cache (production)
         id: go-coverage-cache
         if: env.GO_COVERAGE_USE_LOCAL != 'true'
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: |
             ~/.cache/go-coverage-bin
@@ -204,7 +204,7 @@ jobs:
       - name: 💾 Restore go-coverage binary cache (local)
         id: go-coverage-local-cache
         if: env.GO_COVERAGE_USE_LOCAL == 'true'
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: |
             ~/.cache/go-coverage-local
@@ -2484,11 +2484,11 @@ jobs:
       # --------------------------------------------------------------------
       # Upload to Codecov
       # --------------------------------------------------------------------
-      # NOTE: codecov/codecov-action@v5.5.2 is the latest release and still uses Node.js 20.
+      # NOTE: codecov/codecov-action@v5.5.3 is the latest release and still uses Node.js 20.
       # This will trigger a "Node.js 20 actions are deprecated" warning until Codecov
       # releases a new version with Node.js 24 support. Expected and harmless for now.
       - name: 📈 Upload coverage to Codecov
-        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
+        uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad # v5.5.3
         with:
           #file: ./coverage.txt # This is the old format
           files: ./coverage-artifacts/coverage-data/coverage.txt
