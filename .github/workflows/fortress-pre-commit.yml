@@ -291,6 +291,8 @@ jobs:
       - name: 🔨 Install go-pre-commit tool
         if: steps.go-pre-commit-cache.outputs.cache-hit != 'true' || env.GO_PRE_COMMIT_USE_LOCAL == 'true'
         id: install-pre-commit
+        env:
+          GH_TOKEN: ${{ secrets.github-token || github.token }}
         run: |
           # Check if we should use local development version
           if [[ "${{ env.GO_PRE_COMMIT_USE_LOCAL }}" == "true" ]]; then
@@ -330,24 +332,90 @@ jobs:
             echo "install_success=true" >> $GITHUB_OUTPUT
             echo "version=$VERSION" >> $GITHUB_OUTPUT
           else
-            # Use production version
+            # Use production version - download pre-built binary from GitHub releases
             VERSION="${{ env.GO_PRE_COMMIT_VERSION }}"
-            echo "⬇️ Cache miss – installing go-pre-commit version: $VERSION"
+            echo "⬇️ Cache miss – downloading go-pre-commit version: $VERSION"
 
-            # Install using go install
-            go install github.com/mrz1836/go-pre-commit/cmd/go-pre-commit@$VERSION
+            # Detect platform and architecture
+            OS=$(echo "${{ runner.os }}" | tr '[:upper:]' '[:lower:]')
+            ARCH=$(uname -m)
 
-            # Copy the freshly installed binary to cache directory
+            # Map architecture names
+            case "$ARCH" in
+              x86_64|amd64) ARCH="amd64" ;;
+              aarch64|arm64) ARCH="arm64" ;;
+              *) echo "❌ Unsupported architecture: $ARCH" && exit 1 ;;
+            esac
+
+            # Map OS names
+            case "$OS" in
+              linux) OS="linux" ;;
+              macos) OS="darwin" ;;
+              windows) OS="windows" ;;
+              *) echo "❌ Unsupported OS: $OS" && exit 1 ;;
+            esac
+
+            echo "📋 Detected platform: ${OS}_${ARCH}"
+
+            # Clean version (remove 'v' prefix if present)
+            CLEAN_VERSION="${VERSION#v}"
+
+            # Build asset name and download using gh CLI
+            ASSET_NAME="go-pre-commit_${CLEAN_VERSION}_${OS}_${ARCH}.tar.gz"
+            echo "📥 Downloading asset: $ASSET_NAME from mrz1836/go-pre-commit@$VERSION"
+
+            # Download and extract
+            TEMP_DIR=$(mktemp -d)
+            cd "$TEMP_DIR"
+
+            if gh release download "$VERSION" \
+                --repo mrz1836/go-pre-commit \
+                --pattern "$ASSET_NAME" \
+                --dir .; then
+              echo "✅ Download successful"
+            else
+              echo "❌ Download failed for $ASSET_NAME from mrz1836/go-pre-commit@$VERSION"
+              exit 1
+            fi
+
+            # Extract the tarball
+            if tar -xzf "$ASSET_NAME"; then
+              echo "✅ Extraction successful"
+            else
+              echo "❌ Extraction failed"
+              exit 1
+            fi
+
+            # Find the go-pre-commit binary
+            PRE_COMMIT_BINARY=$(find . -name "go-pre-commit" -type f | head -1)
+            if [[ -z "$PRE_COMMIT_BINARY" ]]; then
+              echo "❌ Could not find go-pre-commit binary in extracted files"
+              ls -la
+              exit 1
+            fi
+
+            echo "✅ Found go-pre-commit binary at: $PRE_COMMIT_BINARY"
+
+            # Make it executable and copy to cache directory
+            chmod +x "$PRE_COMMIT_BINARY"
             mkdir -p ~/.cache/go-pre-commit-bin
-            cp "$(go env GOPATH)/bin/go-pre-commit" ~/.cache/go-pre-commit-bin/
+            cp "$PRE_COMMIT_BINARY" ~/.cache/go-pre-commit-bin/go-pre-commit
+
+            # Copy to GOPATH/bin for immediate use
+            mkdir -p "$(go env GOPATH)/bin"
+            cp ~/.cache/go-pre-commit-bin/go-pre-commit "$(go env GOPATH)/bin/go-pre-commit"
 
             # Store the validated binary path
             GO_BIN="$(go env GOPATH)/bin"
             GO_PRE_COMMIT_PATH="$GO_BIN/go-pre-commit"
             echo "GO_PRE_COMMIT_BINARY=$GO_PRE_COMMIT_PATH" >> $GITHUB_ENV
 
+            # Cleanup temp directory
+            cd /
+            rm -rf "$TEMP_DIR"
+
             # Verify installation
-            echo "✅ go-pre-commit installed and stored in cache"
+            echo "✅ go-pre-commit downloaded and stored in cache"
             VERSION_OUTPUT=$("$GO_BIN/go-pre-commit" --version 2>&1 | head -1 || echo "$VERSION")
             echo "🏷️ Version: $VERSION_OUTPUT"
             echo "install_success=true" >> $GITHUB_OUTPUT
