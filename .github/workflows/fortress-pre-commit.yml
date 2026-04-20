@@ -115,7 +115,7 @@ jobs:
       # --------------------------------------------------------------------
       - name: 💾 Restore golangci-lint analysis cache
         id: cache-golangci-lint-analysis
-        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ${{ env.GOLANGCI_LINT_CACHE }}
           key: ${{ inputs.primary-runner }}-golangci-lint-analysis-${{ hashFiles('.golangci.json', env.GO_SUM_FILE) }}-${{ env.GO_PRE_COMMIT_GOLANGCI_LINT_VERSION }}
@@ -130,7 +130,7 @@ jobs:
       - name: 💾 Restore go-pre-commit binary cache
         id: go-pre-commit-cache
         if: env.GO_PRE_COMMIT_USE_LOCAL != 'true'
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cache/go-pre-commit-bin
@@ -144,7 +144,7 @@ jobs:
       # --------------------------------------------------------------------
       - name: 💾 Restore go-pre-commit tools cache
         id: go-pre-commit-tools-cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cache/go-pre-commit-tools
