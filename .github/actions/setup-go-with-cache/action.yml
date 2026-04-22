@@ -215,7 +215,7 @@ runs:
     # --------------------------------------------------------------------
     - name: 💾 Go module cache
       id: restore-gomod
-      uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
       with:
         path: ~/go/pkg/mod
         key: ${{ steps.cache-keys.outputs.module-key }}
@@ -289,7 +289,7 @@ runs:
     # --------------------------------------------------------------------
     - name: 💾 Go build cache
       id: restore-gobuild
-      uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
       with:
         path: |
           ~/.cache/go-build
