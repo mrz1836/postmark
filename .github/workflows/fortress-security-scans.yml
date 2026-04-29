@@ -160,6 +160,13 @@ jobs:
           if [[ $NANCY_EXIT_CODE -eq 0 ]]; then
             echo "nancy-status=success" >> $GITHUB_OUTPUT
             echo "✅ Nancy scan completed - no vulnerabilities found"
+          elif grep -qi "rate limited by OSS Index" nancy-output.log; then
+            # OSS Index rate-limited the scan; treat as inconclusive, NOT as a CI failure.
+            # Add OSSI_USERNAME and OSSI_TOKEN secrets to authenticate and lift the limit.
+            echo "nancy-status=rate-limited" >> $GITHUB_OUTPUT
+            echo "⚠️  Nancy scan inconclusive - OSS Index rate-limited the request (not failing CI)."
+            echo "    Configure OSSI_USERNAME and OSSI_TOKEN secrets to authenticate and lift the limit."
+            echo "    Register at https://ossindex.sonatype.org/user/register"
           else
             echo "nancy-status=failure" >> $GITHUB_OUTPUT
             echo "❌ Nancy scan completed - vulnerabilities detected (exit code: $NANCY_EXIT_CODE)"
@@ -168,10 +175,18 @@ jobs:
       # --------------------------------------------------------------------
       # Create GitHub Annotations for failures
       # --------------------------------------------------------------------
-      - name: 📋 Create GitHub Annotations
+      - name: 📋 Create GitHub Annotations (vulnerabilities)
         if: always() && steps.run-nancy.outputs.nancy-status == 'failure'
         run: |
           echo "::error title=Nancy Security Scan Failed::Vulnerabilities detected in Go dependencies - see job summary for details"
+
+      # --------------------------------------------------------------------
+      # Create GitHub Annotations for rate-limited scans (warning, not error)
+      # --------------------------------------------------------------------
+      - name: 📋 Create GitHub Annotations (rate-limited)
+        if: always() && steps.run-nancy.outputs.nancy-status == 'rate-limited'
+        run: |
+          echo "::warning title=Nancy Rate Limited::OSS Index rate-limited the scan; results inconclusive. Add OSSI_USERNAME and OSSI_TOKEN secrets to authenticate and lift the limit."
 
       # --------------------------------------------------------------------
       # Summary of Nancy results
@@ -192,6 +207,8 @@ jobs:
 
           if [[ "$NANCY_STATUS" == "success" ]]; then
             echo "| **Result** | ✅ No vulnerabilities found |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$NANCY_STATUS" == "rate-limited" ]]; then
+            echo "| **Result** | ⚠️ Rate limited by OSS Index — scan inconclusive (CI not failed) |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| **Result** | ❌ Vulnerabilities detected |" >> $GITHUB_STEP_SUMMARY
           fi
@@ -201,8 +218,33 @@ jobs:
           echo "The following vulnerabilities were excluded from the scan:" >> $GITHUB_STEP_SUMMARY
           echo "${{ env.NANCY_EXCLUDES }}" >> $GITHUB_STEP_SUMMARY
 
-          # Show failure details if applicable
-          if [[ "$NANCY_STATUS" != "success" ]] && [[ -f nancy-output.log ]]; then
+          # Rate-limited: explain clearly that CI was NOT failed and how to remediate
+          if [[ "$NANCY_STATUS" == "rate-limited" ]]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### ⚠️ OSS Index Rate Limit" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Sonatype's OSS Index rate-limited this request before Nancy could complete the scan." >> $GITHUB_STEP_SUMMARY
+            echo "**This is not a vulnerability detection** and CI has **not** been failed for this run." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**To remediate (recommended):**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "1. Register a free account at <https://ossindex.sonatype.org/user/register>." >> $GITHUB_STEP_SUMMARY
+            echo "2. Retrieve your username (email) and API token from <https://ossindex.sonatype.org/user/settings>." >> $GITHUB_STEP_SUMMARY
+            echo "3. Add them as repository secrets named \`OSSI_USERNAME\` and \`OSSI_TOKEN\`." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Authenticated requests have a substantially higher rate limit and avoid this state." >> $GITHUB_STEP_SUMMARY
+            if [[ -f nancy-output.log ]]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "<details>" >> $GITHUB_STEP_SUMMARY
+              echo "<summary>Click to expand Nancy output</summary>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              head -50 nancy-output.log >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              echo "</details>" >> $GITHUB_STEP_SUMMARY
+            fi
+          # Real vulnerability failure: keep existing details section
+          elif [[ "$NANCY_STATUS" == "failure" ]] && [[ -f nancy-output.log ]]; then
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### 🚨 Vulnerability Details" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
@@ -252,6 +294,12 @@ jobs:
 
       # --------------------------------------------------------------------
       # Fail job if vulnerabilities found
+      #
+      # Only fires when nancy-status == 'failure' (real vulnerabilities).
+      # The 'rate-limited' status is intentionally excluded: an OSS Index rate
+      # limit produces an inconclusive scan, not a vulnerability finding, and
+      # must not red-X CI. See the run-nancy step above for the rate-limit
+      # detection logic.
       # --------------------------------------------------------------------
       - name: 🚨 Fail job if vulnerabilities found
         if: always() && steps.run-nancy.outputs.nancy-status == 'failure'
