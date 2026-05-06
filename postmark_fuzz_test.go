@@ -37,8 +37,8 @@ func FuzzDoRequestJSONUnmarshal(f *testing.F) {
 
 		client := &Client{
 			HTTPClient:   &http.Client{},
-			ServerToken:  "test-token",
-			AccountToken: "test-account-token",
+			ServerToken:  testServerToken,
+			AccountToken: testAccountToken,
 			BaseURL:      server.URL,
 		}
 
@@ -85,8 +85,8 @@ func FuzzAPIErrorHandling(f *testing.F) {
 
 		client := &Client{
 			HTTPClient:   &http.Client{},
-			ServerToken:  "test-token",
-			AccountToken: "test-account-token",
+			ServerToken:  testServerToken,
+			AccountToken: testAccountToken,
 			BaseURL:      server.URL,
 		}
 
@@ -158,8 +158,8 @@ func FuzzJSONPayloadMarshaling(f *testing.F) {
 
 		client := &Client{
 			HTTPClient:   &http.Client{},
-			ServerToken:  "test-token",
-			AccountToken: "test-account-token",
+			ServerToken:  testServerToken,
+			AccountToken: testAccountToken,
 			BaseURL:      server.URL,
 		}
 

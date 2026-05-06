@@ -7,7 +7,7 @@ import (
 
 func getTestEmail() Email {
 	return Email{
-		From:     "sender@example.com",
+		From:     testSenderEmail,
 		To:       "receiver@example.com",
 		Cc:       "copied@example.com",
 		Bcc:      "blank-copied@example.com",

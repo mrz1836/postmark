@@ -134,10 +134,10 @@ func (s *PostmarkTestSuite) TestGetInboundMessages() {
 	})
 
 	_, total, err := s.client.GetInboundMessages(context.Background(), 100, 0, map[string]interface{}{
-		"recipient": "john.doe@yahoo.com",
-		"fromdate":  "2015-02-01",
-		"todate":    "2015-03-01",
-		"status":    "blocked",
+		"recipient":     "john.doe@yahoo.com",
+		testFromDateKey: "2015-02-01",
+		testToDateKey:   "2015-03-01",
+		"status":        "blocked",
 	})
 	s.Require().NoError(err)
 

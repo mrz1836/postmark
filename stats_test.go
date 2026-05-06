@@ -28,8 +28,8 @@ func (s *PostmarkTestSuite) TestGetOutboundStats() {
 	})
 
 	res, err := s.client.GetOutboundStats(context.Background(), map[string]interface{}{
-		"fromdate": "2014-01-01",
-		"todate":   "2014-02-01",
+		testFromDateKey: testStatsFromDate,
+		testToDateKey:   testStatsToDate,
 	})
 	s.Require().NoError(err)
 
@@ -64,8 +64,8 @@ func (s *PostmarkTestSuite) TestGetSentCounts() {
 	})
 
 	res, err := s.client.GetSentCounts(context.Background(), map[string]interface{}{
-		"fromdate": "2014-01-01",
-		"todate":   "2014-02-01",
+		testFromDateKey: testStatsFromDate,
+		testToDateKey:   testStatsToDate,
 	})
 	s.Require().NoError(err)
 
@@ -106,8 +106,8 @@ func (s *PostmarkTestSuite) TestGetBounceCounts() {
 	})
 
 	res, err := s.client.GetBounceCounts(context.Background(), map[string]interface{}{
-		"fromdate": "2014-01-01",
-		"todate":   "2014-02-01",
+		testFromDateKey: testStatsFromDate,
+		testToDateKey:   testStatsToDate,
 	})
 	s.Require().NoError(err)
 
@@ -139,8 +139,8 @@ func (s *PostmarkTestSuite) TestGetSpamCounts() {
 	})
 
 	res, err := s.client.GetSpamCounts(context.Background(), map[string]interface{}{
-		"fromdate": "2014-01-01",
-		"todate":   "2014-02-01",
+		testFromDateKey: testStatsFromDate,
+		testToDateKey:   testStatsToDate,
 	})
 	s.Require().NoError(err)
 
@@ -180,8 +180,8 @@ func (s *PostmarkTestSuite) TestGetTrackedCounts() {
 	})
 
 	res, err := s.client.GetTrackedCounts(context.Background(), map[string]interface{}{
-		"fromdate": "2014-01-01",
-		"todate":   "2014-02-01",
+		testFromDateKey: testStatsFromDate,
+		testToDateKey:   testStatsToDate,
 	})
 	s.Require().NoError(err)
 
@@ -227,8 +227,8 @@ func (s *PostmarkTestSuite) TestGetOpenCounts() {
 	})
 
 	res, err := s.client.GetOpenCounts(context.Background(), map[string]interface{}{
-		"fromdate": "2014-01-01",
-		"todate":   "2014-02-01",
+		testFromDateKey: testStatsFromDate,
+		testToDateKey:   testStatsToDate,
 	})
 	s.Require().NoError(err)
 
@@ -266,8 +266,8 @@ func (s *PostmarkTestSuite) TestGetPlatformCounts() {
 	})
 
 	res, err := s.client.GetPlatformCounts(context.Background(), map[string]interface{}{
-		"fromdate": "2014-01-01",
-		"todate":   "2014-02-01",
+		testFromDateKey: testStatsFromDate,
+		testToDateKey:   testStatsToDate,
 	})
 	s.Require().NoError(err)
 
@@ -303,8 +303,8 @@ func (s *PostmarkTestSuite) TestGetClickCounts() {
 	})
 
 	res, err := s.client.GetClickCounts(context.Background(), map[string]interface{}{
-		"fromdate": "2014-01-01",
-		"todate":   "2014-02-01",
+		testFromDateKey: testStatsFromDate,
+		testToDateKey:   testStatsToDate,
 	})
 	s.Require().NoError(err)
 
@@ -341,8 +341,8 @@ func (s *PostmarkTestSuite) TestGetBrowserFamilyCounts() {
 	})
 
 	res, err := s.client.GetBrowserFamilyCounts(context.Background(), map[string]interface{}{
-		"fromdate": "2014-01-01",
-		"todate":   "2014-02-01",
+		testFromDateKey: testStatsFromDate,
+		testToDateKey:   testStatsToDate,
 	})
 	s.Require().NoError(err)
 
@@ -374,8 +374,8 @@ func (s *PostmarkTestSuite) TestGetClickLocationCounts() {
 	})
 
 	res, err := s.client.GetClickLocationCounts(context.Background(), map[string]interface{}{
-		"fromdate": "2014-01-01",
-		"todate":   "2014-02-01",
+		testFromDateKey: testStatsFromDate,
+		testToDateKey:   testStatsToDate,
 	})
 	s.Require().NoError(err)
 
@@ -411,8 +411,8 @@ func (s *PostmarkTestSuite) TestGetClickPlatformCounts() {
 	})
 
 	res, err := s.client.GetClickPlatformCounts(context.Background(), map[string]interface{}{
-		"fromdate": "2014-01-01",
-		"todate":   "2014-02-01",
+		testFromDateKey: testStatsFromDate,
+		testToDateKey:   testStatsToDate,
 	})
 	s.Require().NoError(err)
 
@@ -450,8 +450,8 @@ func (s *PostmarkTestSuite) TestGetEmailClientCounts() {
 	})
 
 	res, err := s.client.GetEmailClientCounts(context.Background(), map[string]interface{}{
-		"fromdate": "2014-01-01",
-		"todate":   "2014-02-01",
+		testFromDateKey: testStatsFromDate,
+		testToDateKey:   testStatsToDate,
 	})
 	s.Require().NoError(err)
 
@@ -486,8 +486,8 @@ func BenchmarkGetClickCounts(b *testing.B) {
 	})
 
 	options := map[string]interface{}{
-		"fromdate": "2014-01-01",
-		"todate":   "2014-02-01",
+		testFromDateKey: testStatsFromDate,
+		testToDateKey:   testStatsToDate,
 	}
 
 	b.ResetTimer()
@@ -527,8 +527,8 @@ func BenchmarkGetBrowserFamilyCounts(b *testing.B) {
 	})
 
 	options := map[string]interface{}{
-		"fromdate": "2014-01-01",
-		"todate":   "2014-02-01",
+		testFromDateKey: testStatsFromDate,
+		testToDateKey:   testStatsToDate,
 	}
 
 	b.ResetTimer()
@@ -563,8 +563,8 @@ func BenchmarkGetClickLocationCounts(b *testing.B) {
 	})
 
 	options := map[string]interface{}{
-		"fromdate": "2014-01-01",
-		"todate":   "2014-02-01",
+		testFromDateKey: testStatsFromDate,
+		testToDateKey:   testStatsToDate,
 	}
 
 	b.ResetTimer()
@@ -602,8 +602,8 @@ func BenchmarkGetClickPlatformCounts(b *testing.B) {
 	})
 
 	options := map[string]interface{}{
-		"fromdate": "2014-01-01",
-		"todate":   "2014-02-01",
+		testFromDateKey: testStatsFromDate,
+		testToDateKey:   testStatsToDate,
 	}
 
 	b.ResetTimer()
@@ -643,8 +643,8 @@ func BenchmarkGetEmailClientCounts(b *testing.B) {
 	})
 
 	options := map[string]interface{}{
-		"fromdate": "2014-01-01",
-		"todate":   "2014-02-01",
+		testFromDateKey: testStatsFromDate,
+		testToDateKey:   testStatsToDate,
 	}
 
 	b.ResetTimer()

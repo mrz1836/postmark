@@ -56,8 +56,8 @@ func (s *PostmarkTestSuite) TestGetSuppressions() {
 
 	res, err = s.client.GetSuppressions(context.Background(), "outbound", map[string]interface{}{
 		"emailaddress":      "address@wildbit.com",
-		"fromdate":          "2019-12-10",
-		"todate":            "2019-12-11",
+		testFromDateKey:     "2019-12-10",
+		testToDateKey:       "2019-12-11",
 		"suppressionreason": HardBounceReason,
 		"origin":            RecipientOrigin,
 	})

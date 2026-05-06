@@ -172,7 +172,7 @@ func createBatchEmails(batchSize int, emailDomain string) []Email {
 	var emails []Email
 	for i := 0; i < batchSize; i++ {
 		emails = append(emails, Email{
-			From:     "sender@example.com",
+			From:     testSenderEmail,
 			To:       fmt.Sprintf("user%d@%s", i, emailDomain),
 			Subject:  fmt.Sprintf("Test Email %d", i),
 			TextBody: fmt.Sprintf("Test body %d", i),
@@ -271,8 +271,8 @@ func FuzzEmailAddressValidation(f *testing.F) {
 
 		client := &Client{
 			HTTPClient:   &http.Client{},
-			ServerToken:  "test-token",
-			AccountToken: "test-account-token",
+			ServerToken:  testServerToken,
+			AccountToken: testAccountToken,
 			BaseURL:      server.URL,
 		}
 
@@ -324,8 +324,8 @@ func FuzzEmailHeaders(f *testing.F) {
 
 		client := &Client{
 			HTTPClient:   &http.Client{},
-			ServerToken:  "test-token",
-			AccountToken: "test-account-token",
+			ServerToken:  testServerToken,
+			AccountToken: testAccountToken,
 			BaseURL:      server.URL,
 		}
 
@@ -367,8 +367,8 @@ func FuzzEmailAttachments(f *testing.F) {
 
 		client := &Client{
 			HTTPClient:   &http.Client{},
-			ServerToken:  "test-token",
-			AccountToken: "test-account-token",
+			ServerToken:  testServerToken,
+			AccountToken: testAccountToken,
 			BaseURL:      server.URL,
 		}
 
@@ -396,8 +396,8 @@ func FuzzEmailBatch(f *testing.F) {
 
 		client := &Client{
 			HTTPClient:   &http.Client{},
-			ServerToken:  "test-token",
-			AccountToken: "test-account-token",
+			ServerToken:  testServerToken,
+			AccountToken: testAccountToken,
 			BaseURL:      server.URL,
 		}
 

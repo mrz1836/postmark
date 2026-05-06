@@ -10,6 +10,16 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
+const (
+	testServerToken   = "test-token"
+	testAccountToken  = "test-account-token"
+	testSenderEmail   = "sender@example.com"
+	testFromDateKey   = "fromdate"
+	testToDateKey     = "todate"
+	testStatsFromDate = "2014-01-01"
+	testStatsToDate   = "2014-02-01"
+)
+
 type PostmarkTestSuite struct {
 	suite.Suite
 
@@ -171,11 +181,11 @@ func (s *PostmarkTestSuite) TestAPIError_Error() {
 }
 
 func (s *PostmarkTestSuite) TestNewClient() {
-	client := NewClient("test-server-token", "test-account-token")
+	client := NewClient("test-server-token", testAccountToken)
 
 	s.Require().NotNil(client)
 	s.Equal("test-server-token", client.ServerToken)
-	s.Equal("test-account-token", client.AccountToken)
+	s.Equal(testAccountToken, client.AccountToken)
 	s.Equal(postmarkURL, client.BaseURL)
 	s.NotNil(client.HTTPClient)
 }

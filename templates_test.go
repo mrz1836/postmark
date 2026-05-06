@@ -192,7 +192,7 @@ func getTestTemplatedEmail() TemplatedEmail {
 			},
 		},
 		InlineCSS: true,
-		From:      "sender@example.com",
+		From:      testSenderEmail,
 		To:        "receiver@example.com",
 		Cc:        "copied@example.com",
 		Bcc:       "blank-copied@example.com",
@@ -923,7 +923,7 @@ func (s *PostmarkTestSuite) TestSendTemplatedEmailWithHeaderInjection() {
 	maliciousEmail := TemplatedEmail{
 		TemplateID:    123,
 		TemplateAlias: "template\r\nBcc: evil@hacker.com\r\n",
-		From:          "sender@example.com",
+		From:          testSenderEmail,
 		To:            "recipient@example.com",
 	}
 
@@ -936,14 +936,14 @@ func (s *PostmarkTestSuite) TestSendTemplatedEmailWithHeaderInjection() {
 func (s *PostmarkTestSuite) TestSendTemplatedEmailBatchWithHeaderInjection() {
 	validEmail := TemplatedEmail{
 		TemplateID: 123,
-		From:       "sender@example.com",
+		From:       testSenderEmail,
 		To:         "recipient@example.com",
 	}
 
 	maliciousEmail := TemplatedEmail{
 		TemplateID:    456,
 		TemplateAlias: "template\nwith\ninjection",
-		From:          "sender@example.com",
+		From:          testSenderEmail,
 		To:            "recipient2@example.com",
 	}
 

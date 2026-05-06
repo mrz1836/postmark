@@ -122,8 +122,8 @@ func FuzzGetBouncedTagsJSON(f *testing.F) {
 
 		client := &Client{
 			HTTPClient:   &http.Client{},
-			ServerToken:  "test-token",
-			AccountToken: "test-account-token",
+			ServerToken:  testServerToken,
+			AccountToken: testAccountToken,
 			BaseURL:      server.URL,
 		}
 
@@ -200,8 +200,8 @@ func FuzzBounceQueryParams(f *testing.F) {
 
 		client := &Client{
 			HTTPClient:   &http.Client{},
-			ServerToken:  "test-token",
-			AccountToken: "test-account-token",
+			ServerToken:  testServerToken,
+			AccountToken: testAccountToken,
 			BaseURL:      server.URL,
 		}
 
@@ -250,8 +250,8 @@ func FuzzBounceQueryParamsInjection(f *testing.F) {
 
 		client := &Client{
 			HTTPClient:   &http.Client{},
-			ServerToken:  "test-token",
-			AccountToken: "test-account-token",
+			ServerToken:  testServerToken,
+			AccountToken: testAccountToken,
 			BaseURL:      server.URL,
 		}
 
@@ -281,8 +281,8 @@ func FuzzBounceJSONStructure(f *testing.F) {
 
 		client := &Client{
 			HTTPClient:   &http.Client{},
-			ServerToken:  "test-token",
-			AccountToken: "test-account-token",
+			ServerToken:  testServerToken,
+			AccountToken: testAccountToken,
 			BaseURL:      server.URL,
 		}
 

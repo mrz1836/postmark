@@ -275,7 +275,7 @@ func createTemplateBatchEmails(batchSize int, templateID int64, templateAlias st
 				"index": i,
 				"name":  fmt.Sprintf("User %d", i),
 			},
-			From: "sender@example.com",
+			From: testSenderEmail,
 			To:   fmt.Sprintf("user%d@example.com", i),
 		}
 		emails = append(emails, email)
@@ -366,8 +366,8 @@ func FuzzTemplateValidation(f *testing.F) {
 
 		client := &Client{
 			HTTPClient:   &http.Client{},
-			ServerToken:  "test-token",
-			AccountToken: "test-account-token",
+			ServerToken:  testServerToken,
+			AccountToken: testAccountToken,
 			BaseURL:      server.URL,
 		}
 
@@ -397,8 +397,8 @@ func FuzzTemplateQueryParams(f *testing.F) {
 
 		client := &Client{
 			HTTPClient:   &http.Client{},
-			ServerToken:  "test-token",
-			AccountToken: "test-account-token",
+			ServerToken:  testServerToken,
+			AccountToken: testAccountToken,
 			BaseURL:      server.URL,
 		}
 
@@ -438,7 +438,7 @@ func FuzzTemplatedEmail(f *testing.F) {
 			TemplateID:    templateID,
 			TemplateAlias: templateAlias,
 			TemplateModel: templateModel,
-			From:          "sender@example.com",
+			From:          testSenderEmail,
 			To:            "recipient@example.com",
 			InlineCSS:     true,
 		}
@@ -448,8 +448,8 @@ func FuzzTemplatedEmail(f *testing.F) {
 
 		client := &Client{
 			HTTPClient:   &http.Client{},
-			ServerToken:  "test-token",
-			AccountToken: "test-account-token",
+			ServerToken:  testServerToken,
+			AccountToken: testAccountToken,
 			BaseURL:      server.URL,
 		}
 
@@ -483,8 +483,8 @@ func FuzzTemplateBatch(f *testing.F) {
 
 		client := &Client{
 			HTTPClient:   &http.Client{},
-			ServerToken:  "test-token",
-			AccountToken: "test-account-token",
+			ServerToken:  testServerToken,
+			AccountToken: testAccountToken,
 			BaseURL:      server.URL,
 		}
 
