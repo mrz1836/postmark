@@ -167,6 +167,13 @@ jobs:
             echo "⚠️  Nancy scan inconclusive - OSS Index rate-limited the request (not failing CI)."
             echo "    Configure OSSI_USERNAME and OSSI_TOKEN secrets to authenticate and lift the limit."
             echo "    Register at https://ossindex.sonatype.org/user/register"
+          elif grep -qi "402 Payment Required" nancy-output.log; then
+            # OSS Index returned 402 (free-tier quota exhausted / paid plan required);
+            # treat as inconclusive, NOT as a CI failure.
+            echo "nancy-status=payment-required" >> $GITHUB_OUTPUT
+            echo "⚠️  Nancy scan inconclusive - OSS Index returned 402 Payment Required (not failing CI)."
+            echo "    Configure OSSI_USERNAME and OSSI_TOKEN secrets to authenticate against your OSS Index account."
+            echo "    Register at https://ossindex.sonatype.org/user/register"
           else
             echo "nancy-status=failure" >> $GITHUB_OUTPUT
             echo "❌ Nancy scan completed - vulnerabilities detected (exit code: $NANCY_EXIT_CODE)"
@@ -189,6 +196,14 @@ jobs:
           echo "::warning title=Nancy Rate Limited::OSS Index rate-limited the scan; results inconclusive. Add OSSI_USERNAME and OSSI_TOKEN secrets to authenticate and lift the limit."
 
       # --------------------------------------------------------------------
+      # Create GitHub Annotations for 402 Payment Required (warning, not error)
+      # --------------------------------------------------------------------
+      - name: 📋 Create GitHub Annotations (payment-required)
+        if: always() && steps.run-nancy.outputs.nancy-status == 'payment-required'
+        run: |
+          echo "::warning title=Nancy Payment Required::OSS Index returned 402 Payment Required; results inconclusive. Add OSSI_USERNAME and OSSI_TOKEN secrets to authenticate against your OSS Index account."
+
+      # --------------------------------------------------------------------
       # Summary of Nancy results
       # --------------------------------------------------------------------
       - name: 📊 Job Summary
@@ -209,6 +224,8 @@ jobs:
             echo "| **Result** | ✅ No vulnerabilities found |" >> $GITHUB_STEP_SUMMARY
           elif [[ "$NANCY_STATUS" == "rate-limited" ]]; then
             echo "| **Result** | ⚠️ Rate limited by OSS Index — scan inconclusive (CI not failed) |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$NANCY_STATUS" == "payment-required" ]]; then
+            echo "| **Result** | ⚠️ OSS Index returned 402 Payment Required — scan inconclusive (CI not failed) |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| **Result** | ❌ Vulnerabilities detected |" >> $GITHUB_STEP_SUMMARY
           fi
@@ -233,6 +250,31 @@ jobs:
             echo "3. Add them as repository secrets named \`OSSI_USERNAME\` and \`OSSI_TOKEN\`." >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "Authenticated requests have a substantially higher rate limit and avoid this state." >> $GITHUB_STEP_SUMMARY
+            if [[ -f nancy-output.log ]]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "<details>" >> $GITHUB_STEP_SUMMARY
+              echo "<summary>Click to expand Nancy output</summary>" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              head -50 nancy-output.log >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              echo "</details>" >> $GITHUB_STEP_SUMMARY
+            fi
+          # Payment-required (402): explain clearly that CI was NOT failed and how to remediate
+          elif [[ "$NANCY_STATUS" == "payment-required" ]]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### ⚠️ OSS Index Payment Required (402)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Sonatype's OSS Index returned **402 Payment Required**, indicating the free-tier quota for unauthenticated requests has been exhausted." >> $GITHUB_STEP_SUMMARY
+            echo "**This is not a vulnerability detection** and CI has **not** been failed for this run." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**To remediate (recommended):**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "1. Register a free account at <https://ossindex.sonatype.org/user/register>." >> $GITHUB_STEP_SUMMARY
+            echo "2. Retrieve your username (email) and API token from <https://ossindex.sonatype.org/user/settings>." >> $GITHUB_STEP_SUMMARY
+            echo "3. Add them as repository secrets named \`OSSI_USERNAME\` and \`OSSI_TOKEN\`." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Authenticated requests have a higher quota and avoid this state." >> $GITHUB_STEP_SUMMARY
             if [[ -f nancy-output.log ]]; then
               echo "" >> $GITHUB_STEP_SUMMARY
               echo "<details>" >> $GITHUB_STEP_SUMMARY
