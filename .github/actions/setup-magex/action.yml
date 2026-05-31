@@ -156,11 +156,48 @@ runs:
             --pattern "$ASSET_NAME" \
             --dir .; then
           echo "✅ Download successful"
-          mv "$ASSET_NAME" mage-x.tar.gz
         else
           echo "❌ Download failed for $ASSET_NAME from mrz1836/mage-x@$VERSION"
           exit 1
         fi
+
+        # Verify SHA256 integrity against the release's checksums file before extraction.
+        # Without this, a compromised release asset would silently be executed.
+        # GoReleaser names the file mage-x_${VERSION}_checksums.txt by default.
+        CHECKSUMS_FILE="mage-x_${CLEAN_VERSION}_checksums.txt"
+        echo "🔐 Verifying SHA256 checksum against $CHECKSUMS_FILE..."
+        if ! gh release download "$VERSION" \
+            --repo mrz1836/mage-x \
+            --pattern "$CHECKSUMS_FILE" \
+            --dir .; then
+          echo "❌ Failed to download $CHECKSUMS_FILE from mrz1836/mage-x@$VERSION"
+          echo "❌ Cannot verify binary integrity — refusing to proceed"
+          exit 1
+        fi
+
+        EXPECTED_HASH=$(grep " ${ASSET_NAME}\$" "$CHECKSUMS_FILE" | awk '{print $1}')
+        if [[ -z "$EXPECTED_HASH" ]]; then
+          echo "❌ No checksum entry found for $ASSET_NAME in $CHECKSUMS_FILE"
+          echo "📋 $CHECKSUMS_FILE contents:"
+          cat "$CHECKSUMS_FILE"
+          exit 1
+        fi
+
+        if command -v sha256sum >/dev/null 2>&1; then
+          ACTUAL_HASH=$(sha256sum "$ASSET_NAME" | awk '{print $1}')
+        else
+          ACTUAL_HASH=$(shasum -a 256 "$ASSET_NAME" | awk '{print $1}')
+        fi
+
+        if [[ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]]; then
+          echo "❌ Checksum mismatch for $ASSET_NAME"
+          echo "   Expected: $EXPECTED_HASH"
+          echo "   Actual:   $ACTUAL_HASH"
+          exit 1
+        fi
+        echo "✅ SHA256 checksum verified: $ACTUAL_HASH"
+
+        mv "$ASSET_NAME" mage-x.tar.gz
 
         # Extract the tarball
         if tar -xzf mage-x.tar.gz; then

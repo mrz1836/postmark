@@ -9,7 +9,7 @@
 #  centralized management across all workflows.
 #
 #  Triggers:
-#  - Scheduled: Monday-Friday at 08:32 UTC
+#  - Scheduled: Monday-Friday at 12:00 UTC
 #  - Manual: Via workflow_dispatch
 #
 #  Maintainer: @mrz1836
@@ -39,15 +39,27 @@ concurrency:
 
 jobs:
   # ----------------------------------------------------------------------------------
-  # Load Environment Variables
+  # Stale processing (single consolidated job)
+  #
+  # Workflow phases (each preserved as a step):
+  #   🌍 Load environment       → reads .github/env/*
+  #   🔑 Log token configuration → indicates which token will be used
+  #   🔧 Extract configuration  → STALE_* vars into step outputs
+  #   📅 Calculate cutoff dates → stale/close window math
+  #   📋 Process stale issues   → mark/close inactive issues
+  #   🔀 Process stale PRs      → mark/close inactive PRs
+  #   🏷️ Remove stale labels    → clean labels off recently-updated items
+  #   📊 Generate summary       → step summary
   # ----------------------------------------------------------------------------------
-  load-env:
-    name: 🌍 Load Environment Variables
-    runs-on: ubuntu-latest
+  stale-check:
+    name: 🧹 Process Stale Items
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
-      contents: read # Required: Read repository content for sparse checkout
-    outputs:
-      env-json: ${{ steps.load-env.outputs.env-json }}
+      contents: read # Required: Sparse checkout for env files
+      issues: write # Required to add labels and comments
+      pull-requests: write # Required to add labels and comments on PRs
+
     steps:
       # --------------------------------------------------------------------
       # Check out code to access env file
@@ -55,6 +67,7 @@ jobs:
       - name: 📥 Checkout code (sparse)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          persist-credentials: false
           sparse-checkout: |
             .github/env
             .github/actions/load-env
@@ -63,27 +76,15 @@ jobs:
       # Load and parse environment file
       # --------------------------------------------------------------------
       - name: 🌍 Load environment variables
-        uses: ./.github/actions/load-env
         id: load-env
+        uses: ./.github/actions/load-env
 
-  # ----------------------------------------------------------------------------------
-  # Main Stale Check Job
-  # ----------------------------------------------------------------------------------
-  stale-check:
-    name: 🧹 Process Stale Items
-    needs: [load-env]
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write # Required to add labels and comments
-      pull-requests: write # Required to add labels and comments on PRs
-
-    steps:
       # --------------------------------------------------------------------
       # Log token configuration
       # --------------------------------------------------------------------
       - name: 🔑 Log token configuration
         env:
-          ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
           GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
         run: |
           PREFERRED_TOKEN=$(echo "$ENV_JSON" | jq -r '.PREFERRED_GITHUB_TOKEN')
@@ -100,7 +101,7 @@ jobs:
       - name: 🔧 Extract stale configuration
         id: config
         env:
-          ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
         run: |
           echo "🎯 Extracting stale workflow configuration..."
 
@@ -113,12 +114,14 @@ jobs:
           OPERATIONS_PER_RUN=$(echo "$ENV_JSON" | jq -r '.STALE_OPERATIONS_PER_RUN')
 
           # Export to outputs
-          echo "days-before-stale=$DAYS_BEFORE_STALE" >> $GITHUB_OUTPUT
-          echo "days-before-close=$DAYS_BEFORE_CLOSE" >> $GITHUB_OUTPUT
-          echo "stale-label=$STALE_LABEL" >> $GITHUB_OUTPUT
-          echo "exempt-issue-labels=$EXEMPT_ISSUE_LABELS" >> $GITHUB_OUTPUT
-          echo "exempt-pr-labels=$EXEMPT_PR_LABELS" >> $GITHUB_OUTPUT
-          echo "operations-per-run=$OPERATIONS_PER_RUN" >> $GITHUB_OUTPUT
+          {
+            echo "days-before-stale=$DAYS_BEFORE_STALE"
+            echo "days-before-close=$DAYS_BEFORE_CLOSE"
+            echo "stale-label=$STALE_LABEL"
+            echo "exempt-issue-labels=$EXEMPT_ISSUE_LABELS"
+            echo "exempt-pr-labels=$EXEMPT_PR_LABELS"
+            echo "operations-per-run=$OPERATIONS_PER_RUN"
+          } >> $GITHUB_OUTPUT
 
           echo "✅ Configuration extracted successfully"
 
@@ -153,7 +156,7 @@ jobs:
       - name: 📋 Process stale issues
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
           GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
         with:
           github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
@@ -291,7 +294,7 @@ jobs:
       - name: 🔀 Process stale pull requests
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
         with:
           github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
           script: |
@@ -536,8 +539,9 @@ jobs:
       # Generate a workflow summary report
       # --------------------------------------------------------------------
       - name: 📊 Generate workflow summary
+        if: always()
         env:
-          ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
           GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
         run: |
           echo "🚀 Generating workflow summary..."
@@ -550,26 +554,25 @@ jobs:
             TOKEN_TYPE="🔑 Default GITHUB_TOKEN"
           fi
 
-          echo "# 🧹 Stale Check Workflow Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**⏰ Completed:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "## ⚙️ Configuration" >> $GITHUB_STEP_SUMMARY
-          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Days before stale | ${{ steps.config.outputs.days-before-stale }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Days before close | ${{ steps.config.outputs.days-before-close }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Stale label | ${{ steps.config.outputs.stale-label }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Operations limit | ${{ steps.config.outputs.operations-per-run }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Token type | $TOKEN_TYPE |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "## 🏷️ Exempt Labels" >> $GITHUB_STEP_SUMMARY
-          echo "- **Issues:** ${{ steps.config.outputs.exempt-issue-labels }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Pull Requests:** ${{ steps.config.outputs.exempt-pr-labels }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "📋 _Check the job logs above for detailed processing statistics._" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Stale check workflow completed successfully!**" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "# 🧹 Stale Check Workflow Summary"
+            echo ""
+            echo "**⏰ Completed:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo ""
+            echo "## ⚙️ Configuration"
+            echo "| Setting | Value |"
+            echo "|---------|-------|"
+            echo "| Days before stale | ${{ steps.config.outputs.days-before-stale }} |"
+            echo "| Days before close | ${{ steps.config.outputs.days-before-close }} |"
+            echo "| Stale label | ${{ steps.config.outputs.stale-label }} |"
+            echo "| Operations limit | ${{ steps.config.outputs.operations-per-run }} |"
+            echo "| Token type | $TOKEN_TYPE |"
+            echo ""
+            echo "## 🏷️ Exempt Labels"
+            echo "- **Issues:** ${{ steps.config.outputs.exempt-issue-labels }}"
+            echo "- **Pull Requests:** ${{ steps.config.outputs.exempt-pr-labels }}"
+            echo ""
+            echo "📋 _Check the job logs above for detailed processing statistics._"
+            echo ""
+            echo "✅ **Stale check workflow completed successfully!**"
+          } >> $GITHUB_STEP_SUMMARY

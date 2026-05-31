@@ -46,6 +46,7 @@ runs:
       id: load-env
       shell: bash
       run: |
+        set -euo pipefail
         echo "📋 Loading environment configuration..."
 
         LOADER_SCRIPT=".github/env/load-env.sh"

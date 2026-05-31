@@ -51,22 +51,57 @@ concurrency:
 
 jobs:
   # ----------------------------------------------------------------------------------
-  # Load Environment Variables
+  # Auto-merge processing (single consolidated job)
+  #
+  # Workflow phases (each preserved as a step):
+  #   🌍 Load environment        → reads .github/env/*
+  #   🔧 Extract configuration   → exports AUTO_MERGE_* vars to env
+  #   🤖 Process auto-merge      → applies conditions and enables/disables auto-merge
+  #   📊 Generate summary        → always
   # ----------------------------------------------------------------------------------
-  load-env:
-    name: 🌍 Load Environment Variables
-    runs-on: ubuntu-latest
+  auto-merge:
+    name: 🤖 Auto-merge on Approval
+    # ----------------------------------------------------------------
+    # Event gate: skip review events that can't meaningfully
+    # change the auto-merge decision.
+    #
+    # `pull_request_review:submitted` fires for ALL review states —
+    # "approved", "changes_requested", "commented", and "dismissed".
+    # Only the first two affect auto-merge state. A pure "commented"
+    # review (very common — "lgtm but one question") would otherwise
+    # trigger a full workflow run that just exits at conditions-not-met.
+    # Same for "dismissed" reviews.
+    #
+    # The first clause keeps the non-review triggers
+    # (ready_for_review, review_request_removed) running normally —
+    # both are real state changes that must re-evaluate the PR.
+    # ----------------------------------------------------------------
+    if: |
+      github.event_name != 'pull_request_review' ||
+      contains(fromJSON('["approved", "changes_requested"]'), github.event.review.state)
+    runs-on: ubuntu-24.04
     permissions:
-      contents: read
-    outputs:
-      env-json: ${{ steps.load-env.outputs.env-json }}
+      contents: read # Required: Sparse checkout for env files
+      pull-requests: write # Required: Update PR status and enable auto-merge
+      issues: write # Required: Add labels and create comments
+
     steps:
       # --------------------------------------------------------------------
       # Check out code to access env file
       # --------------------------------------------------------------------
       - name: 📥 Checkout code (sparse)
+        # SECURITY: pin the checkout to the trusted base ref so the local
+        # ./.github/actions/load-env action (run below with pull-requests/issues write)
+        # can never be a PR-controlled version. Default checkout on pull_request /
+        # pull_request_review events resolves to the PR merge ref, which is attacker-influenced.
+        # `github.base_ref` is ONLY populated for pull_request / pull_request_target — it is
+        # empty on pull_request_review, where `github.ref` is refs/pull/<n>/merge (PR-controlled).
+        # Read the base branch directly from the event payload so it is the trusted base ref for
+        # BOTH triggers. Env files and the action are not modified there, so base-ref loading is safe.
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          persist-credentials: false
           sparse-checkout: |
             .github/env
             .github/actions/load-env
@@ -75,98 +110,55 @@ jobs:
       # Load and parse environment file
       # --------------------------------------------------------------------
       - name: 🌍 Load environment variables
-        uses: ./.github/actions/load-env
         id: load-env
+        uses: ./.github/actions/load-env
 
-  # ----------------------------------------------------------------------------------
-  # Process Auto-merge
-  # ----------------------------------------------------------------------------------
-  process-auto-merge:
-    name: 🤖 Process Auto-merge
-    needs: [load-env]
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write # Required: Update PR status and enable auto-merge
-      issues: write # Required: Add labels and create comments
-    outputs:
-      action-taken: ${{ steps.process.outputs.action }}
-      pr-number: ${{ github.event.pull_request.number }}
-
-    steps:
       # --------------------------------------------------------------------
-      # Extract configuration from env-json
+      # Extract auto-merge configuration up-front
       # --------------------------------------------------------------------
       - name: 🔧 Extract configuration
-        id: config
         env:
-          ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
         run: |
           echo "📋 Extracting auto-merge configuration from environment..."
 
-          # Extract all needed variables
+          # Single jq pass for all config we need across steps
           MIN_APPROVALS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_MIN_APPROVALS')
-          REQUIRE_ALL_REVIEWS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_REQUIRE_ALL_REQUESTED_REVIEWS')
-          MERGE_TYPES=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_ALLOWED_MERGE_TYPES')
-          DELETE_BRANCH=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_DELETE_BRANCH')
-          SKIP_DRAFT=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_DRAFT')
-          SKIP_WIP=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_WIP')
-          WIP_LABELS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_WIP_LABELS')
-          COMMENT_ON_ENABLE=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_COMMENT_ON_ENABLE')
-          COMMENT_ON_DISABLE=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_COMMENT_ON_DISABLE')
-          LABELS_TO_ADD=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_LABELS_TO_ADD')
-          SKIP_BOT_PRS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_BOT_PRS')
-          SKIP_FORK_PRS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_FORK_PRS')
-          COMMENT_ON_FORK_SKIP=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_COMMENT_ON_FORK_SKIP')
-          AUTO_MERGE_REQUIRE_LABEL=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_REQUIRE_LABEL')
-          AUTO_MERGE_LABEL=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_LABEL')
-          PREFERRED_TOKEN=$(echo "$ENV_JSON" | jq -r '.PREFERRED_GITHUB_TOKEN')
-
-          # Validate required configuration
           if [[ -z "$MIN_APPROVALS" ]] || [[ "$MIN_APPROVALS" == "null" ]]; then
             MIN_APPROVALS="1"  # Default to 1 approval
           fi
 
-          # Set as environment variables for all subsequent steps
-          echo "MIN_APPROVALS=$MIN_APPROVALS" >> $GITHUB_ENV
-          echo "REQUIRE_ALL_REVIEWS=$REQUIRE_ALL_REVIEWS" >> $GITHUB_ENV
-          echo "MERGE_TYPES=$MERGE_TYPES" >> $GITHUB_ENV
-          echo "DELETE_BRANCH=$DELETE_BRANCH" >> $GITHUB_ENV
-          echo "SKIP_DRAFT=$SKIP_DRAFT" >> $GITHUB_ENV
-          echo "SKIP_WIP=$SKIP_WIP" >> $GITHUB_ENV
-          echo "WIP_LABELS=$WIP_LABELS" >> $GITHUB_ENV
-          echo "COMMENT_ON_ENABLE=$COMMENT_ON_ENABLE" >> $GITHUB_ENV
-          echo "COMMENT_ON_DISABLE=$COMMENT_ON_DISABLE" >> $GITHUB_ENV
-          echo "LABELS_TO_ADD=$LABELS_TO_ADD" >> $GITHUB_ENV
-          echo "SKIP_BOT_PRS=$SKIP_BOT_PRS" >> $GITHUB_ENV
-          echo "SKIP_FORK_PRS=$SKIP_FORK_PRS" >> $GITHUB_ENV
-          echo "COMMENT_ON_FORK_SKIP=$COMMENT_ON_FORK_SKIP" >> $GITHUB_ENV
-          echo "AUTO_MERGE_REQUIRE_LABEL=$AUTO_MERGE_REQUIRE_LABEL" >> $GITHUB_ENV
-          echo "AUTO_MERGE_LABEL=$AUTO_MERGE_LABEL" >> $GITHUB_ENV
-
-          # Determine default merge type
+          MERGE_TYPES=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_ALLOWED_MERGE_TYPES')
           DEFAULT_MERGE_TYPE=$(echo "$MERGE_TYPES" | cut -d',' -f1)
           if [[ -z "$DEFAULT_MERGE_TYPE" ]]; then
             DEFAULT_MERGE_TYPE="squash"
           fi
-          echo "DEFAULT_MERGE_TYPE=$DEFAULT_MERGE_TYPE" >> $GITHUB_ENV
 
-          # Log configuration
+          {
+            echo "MIN_APPROVALS=$MIN_APPROVALS"
+            echo "REQUIRE_ALL_REVIEWS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_REQUIRE_ALL_REQUESTED_REVIEWS')"
+            echo "MERGE_TYPES=$MERGE_TYPES"
+            echo "DEFAULT_MERGE_TYPE=$DEFAULT_MERGE_TYPE"
+            echo "DELETE_BRANCH=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_DELETE_BRANCH')"
+            echo "SKIP_DRAFT=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_DRAFT')"
+            echo "SKIP_WIP=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_WIP')"
+            echo "WIP_LABELS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_WIP_LABELS')"
+            echo "COMMENT_ON_ENABLE=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_COMMENT_ON_ENABLE')"
+            echo "COMMENT_ON_DISABLE=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_COMMENT_ON_DISABLE')"
+            echo "LABELS_TO_ADD=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_LABELS_TO_ADD')"
+            echo "SKIP_BOT_PRS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_BOT_PRS')"
+            echo "SKIP_FORK_PRS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_FORK_PRS')"
+            echo "COMMENT_ON_FORK_SKIP=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_COMMENT_ON_FORK_SKIP')"
+            echo "AUTO_MERGE_REQUIRE_LABEL=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_REQUIRE_LABEL')"
+            echo "AUTO_MERGE_LABEL=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_LABEL')"
+          } >> "$GITHUB_ENV"
+
           echo "🔍 Configuration loaded:"
           echo "  ✅ Min approvals: $MIN_APPROVALS"
-          echo "  👥 Require all reviews: $REQUIRE_ALL_REVIEWS"
           echo "  🔀 Merge types: $MERGE_TYPES (default: $DEFAULT_MERGE_TYPE)"
-          echo "  🗑️ Delete branch: $DELETE_BRANCH"
-          echo "  📝 Skip draft: $SKIP_DRAFT"
-          echo "  🚧 Skip WIP: $SKIP_WIP"
-          echo "  🏷️ WIP labels: $WIP_LABELS"
-          echo "  💬 Comment on enable: $COMMENT_ON_ENABLE"
-          echo "  💬 Comment on disable: $COMMENT_ON_DISABLE"
-          echo "  🏷️ Labels to add: $LABELS_TO_ADD"
-          echo "  🤖 Skip bot PRs: $SKIP_BOT_PRS"
-          echo "  🍴 Skip fork PRs: $SKIP_FORK_PRS"
-          echo "  💬 Comment on fork skip: $COMMENT_ON_FORK_SKIP"
-          echo "  🏷️ Require automerge label: $AUTO_MERGE_REQUIRE_LABEL"
-          echo "  🏷️ Automerge label name: $AUTO_MERGE_LABEL"
+          echo "  🤖 Skip bot PRs: $(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_BOT_PRS')"
+          echo "  🍴 Skip fork PRs: $(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_FORK_PRS')"
+          echo "  🏷️ Require automerge label: $(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_REQUIRE_LABEL')"
           echo "  🔑 Token: Selected via github-script action"
 
       # --------------------------------------------------------------------
@@ -231,9 +223,9 @@ jobs:
                 console.log('   Security reason: Fork PRs require manual maintainer review before merge');
 
                 // Note: Comments are not posted to fork PRs due to read-only GITHUB_TOKEN permissions
-                // Fork PR handling is already managed by pull-request-management-fork.yml workflow
+                // Fork PR welcome/labeling is handled by pull-request-management.yml's fork job
                 if (process.env.COMMENT_ON_FORK_SKIP === 'true') {
-                  console.log('   ℹ️  Comment posting skipped for fork PR (handled by fork PR workflow)');
+                  console.log('   ℹ️  Comment posting skipped for fork PR (handled by PR mgmt fork job)');
                 }
 
                 core.setOutput('action', 'skip-fork');
@@ -487,138 +479,81 @@ jobs:
               throw error;
             }
 
-  # ----------------------------------------------------------------------------------
-  # Generate Workflow Summary Report
-  # ----------------------------------------------------------------------------------
-  summary:
-    name: 📊 Generate Summary
-    if: always()
-    needs: [load-env, process-auto-merge]
-    runs-on: ubuntu-latest
-    steps:
       # --------------------------------------------------------------------
       # Generate a workflow summary report
       # --------------------------------------------------------------------
       - name: 📊 Generate workflow summary
+        if: always()
         env:
-          ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ACTION: ${{ steps.process.outputs.action }}
         run: |
           echo "📊 Generating workflow summary..."
 
-          echo "# 🤖 Auto-merge on Approval Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**⏰ Processed:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
-          echo "**📋 PR:** #${{ needs.process-auto-merge.outputs.pr-number }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
           # Determine action taken
-          ACTION="${{ needs.process-auto-merge.outputs.action-taken }}"
           case "$ACTION" in
-            "enabled")
-              ACTION_DESC="✅ Auto-merge enabled"
-              ;;
-            "already-enabled")
-              ACTION_DESC="✅ Auto-merge already enabled"
-              ;;
-            "disabled-changes-requested")
-              ACTION_DESC="🛑 Auto-merge disabled (changes requested)"
-              ;;
-            "skip-bot")
-              ACTION_DESC="🤖 Skipped (bot PR)"
-              ;;
-            "skip-fork")
-              ACTION_DESC="🍴 Skipped (fork PR - security policy)"
-              ;;
-            "skip-deleted-fork")
-              ACTION_DESC="🍴 Skipped (deleted fork PR)"
-              ;;
-            "skip-draft")
-              ACTION_DESC="📝 Skipped (draft PR)"
-              ;;
-            "skip-wip")
-              ACTION_DESC="🚧 Skipped (work in progress)"
-              ;;
-            "skip-missing-automerge-label")
-              ACTION_DESC="🏷️ Skipped (missing automerge label)"
-              ;;
-            "conditions-not-met")
-              ACTION_DESC="⏳ Conditions not met"
-              ;;
-            "failed")
-              ACTION_DESC="❌ Failed to enable auto-merge"
-              ;;
-            *)
-              ACTION_DESC="❓ Unknown action: $ACTION"
-              ;;
+            "enabled")                       ACTION_DESC="✅ Auto-merge enabled" ;;
+            "already-enabled")               ACTION_DESC="✅ Auto-merge already enabled" ;;
+            "disabled-changes-requested")    ACTION_DESC="🛑 Auto-merge disabled (changes requested)" ;;
+            "skip-bot")                      ACTION_DESC="🤖 Skipped (bot PR)" ;;
+            "skip-fork")                     ACTION_DESC="🍴 Skipped (fork PR - security policy)" ;;
+            "skip-deleted-fork")             ACTION_DESC="🍴 Skipped (deleted fork PR)" ;;
+            "skip-draft")                    ACTION_DESC="📝 Skipped (draft PR)" ;;
+            "skip-wip")                      ACTION_DESC="🚧 Skipped (work in progress)" ;;
+            "skip-missing-automerge-label")  ACTION_DESC="🏷️ Skipped (missing automerge label)" ;;
+            "conditions-not-met")            ACTION_DESC="⏳ Conditions not met" ;;
+            "failed")                        ACTION_DESC="❌ Failed to enable auto-merge" ;;
+            *)                               ACTION_DESC="❓ Unknown action: $ACTION" ;;
           esac
 
-          echo "## 🎯 Action Taken" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "$ACTION_DESC" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "### 🔧 Current Configuration" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Extract configuration for display
-          MIN_APPROVALS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_MIN_APPROVALS')
-          REQUIRE_ALL_REVIEWS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_REQUIRE_ALL_REQUESTED_REVIEWS')
-          MERGE_TYPES=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_ALLOWED_MERGE_TYPES')
-          SKIP_DRAFT=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_DRAFT')
-          SKIP_WIP=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_WIP')
-          SKIP_BOT_PRS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_BOT_PRS')
-          SKIP_FORK_PRS=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_FORK_PRS')
-
-          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Min approvals | $MIN_APPROVALS |" >> $GITHUB_STEP_SUMMARY
-          echo "| Require all reviews | $REQUIRE_ALL_REVIEWS |" >> $GITHUB_STEP_SUMMARY
-          echo "| Allowed merge types | $MERGE_TYPES |" >> $GITHUB_STEP_SUMMARY
-          echo "| Skip draft PRs | $SKIP_DRAFT |" >> $GITHUB_STEP_SUMMARY
-          echo "| Skip WIP PRs | $SKIP_WIP |" >> $GITHUB_STEP_SUMMARY
-          echo "| Skip bot PRs | $SKIP_BOT_PRS |" >> $GITHUB_STEP_SUMMARY
-          echo "| Skip fork PRs | $SKIP_FORK_PRS |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "🤖 _Automated by GitHub Actions_" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "# 🤖 Auto-merge on Approval Summary"
+            echo ""
+            echo "**⏰ Processed:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "**📋 PR:** #$PR_NUMBER"
+            echo ""
+            echo "## 🎯 Action Taken"
+            echo ""
+            echo "$ACTION_DESC"
+            echo ""
+            echo "### 🔧 Current Configuration"
+            echo ""
+            echo "| Setting | Value |"
+            echo "|---------|-------|"
+            echo "| Min approvals | ${MIN_APPROVALS} |"
+            echo "| Require all reviews | ${REQUIRE_ALL_REVIEWS} |"
+            echo "| Allowed merge types | ${MERGE_TYPES} |"
+            echo "| Skip draft PRs | ${SKIP_DRAFT} |"
+            echo "| Skip WIP PRs | ${SKIP_WIP} |"
+            echo "| Skip bot PRs | ${SKIP_BOT_PRS} |"
+            echo "| Skip fork PRs | ${SKIP_FORK_PRS} |"
+            echo ""
+            echo "---"
+            echo "🤖 _Automated by GitHub Actions_"
+          } >> $GITHUB_STEP_SUMMARY
 
       # --------------------------------------------------------------------
-      # Report final workflow status
+      # Report final workflow status (stdout)
       # --------------------------------------------------------------------
       - name: 📢 Report workflow status
+        if: always()
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ACTION: ${{ steps.process.outputs.action }}
         run: |
           echo "=== 🤖 Auto-merge on Approval Summary ==="
-          echo "📋 PR: #${{ needs.process-auto-merge.outputs.pr-number }}"
+          echo "📋 PR: #$PR_NUMBER"
 
-          ACTION="${{ needs.process-auto-merge.outputs.action-taken }}"
           case "$ACTION" in
-            enabled)
-              echo "✅ Action: Auto-merge enabled successfully"
-              ;;
-            already-enabled)
-              echo "✅ Action: Auto-merge was already enabled"
-              ;;
-            disabled-changes-requested)
-              echo "🛑 Action: Auto-merge disabled due to changes requested"
-              ;;
-            skip-fork)
-              echo "🍴 Action: Skipped - Fork PR (security policy)"
-              ;;
-            skip-missing-automerge-label)
-              echo "🏷️ Action: Skipped - Missing automerge label"
-              ;;
-            skip-*)
-              echo "⏭️ Action: Skipped - $ACTION"
-              ;;
-            conditions-not-met)
-              echo "⏳ Action: Waiting for conditions to be met"
-              ;;
-            failed)
-              echo "❌ Action: Failed to enable auto-merge"
-              ;;
-            *)
-              echo "❓ Action: $ACTION"
-              ;;
+            enabled)                       echo "✅ Action: Auto-merge enabled successfully" ;;
+            already-enabled)               echo "✅ Action: Auto-merge was already enabled" ;;
+            disabled-changes-requested)    echo "🛑 Action: Auto-merge disabled due to changes requested" ;;
+            skip-fork)                     echo "🍴 Action: Skipped - Fork PR (security policy)" ;;
+            skip-missing-automerge-label)  echo "🏷️ Action: Skipped - Missing automerge label" ;;
+            skip-*)                        echo "⏭️ Action: Skipped - $ACTION" ;;
+            conditions-not-met)            echo "⏳ Action: Waiting for conditions to be met" ;;
+            failed)                        echo "❌ Action: Failed to enable auto-merge" ;;
+            *)                             echo "❓ Action: $ACTION" ;;
           esac
 
           echo "🕐 Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"

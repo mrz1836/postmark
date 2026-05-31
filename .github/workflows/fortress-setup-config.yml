@@ -7,33 +7,20 @@
 #
 #  Maintainer: @mrz1836
 #
+#  NOTE:
+#  - `load-env` and `test-magex` run as steps inside this workflow. The orchestrator
+#    (`fortress.yml`) calls this workflow directly off `paths-check`, with no
+#    `env-json` input — env loading happens inside.
+#
 # ------------------------------------------------------------------------------------
 name: GoFortress (Setup Configuration)
 on:
   workflow_call:
-    inputs:
-      env-json:
-        description: "JSON string of environment variables"
-        required: true
-        type: string
-      primary-runner:
-        description: "Primary runner OS"
-        required: true
-        type: string
-      env-file-count:
-        description: "Number of env files loaded"
-        required: false
-        type: string
-        default: "0"
-      var-count:
-        description: "Total number of variables loaded"
-        required: false
-        type: string
-        default: "0"
+    # No inputs — environment is loaded inside the job.
     secrets:
       github-token:
         description: "GitHub token for API access"
-        required: true
+        required: false
     outputs:
       benchmarks-enabled:
         description: "Whether benchmarks are enabled"
@@ -164,6 +151,21 @@ on:
       completion-report-enabled:
         description: "Whether workflow completion report is enabled"
         value: ${{ jobs.setup-config.outputs.completion-report-enabled }}
+      # ----------------------------------------------------------------
+      # Environment outputs
+      # ----------------------------------------------------------------
+      env-json:
+        description: "JSON string of environment variables"
+        value: ${{ jobs.setup-config.outputs.env-json }}
+      env-file-count:
+        description: "Number of env files loaded"
+        value: ${{ jobs.setup-config.outputs.env-file-count }}
+      var-count:
+        description: "Total number of variables loaded"
+        value: ${{ jobs.setup-config.outputs.var-count }}
+      mage-x-version:
+        description: "MAGE-X version verified by setup-config"
+        value: ${{ jobs.setup-config.outputs.mage-x-version }}
 
 # Security: Restrict default permissions (jobs must explicitly request what they need)
 permissions: {}
@@ -174,10 +176,17 @@ jobs:
   # ----------------------------------------------------------------------------------
   setup-config:
     name: 🔧 Setup CI Config
-    runs-on: ${{ inputs.primary-runner }}
+    # Hard-coded runner: this job loads env from .github/env/ to discover the
+    # eventual `primary-runner` value, so it can't run on it.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: read
     outputs:
+      env-json: ${{ steps.load-env.outputs.env-json }}
+      env-file-count: ${{ steps.load-env.outputs.env-file-count }}
+      var-count: ${{ steps.load-env.outputs.var-count }}
+      mage-x-version: ${{ steps.verify-magex.outputs.version }}
       benchmarks-enabled: ${{ steps.config.outputs.benchmarks-enabled }}
       benchmark-matrix: ${{ steps.matrix.outputs.matrix }}
       code-coverage-enabled: ${{ steps.config.outputs.code-coverage-enabled }}
@@ -222,6 +231,21 @@ jobs:
       fork-security-mode: ${{ steps.fork-detection.outputs.fork-security-mode }}
       completion-report-enabled: ${{ steps.config.outputs.completion-report-enabled }}
     steps:
+      # ====================================================================
+      # ENVIRONMENT LOAD
+      # ====================================================================
+      - name: 📥 Checkout (env loader)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/env
+            .github/actions/load-env
+
+      - name: 🌍 Load environment variables
+        id: load-env
+        uses: ./.github/actions/load-env
+
       # --------------------------------------------------------------------
       # Start timer to record workflow start time
       # --------------------------------------------------------------------
@@ -279,7 +303,7 @@ jobs:
       - name: 🔧 Parse environment variables
         id: parse-env
         env:
-          ENV_JSON: ${{ inputs.env-json }}
+          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
         run: |
           echo "📋 Parsing environment variables..."
 
@@ -290,19 +314,181 @@ jobs:
 
           echo "✅ Environment variables parsed successfully"
       # --------------------------------------------------------------------
-      # Checkout code (sparse checkout)
+      # Checkout code (conditional: full when MAGE-X uses local build, otherwise
+      # sparse with everything needed by setup-config + the inlined test-magex
+      # steps below)
       # --------------------------------------------------------------------
-      - name: 📥 Checkout (sparse)
+      - name: 📥 Checkout (full - MAGE-X local build)
+        if: env.MAGE_X_USE_LOCAL == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: 📥 Checkout (sparse)
+        if: env.MAGE_X_USE_LOCAL != 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # Required so the magex `metrics:mage` step can read git metadata
+          # Non-cone mode is required: this pattern mixes individual files
+          # (.mage.yaml, go.mod, go.work, go.sum, fortress.yml) with directories.
+          # In cone mode, `git sparse-checkout set` strict-checks each entry as a
+          # tree and fails with "fatal: '<file>' is not a directory" — especially
+          # when re-applying over the sparse state from the env-loader checkout
+          # earlier in this same job.
+          sparse-checkout-cone-mode: false
           sparse-checkout: |
             .mage.yaml
             go.mod
             go.work
             ${{ env.GO_SUM_FILE }}
+            .github/env
             .github/workflows/fortress.yml
+            .github/actions/load-env
             .github/actions/configure-redis
             .github/actions/extract-module-dir
+            .github/actions/setup-magex
+            magefiles/
+
+      # ====================================================================
+      # MAGE-X VERIFICATION
+      # ====================================================================
+      - name: 🔧 Setup MAGE-X
+        id: setup-magex
+        uses: ./.github/actions/setup-magex
+        with:
+          magex-version: ${{ env.MAGE_X_VERSION }}
+          runner-os: ubuntu-24.04
+          use-local: ${{ env.MAGE_X_USE_LOCAL }}
+
+      - name: 🔍 Validate MAGE-X Version
+        id: validate-magex-version
+        run: |
+          echo "🔍 Validating MAGE-X version..."
+
+          ACTUAL_VERSION=$(magex --version 2>/dev/null | grep -E '^\s+Version:' | awk '{print $2}' || echo "unknown")
+          REQUESTED_VERSION="${{ env.MAGE_X_VERSION }}"
+          USE_LOCAL="${{ env.MAGE_X_USE_LOCAL }}"
+
+          echo "📋 Build mode: $([ "$USE_LOCAL" == "true" ] && echo "local (development)" || echo "remote (release)")"
+          echo "📋 Requested version: $REQUESTED_VERSION"
+          echo "📋 Actual version: $ACTUAL_VERSION"
+
+          if [[ "$ACTUAL_VERSION" == "unknown" ]]; then
+            echo "❌ Failed: Could not determine magex version from binary"
+            echo "validation-result=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          if [[ "$USE_LOCAL" == "true" ]]; then
+            if [[ "$ACTUAL_VERSION" == "dev" ]]; then
+              echo "✅ Version validation passed: local build has expected 'dev' version"
+              echo "validation-result=success" >> $GITHUB_OUTPUT
+            else
+              echo "⚠️  Warning: Local build has version '$ACTUAL_VERSION', expected 'dev'"
+              echo "✅ Accepting anyway since this is a local development build"
+              echo "validation-result=success-with-warning" >> $GITHUB_OUTPUT
+            fi
+          else
+            REQUESTED_CLEAN=$(echo "$REQUESTED_VERSION" | sed 's/^v//')
+            ACTUAL_CLEAN=$(echo "$ACTUAL_VERSION" | sed 's/^v//')
+
+            if [[ "$ACTUAL_CLEAN" == "$REQUESTED_CLEAN" ]]; then
+              echo "✅ Version validation passed: $ACTUAL_VERSION matches $REQUESTED_VERSION"
+              echo "validation-result=success" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Version mismatch detected!"
+              echo "❌ Requested: $REQUESTED_VERSION (clean: $REQUESTED_CLEAN)"
+              echo "❌ Actual: $ACTUAL_VERSION (clean: $ACTUAL_CLEAN)"
+              echo "validation-result=failed" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+          fi
+
+      - name: ✅ Verify MAGE-X help and required commands
+        id: verify-magex
+        run: |
+          echo "📋 Testing for required magex commands..."
+          HELP_OUTPUT=$(magex help)
+          echo "$HELP_OUTPUT"
+
+          REQUIRED_COMMANDS=(
+            "bench" "clean" "deps:download" "deps:update" "format:fix" "lint"
+            "metrics:coverage" "metrics:loc" "metrics:mage" "release"
+            "release:validate" "test" "test:cover" "test:coverrace" "test:fuzz"
+            "test:race" "tidy" "update:install" "version:bump" "vet"
+          )
+
+          MATCHED_COUNT=0
+          MISSING_COUNT=0
+          MISSING_COMMANDS=()
+
+          echo ""
+          echo "🔍 Verifying required magex commands..."
+
+          for cmd in "${REQUIRED_COMMANDS[@]}"; do
+            if echo "$HELP_OUTPUT" | grep -qE "^[[:space:]]*$cmd[[:space:]]"; then
+              echo "✅ Found: $cmd"
+              MATCHED_COUNT=$((MATCHED_COUNT + 1))
+            else
+              echo "❌ Missing required command: $cmd"
+              MISSING_COMMANDS+=("$cmd")
+              MISSING_COUNT=$((MISSING_COUNT + 1))
+            fi
+          done
+
+          # Expose the validated version so callers can read steps.verify-magex.outputs.version
+          MAGEX_VERSION=$(magex --version 2>/dev/null | grep -E '^\s+Version:' | awk '{print $2}' || echo "unknown")
+
+          {
+            echo "matched=$MATCHED_COUNT"
+            echo "missing=$MISSING_COUNT"
+            echo "missing_commands=${MISSING_COMMANDS[*]}"
+            echo "version=$MAGEX_VERSION"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ $MISSING_COUNT -gt 0 ]; then
+            echo ""
+            echo "🚨 Missing MAGE-X commands:"
+            printf ' - %s\n' "${MISSING_COMMANDS[@]}"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ MAGE-X verification completed successfully."
+
+      - name: 📊 Collect Mage Metrics
+        id: mage-metrics
+        run: |
+          set -euo pipefail
+          echo "📋 Running magex metrics:mage..."
+
+          METRICS_OUTPUT=$(magex metrics:mage 2>&1 || true)
+          echo "$METRICS_OUTPUT"
+
+          if echo "$METRICS_OUTPUT" | grep -q "Magefiles Directory Found: ✅"; then
+            echo "directory-found=true" >> $GITHUB_OUTPUT
+          else
+            echo "directory-found=false" >> $GITHUB_OUTPUT
+          fi
+
+          TOTAL_FUNCTIONS=$(echo "$METRICS_OUTPUT" | grep -oE "Total functions found: [0-9]+" | grep -oE "[0-9]+" || echo "0")
+          echo "total-functions=$TOTAL_FUNCTIONS" >> $GITHUB_OUTPUT
+
+          FILE_COUNT=$(echo "$METRICS_OUTPUT" | { grep -E "^\| magefiles/" || true; } | wc -l | tr -d ' ')
+          echo "file-count=$FILE_COUNT" >> $GITHUB_OUTPUT
+
+          echo ""
+          echo "✅ Mage metrics collected successfully."
+
+      # Note: The MAGE-X verification SUMMARY is intentionally NOT written here.
+      # It's appended to $GITHUB_STEP_SUMMARY at the very end of the job (after
+      # the GoFortress CI Configuration summary) so the rendered order matches
+      # the conceptual hierarchy: GoFortress config first, supporting tool
+      # verification second, footer last. The verification WORK still runs here
+      # so the job can fail fast on MAGE-X problems.
+
       # --------------------------------------------------------------------
       # Extract Go module directory from GO_SUM_FILE path
       # --------------------------------------------------------------------
@@ -487,16 +673,19 @@ jobs:
           echo "code-coverage-enabled=${{ env.ENABLE_CODE_COVERAGE }}" >> $GITHUB_OUTPUT
           echo "coverage-provider=${{ env.GO_COVERAGE_PROVIDER }}" >> $GITHUB_OUTPUT
 
-          # Validate coverage provider configuration
-          if [ "${{ env.ENABLE_CODE_COVERAGE }}" == "true" ]; then
-            PROVIDER="${{ env.GO_COVERAGE_PROVIDER }}"
-            if [ "$PROVIDER" != "internal" ] && [ "$PROVIDER" != "codecov" ]; then
-              echo "❌ Invalid GO_COVERAGE_PROVIDER: $PROVIDER"
-              echo "   Valid options are: internal, codecov"
-              exit 1
-            fi
+          # Validate coverage provider configuration ALWAYS — even when coverage is
+          # disabled. A typo here would otherwise pass silently and, if coverage is later
+          # enabled, both coverage jobs (gated on internal|codecov) would just skip,
+          # disabling coverage without any failure. Fail fast at the first job instead.
+          PROVIDER="${{ env.GO_COVERAGE_PROVIDER }}"
+          if [ "$PROVIDER" != "internal" ] && [ "$PROVIDER" != "codecov" ]; then
+            echo "❌ Invalid GO_COVERAGE_PROVIDER: $PROVIDER"
+            echo "   Valid options are: internal, codecov"
+            exit 1
+          fi
 
-            # Check for codecov token requirement
+          # Report the active provider when coverage is enabled
+          if [ "${{ env.ENABLE_CODE_COVERAGE }}" == "true" ]; then
             if [ "$PROVIDER" == "codecov" ]; then
               echo "✅ Coverage provider: Codecov"
             else
@@ -538,14 +727,14 @@ jobs:
         id: redis-config
         uses: ./.github/actions/configure-redis
         with:
-          env-json: ${{ inputs.env-json }}
+          env-json: ${{ steps.load-env.outputs.env-json }}
       # --------------------------------------------------------------------
       # Build the configuration summary (Part 1: Compact Overview)
       # --------------------------------------------------------------------
       - name: 📋 Build Configuration Summary (Part 1)
         id: config-summary-part1
         env:
-          ENV_JSON: ${{ inputs.env-json }}
+          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
         run: |
           UNIQUE_GO_VERSIONS='${{ steps.versions.outputs.versions }}'
           MATRIX_JSON='${{ steps.matrix.outputs.matrix }}'
@@ -622,8 +811,8 @@ jobs:
           echo "- **Workflow Start Time**: ${{ steps.timer.outputs.start-time }}" >> $GITHUB_STEP_SUMMARY
 
           # Configuration File Discovery
-          ENV_FILE_COUNT="${{ inputs.env-file-count }}"
-          VAR_COUNT="${{ inputs.var-count }}"
+          ENV_FILE_COUNT="${{ steps.load-env.outputs.env-file-count }}"
+          VAR_COUNT="${{ steps.load-env.outputs.var-count }}"
 
           echo "- **Configuration Sources**: Modular env files ($ENV_FILE_COUNT files, $VAR_COUNT variables)" >> $GITHUB_STEP_SUMMARY
 
@@ -662,7 +851,7 @@ jobs:
       - name: 📋 Build Configuration Summary (Part 2)
         id: config-summary-part2
         env:
-          ENV_JSON: ${{ inputs.env-json }}
+          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
         run: |
           MATRIX_JSON='${{ steps.matrix.outputs.matrix }}'
           MATRIX_COUNT=$(echo "$MATRIX_JSON" | jq '.include | length')
@@ -710,7 +899,7 @@ jobs:
       - name: 📋 Build Configuration Summary (Part 3)
         id: config-summary-part3
         env:
-          ENV_JSON: ${{ inputs.env-json }}
+          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
         run: |
           # Benchmark Configuration (collapsed, only if enabled)
           if [[ "${{ env.ENABLE_BENCHMARKS }}" == "true" ]]; then
@@ -766,7 +955,7 @@ jobs:
       - name: 📋 Build Configuration Summary (Part 4)
         id: config-summary-part4
         env:
-          ENV_JSON: ${{ inputs.env-json }}
+          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
         run: |
           # Pre-Commit System Configuration (collapsed, only if enabled)
           if [[ "${{ env.ENABLE_GO_PRE_COMMIT }}" == "true" ]]; then
@@ -819,7 +1008,7 @@ jobs:
       - name: 📋 Build Configuration Summary (Part 5)
         id: config-summary-part5
         env:
-          ENV_JSON: ${{ inputs.env-json }}
+          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
         run: |
           ENV_COUNT=$(echo "$ENV_JSON" | jq 'keys | length')
 
@@ -859,7 +1048,54 @@ jobs:
           echo "</details>" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Footer (always visible)
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "_🎯 Configuration complete at $(date -u +"%H:%M:%S UTC") — GoFortress CI/CD Pipeline_" >> $GITHUB_STEP_SUMMARY
+      # --------------------------------------------------------------------
+      # MAGE-X Verification Summary — rendered AFTER GoFortress CI Configuration
+      # so the step summary reads top-down: GoFortress config → supporting tool
+      # verification → footer. The verification WORK already ran (and could have
+      # failed the job) much earlier; this step only renders the report.
+      # --------------------------------------------------------------------
+      - name: 📊 MAGE-X Verification Summary
+        if: always()
+        run: |
+          {
+            echo "## 🪄 MAGE-X Verification Summary"
+            echo ""
+            echo "| Verification Details | Status |"
+            echo "|---|---|"
+            echo "| **Test** | magex help command |"
+            echo "| **Version** | ${{ steps.verify-magex.outputs.version }} |"
+            echo "| **Version Validation** | ${{ steps.validate-magex-version.outputs.validation-result == 'success' && '✅ Passed' || '❌ Failed' }} |"
+            echo "| **Installation** | ${{ steps.setup-magex.outputs.installation-method == 'cached' && '💾 From cache' || '📥 Fresh install' }} |"
+            echo "| **Purpose** | Verify MAGE-X installation and standard commands |"
+            echo "| **Matched Commands** | ${{ steps.verify-magex.outputs.matched }} |"
+            echo "| **Missing Commands** | ${{ steps.verify-magex.outputs.missing }} |"
+            echo ""
+            echo "### 📁 Mage Metrics"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|---|---|"
+            echo "| **Magefiles Directory** | ${{ steps.mage-metrics.outputs.directory-found == 'true' && '✅ Found' || '❌ Not Found' }} |"
+            echo "| **Mage Files** | ${{ steps.mage-metrics.outputs.file-count }} |"
+            echo "| **Total Functions** | ${{ steps.mage-metrics.outputs.total-functions }} |"
+            echo ""
+          } >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ steps.verify-magex.outputs.missing }}" != "0" ]]; then
+            echo "🚨 **Missing Commands:** ${{ steps.verify-magex.outputs.missing_commands }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "🎯 **MAGE-X is properly configured and functional.**" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+      # --------------------------------------------------------------------
+      # Final footer — rendered last so it always sits at the bottom of the
+      # setup job's summary regardless of how many sections preceded it.
+      # --------------------------------------------------------------------
+      - name: ✅ Setup Footer
+        if: always()
+        run: |
+          {
+            echo "---"
+            echo "_🎯 Configuration complete at $(date -u +"%H:%M:%S UTC") — GoFortress CI/CD Pipeline_"
+          } >> $GITHUB_STEP_SUMMARY
 
