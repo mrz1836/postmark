@@ -25,10 +25,21 @@ name: Dependabot Auto-merge
 
 # --------------------------------------------------------------------
 # Trigger Configuration
+#
+# Only `opened` and `synchronize` are listed because:
+#   - `opened`:      first event for any new Dependabot PR.
+#   - `synchronize`: fires when Dependabot rebases its own PR (e.g., after
+#                    a base-branch update or a conflict). The decision tree
+#                    must re-evaluate so the rebased commit can be auto-merged.
+# `reopened` and `ready_for_review` are intentionally omitted — Dependabot
+# never reopens closed PRs (it creates new ones) and never opens drafts,
+# so those events would only fire for human PRs which the job-level `if:`
+# below would skip anyway. Skipping them at the trigger level avoids the
+# corresponding skipped runs in the UI.
 # --------------------------------------------------------------------
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize]
 
 # Security: Restrict default permissions (jobs must explicitly request what they need)
 permissions: {}
@@ -47,24 +58,46 @@ concurrency:
 
 jobs:
   # ----------------------------------------------------------------------------------
-  # Load Environment Variables
+  # Dependabot processing (single consolidated job)
+  #
+  # Workflow phases (each preserved as a step):
+  #   🌍 Load environment       → reads .github/env/*
+  #   🔧 Extract configuration  → exports all DEPENDABOT_* vars to env
+  #   📊 Fetch metadata         → official Dependabot metadata
+  #   📋 Log dependency details → trace logging
+  #   🔒 Check for security     → classify security vs non-security
+  #   🎯 Determine action       → decision tree over config + metadata
+  #   ⚠️ Alert (major/security) → comment + manual-review label
+  #   🔍 Alert (minor prod)     → comment for review
+  #   🚀 Auto-merge approved    → approve + enable auto-merge
+  #   🏷️ Add tracking labels    → dependency/update-type labels
+  #   📊 Generate summary       → always
   # ----------------------------------------------------------------------------------
-  load-env:
-    name: 🌍 Load Environment Variables
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read # Required: Read repository content for sparse checkout
+  dependabot:
+    name: 🤖 Dependabot Auto-merge
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     # Only run on Dependabot PRs
     if: github.event.pull_request.user.login == 'dependabot[bot]'
-    outputs:
-      env-json: ${{ steps.load-env.outputs.env-json }}
+    permissions:
+      contents: write # Required: Enables auto-merge for Dependabot PRs
+      pull-requests: write # Required: Update and merge Dependabot PRs
+      issues: write # Required: Comment on related dependency issues
+
     steps:
       # --------------------------------------------------------------------
       # Check out code to access env file
       # --------------------------------------------------------------------
       - name: 📥 Checkout code (sparse)
+        # SECURITY: pin the checkout to the trusted base ref so the local
+        # ./.github/actions/load-env action (run below with contents/pull-requests/issues
+        # write) can never be a PR-controlled version. Default checkout on pull_request
+        # events resolves to the PR head. Lower risk here (job is gated to dependabot[bot]),
+        # but pinned for defense-in-depth and consistency with the other PR workflows.
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ github.base_ref || github.ref }}
+          persist-credentials: false
           sparse-checkout: |
             .github/env
             .github/actions/load-env
@@ -73,84 +106,52 @@ jobs:
       # Load and parse environment file
       # --------------------------------------------------------------------
       - name: 🌍 Load environment variables
-        uses: ./.github/actions/load-env
         id: load-env
+        uses: ./.github/actions/load-env
 
-  # ----------------------------------------------------------------------------------
-  # Process Dependabot PR
-  # ----------------------------------------------------------------------------------
-  process-pr:
-    name: 🤖 Process Dependabot PR
-    needs: [load-env]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # Required for Dependabot PRs: Enables auto-merge (not needed for other PRs)
-      pull-requests: write # Required: Update and merge Dependabot PRs
-      issues: write # Required: Comment on related dependency issues
-    outputs:
-      dependency-names: ${{ steps.metadata.outputs.dependency-names }}
-      update-type: ${{ steps.metadata.outputs.update-type }}
-      dependency-type: ${{ steps.metadata.outputs.dependency-type }}
-      action-taken: ${{ steps.determine-action.outputs.action }}
-
-    steps:
       # --------------------------------------------------------------------
-      # Extract configuration from env-json
+      # Extract Dependabot configuration up-front
       # --------------------------------------------------------------------
       - name: 🔧 Extract configuration
-        id: config
         env:
-          ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
           GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
         run: |
           echo "📋 Extracting Dependabot configuration from environment..."
 
-          # Extract all needed variables
-          MAINTAINER=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_MAINTAINER_USERNAME')
-          AUTO_MERGE_PATCH=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH')
-          AUTO_MERGE_MINOR_DEV=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_DEV')
-          AUTO_MERGE_MINOR_PROD=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_PROD')
-          AUTO_MERGE_PATCH_INDIRECT=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH_INDIRECT')
-          AUTO_MERGE_MINOR_INDIRECT=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_INDIRECT')
-          AUTO_MERGE_SECURITY=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_SECURITY_NON_MAJOR')
-          ALERT_ON_MAJOR=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_ALERT_ON_MAJOR')
-          ALERT_ON_MINOR_PROD=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_ALERT_ON_MINOR_PROD')
-          MANUAL_REVIEW_LABEL=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_MANUAL_REVIEW_LABEL')
-          AUTO_MERGE_LABELS=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_LABELS')
-          PREFERRED_TOKEN=$(echo "$ENV_JSON" | jq -r '.PREFERRED_GITHUB_TOKEN')
-
           # Validate required configuration
+          MAINTAINER=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_MAINTAINER_USERNAME')
           if [[ -z "$MAINTAINER" ]] || [[ "$MAINTAINER" == "null" ]]; then
             echo "❌ ERROR: DEPENDABOT_MAINTAINER_USERNAME not set in configuration" >&2
             exit 1
           fi
 
-          # Set as environment variables for all subsequent steps
-          echo "MAINTAINER=$MAINTAINER" >> $GITHUB_ENV
-          echo "AUTO_MERGE_PATCH=$AUTO_MERGE_PATCH" >> $GITHUB_ENV
-          echo "AUTO_MERGE_MINOR_DEV=$AUTO_MERGE_MINOR_DEV" >> $GITHUB_ENV
-          echo "AUTO_MERGE_MINOR_PROD=$AUTO_MERGE_MINOR_PROD" >> $GITHUB_ENV
-          echo "AUTO_MERGE_PATCH_INDIRECT=$AUTO_MERGE_PATCH_INDIRECT" >> $GITHUB_ENV
-          echo "AUTO_MERGE_MINOR_INDIRECT=$AUTO_MERGE_MINOR_INDIRECT" >> $GITHUB_ENV
-          echo "AUTO_MERGE_SECURITY=$AUTO_MERGE_SECURITY" >> $GITHUB_ENV
-          echo "ALERT_ON_MAJOR=$ALERT_ON_MAJOR" >> $GITHUB_ENV
-          echo "ALERT_ON_MINOR_PROD=$ALERT_ON_MINOR_PROD" >> $GITHUB_ENV
-          echo "MANUAL_REVIEW_LABEL=$MANUAL_REVIEW_LABEL" >> $GITHUB_ENV
-          echo "AUTO_MERGE_LABELS=$AUTO_MERGE_LABELS" >> $GITHUB_ENV
+          # Single jq pass for all config we need across steps
+          {
+            echo "MAINTAINER=$MAINTAINER"
+            echo "AUTO_MERGE_PATCH=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH')"
+            echo "AUTO_MERGE_MINOR_DEV=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_DEV')"
+            echo "AUTO_MERGE_MINOR_PROD=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_PROD')"
+            echo "AUTO_MERGE_PATCH_INDIRECT=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH_INDIRECT')"
+            echo "AUTO_MERGE_MINOR_INDIRECT=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_INDIRECT')"
+            echo "AUTO_MERGE_SECURITY=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_SECURITY_NON_MAJOR')"
+            echo "ALERT_ON_MAJOR=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_ALERT_ON_MAJOR')"
+            echo "ALERT_ON_MINOR_PROD=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_ALERT_ON_MINOR_PROD')"
+            echo "MANUAL_REVIEW_LABEL=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_MANUAL_REVIEW_LABEL')"
+            echo "AUTO_MERGE_LABELS=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_LABELS')"
+          } >> "$GITHUB_ENV"
+
+          PREFERRED_TOKEN=$(echo "$ENV_JSON" | jq -r '.PREFERRED_GITHUB_TOKEN')
 
           # Log configuration
           echo "🔍 Configuration loaded:"
           echo "  👤 Maintainer: @$MAINTAINER"
-          echo "  🔧 Auto-merge patch: $AUTO_MERGE_PATCH"
-          echo "  🔧 Auto-merge minor dev: $AUTO_MERGE_MINOR_DEV"
-          echo "  🔧 Auto-merge minor prod: $AUTO_MERGE_MINOR_PROD"
-          echo "  🔧 Auto-merge patch indirect: $AUTO_MERGE_PATCH_INDIRECT"
-          echo "  🔧 Auto-merge minor indirect: $AUTO_MERGE_MINOR_INDIRECT"
-          echo "  🔒 Auto-merge security (non-major): $AUTO_MERGE_SECURITY"
-          echo "  ⚠️ Alert on major: $ALERT_ON_MAJOR"
-          echo "  🔍 Alert on minor prod: $ALERT_ON_MINOR_PROD"
-          echo "  🏷️ Manual review label: $MANUAL_REVIEW_LABEL"
-          echo "  🏷️ Auto-merge labels: $AUTO_MERGE_LABELS"
+          echo "  🔧 Auto-merge patch: $(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH')"
+          echo "  🔧 Auto-merge minor dev: $(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_DEV')"
+          echo "  🔧 Auto-merge minor prod: $(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_PROD')"
+          echo "  🔧 Auto-merge patch indirect: $(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH_INDIRECT')"
+          echo "  🔧 Auto-merge minor indirect: $(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_INDIRECT')"
+          echo "  🔒 Auto-merge security (non-major): $(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_SECURITY_NON_MAJOR')"
 
           if [[ "$PREFERRED_TOKEN" == "GH_PAT_TOKEN" && -n "$GH_PAT_TOKEN" ]]; then
             echo "  🔑 Token: Personal Access Token (PAT)"
@@ -748,6 +749,10 @@ jobs:
       - name: 🚀 Auto-merge approved updates
         if: |
           startsWith(steps.determine-action.outputs.action, 'auto-merge-')
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          TOKEN_TYPE: ${{ secrets.GH_PAT_TOKEN && 'PAT' || 'GITHUB_TOKEN' }}
         run: |
           echo "════════════════════════════════════════════════════════════════"
           echo "🚀 EXECUTING AUTO-MERGE"
@@ -861,10 +866,6 @@ jobs:
 
             # Don't exit with error - the PR is still approved
           fi
-        env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
-          TOKEN_TYPE: ${{ secrets.GH_PAT_TOKEN && 'PAT' || 'GITHUB_TOKEN' }}
 
       # --------------------------------------------------------------------
       # Add tracking labels
@@ -921,137 +922,92 @@ jobs:
               console.log(`Added labels: ${labels.join(', ')}`);
             }
 
-  # ----------------------------------------------------------------------------------
-  # Generate Workflow Summary Report
-  # ----------------------------------------------------------------------------------
-  summary:
-    name: 📊 Generate Summary
-    if: always() && github.event.pull_request.user.login == 'dependabot[bot]'
-    needs: [load-env, process-pr]
-    runs-on: ubuntu-latest
-    steps:
       # --------------------------------------------------------------------
-      # Generate a workflow summary report
+      # Generate workflow summary report
       # --------------------------------------------------------------------
       - name: 📊 Generate workflow summary
+        if: always()
         env:
-          ENV_JSON: ${{ needs.load-env.outputs.env-json }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DEPENDENCY_NAMES: ${{ steps.metadata.outputs.dependency-names }}
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          DEPENDENCY_TYPE: ${{ steps.metadata.outputs.dependency-type }}
+          ACTION: ${{ steps.determine-action.outputs.action }}
         run: |
           echo "📊 Generating workflow summary..."
 
-          echo "# 🤖 Dependabot Auto-merge Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**⏰ Processed:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
-          echo "**📋 PR:** #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "## 📦 Dependency Information" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Dependency** | ${{ needs.process-pr.outputs.dependency-names }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Update Type** | ${{ needs.process-pr.outputs.update-type }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Dependency Type** | ${{ needs.process-pr.outputs.dependency-type }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
           # Determine action taken
-          ACTION="${{ needs.process-pr.outputs.action-taken }}"
           case "$ACTION" in
-            "auto-merge-patch")
-              ACTION_DESC="✅ Auto-merged (patch update)"
-              ;;
-            "auto-merge-patch-indirect")
-              ACTION_DESC="✅ Auto-merged (patch update - indirect dependency)"
-              ;;
-            "auto-merge-minor-dev")
-              ACTION_DESC="✅ Auto-merged (minor dev dependency)"
-              ;;
-            "auto-merge-minor-prod")
-              ACTION_DESC="✅ Auto-merged (minor prod dependency)"
-              ;;
-            "auto-merge-minor-indirect")
-              ACTION_DESC="✅ Auto-merged (minor update - indirect dependency)"
-              ;;
-            "auto-merge-security")
-              ACTION_DESC="🔒 Auto-merged (security update)"
-              ;;
-            "approved-ready-for-merge")
-              ACTION_DESC="✅ Approved and ready for manual merge (auto-merge failed)"
-              ;;
-            "alert-major")
-              ACTION_DESC="⚠️ Manual review required (major update)"
-              ;;
-            "alert-security-major")
-              ACTION_DESC="🚨 Manual review required (major security update)"
-              ;;
-            "alert-minor-prod")
-              ACTION_DESC="🔍 Manual review suggested (minor prod update)"
-              ;;
-            "manual-review")
-              ACTION_DESC="👀 Manual review required"
-              ;;
-            *)
-              ACTION_DESC="❓ Unknown action"
-              ;;
+            "auto-merge-patch")           ACTION_DESC="✅ Auto-merged (patch update)" ;;
+            "auto-merge-patch-indirect")  ACTION_DESC="✅ Auto-merged (patch update - indirect dependency)" ;;
+            "auto-merge-minor-dev")       ACTION_DESC="✅ Auto-merged (minor dev dependency)" ;;
+            "auto-merge-minor-prod")      ACTION_DESC="✅ Auto-merged (minor prod dependency)" ;;
+            "auto-merge-minor-indirect")  ACTION_DESC="✅ Auto-merged (minor update - indirect dependency)" ;;
+            "auto-merge-security")        ACTION_DESC="🔒 Auto-merged (security update)" ;;
+            "approved-ready-for-merge")   ACTION_DESC="✅ Approved and ready for manual merge (auto-merge failed)" ;;
+            "alert-major")                ACTION_DESC="⚠️ Manual review required (major update)" ;;
+            "alert-security-major")       ACTION_DESC="🚨 Manual review required (major security update)" ;;
+            "alert-minor-prod")           ACTION_DESC="🔍 Manual review suggested (minor prod update)" ;;
+            "manual-review")              ACTION_DESC="👀 Manual review required" ;;
+            *)                            ACTION_DESC="❓ Unknown action" ;;
           esac
 
-          echo "## 🎯 Action Taken" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "$ACTION_DESC" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "### 🔧 Current Configuration" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Extract configuration for display
-          MAINTAINER=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_MAINTAINER_USERNAME')
-          AUTO_MERGE_PATCH=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH')
-          AUTO_MERGE_MINOR_DEV=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_DEV')
-          AUTO_MERGE_MINOR_PROD=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_PROD')
-          AUTO_MERGE_PATCH_INDIRECT=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH_INDIRECT')
-          AUTO_MERGE_MINOR_INDIRECT=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_INDIRECT')
-          AUTO_MERGE_SECURITY=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_SECURITY_NON_MAJOR')
-
-          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Auto-merge patch | $AUTO_MERGE_PATCH |" >> $GITHUB_STEP_SUMMARY
-          echo "| Auto-merge minor dev | $AUTO_MERGE_MINOR_DEV |" >> $GITHUB_STEP_SUMMARY
-          echo "| Auto-merge minor prod | $AUTO_MERGE_MINOR_PROD |" >> $GITHUB_STEP_SUMMARY
-          echo "| Auto-merge patch indirect | $AUTO_MERGE_PATCH_INDIRECT |" >> $GITHUB_STEP_SUMMARY
-          echo "| Auto-merge minor indirect | $AUTO_MERGE_MINOR_INDIRECT |" >> $GITHUB_STEP_SUMMARY
-          echo "| Auto-merge security | $AUTO_MERGE_SECURITY |" >> $GITHUB_STEP_SUMMARY
-          echo "| Maintainer | @$MAINTAINER |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "🤖 _Automated by GitHub Actions_" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "# 🤖 Dependabot Auto-merge Summary"
+            echo ""
+            echo "**⏰ Processed:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "**📋 PR:** #$PR_NUMBER"
+            echo ""
+            echo "## 📦 Dependency Information"
+            echo ""
+            echo "| Property | Value |"
+            echo "|----------|-------|"
+            echo "| **Dependency** | ${DEPENDENCY_NAMES} |"
+            echo "| **Update Type** | ${UPDATE_TYPE} |"
+            echo "| **Dependency Type** | ${DEPENDENCY_TYPE} |"
+            echo ""
+            echo "## 🎯 Action Taken"
+            echo ""
+            echo "$ACTION_DESC"
+            echo ""
+            echo "### 🔧 Current Configuration"
+            echo ""
+            echo "| Setting | Value |"
+            echo "|---------|-------|"
+            echo "| Auto-merge patch | ${AUTO_MERGE_PATCH} |"
+            echo "| Auto-merge minor dev | ${AUTO_MERGE_MINOR_DEV} |"
+            echo "| Auto-merge minor prod | ${AUTO_MERGE_MINOR_PROD} |"
+            echo "| Auto-merge patch indirect | ${AUTO_MERGE_PATCH_INDIRECT} |"
+            echo "| Auto-merge minor indirect | ${AUTO_MERGE_MINOR_INDIRECT} |"
+            echo "| Auto-merge security | ${AUTO_MERGE_SECURITY} |"
+            echo "| Maintainer | @${MAINTAINER} |"
+            echo ""
+            echo "---"
+            echo "🤖 _Automated by GitHub Actions_"
+          } >> $GITHUB_STEP_SUMMARY
 
       # --------------------------------------------------------------------
-      # Report final workflow status
+      # Report final workflow status (stdout)
       # --------------------------------------------------------------------
       - name: 📢 Report workflow status
+        if: always()
+        env:
+          DEPENDENCY_NAMES: ${{ steps.metadata.outputs.dependency-names }}
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          DEPENDENCY_TYPE: ${{ steps.metadata.outputs.dependency-type }}
+          ACTION: ${{ steps.determine-action.outputs.action }}
         run: |
           echo "=== 🤖 Dependabot Auto-merge Summary ==="
-          echo "📦 Dependency: ${{ needs.process-pr.outputs.dependency-names }}"
-          echo "🔄 Update type: ${{ needs.process-pr.outputs.update-type }}"
-          echo "📁 Dependency type: ${{ needs.process-pr.outputs.dependency-type }}"
+          echo "📦 Dependency: $DEPENDENCY_NAMES"
+          echo "🔄 Update type: $UPDATE_TYPE"
+          echo "📁 Dependency type: $DEPENDENCY_TYPE"
 
-          ACTION="${{ needs.process-pr.outputs.action-taken }}"
           case "$ACTION" in
-            auto-merge-*)
-              echo "✅ Action: Auto-merge enabled"
-              ;;
-            approved-ready-for-merge)
-              echo "✅ Action: Approved and ready for manual merge"
-              ;;
-            alert-*)
-              echo "⚠️ Action: Alert sent, manual review required"
-              ;;
-            manual-review)
-              echo "👀 Action: Manual review required"
-              ;;
-            *)
-              echo "❓ Action: $ACTION"
-              ;;
+            auto-merge-*)              echo "✅ Action: Auto-merge enabled" ;;
+            approved-ready-for-merge)  echo "✅ Action: Approved and ready for manual merge" ;;
+            alert-*)                   echo "⚠️ Action: Alert sent, manual review required" ;;
+            manual-review)             echo "👀 Action: Manual review required" ;;
+            *)                         echo "❓ Action: $ACTION" ;;
           esac
 
           echo "🕐 Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"

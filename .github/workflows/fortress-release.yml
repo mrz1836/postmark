@@ -54,6 +54,7 @@ jobs:
   release:
     name: 🚀 Build and Release
     runs-on: ${{ inputs.primary-runner }}
+    timeout-minutes: 30
     permissions:
       contents: write # Required: "magex release" creates GitHub releases and uploads assets
     steps:

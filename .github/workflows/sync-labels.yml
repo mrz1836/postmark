@@ -55,7 +55,8 @@ jobs:
   # ----------------------------------------------------------------------------------
   load-env:
     name: 🌍 Load Environment Variables
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: read # Required: Read repository content for sparse checkout
     outputs:
@@ -68,6 +69,7 @@ jobs:
       - name: 📥 Checkout code (sparse)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          persist-credentials: false
           sparse-checkout: |
             .github/env
             .github/actions/load-env
@@ -106,7 +108,8 @@ jobs:
   sync-labels:
     name: 🏷️ Sync Labels
     needs: [load-env]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: read
       issues: write # Required for label management
@@ -137,6 +140,7 @@ jobs:
       - name: 📥 Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          persist-credentials: false
           fetch-depth: 2 # Fetch enough history to check parent commits
 
       # --------------------------------------------------------------------

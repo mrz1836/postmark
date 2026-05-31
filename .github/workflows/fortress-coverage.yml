@@ -44,6 +44,10 @@ on:
         description: "Path to go.sum file for dependency verification"
         required: true
         type: string
+      coverage-provider:
+        description: "Coverage service provider (internal or codecov). Gates which downstream job runs."
+        required: true
+        type: string
     secrets:
       github-token:
         description: "GitHub token for API access"
@@ -60,53 +64,43 @@ permissions: {}
 
 jobs:
   # ----------------------------------------------------------------------------------
-  # Check Coverage Provider
+  # Validate Coverage Provider (fail-fast guard)
+  #
+  # Both coverage jobs below are gated on `coverage-provider == 'internal' | 'codecov'`.
+  # Without this guard, an invalid value would cause BOTH to skip and the reusable
+  # workflow to report success while silently processing no coverage. This guard provides
+  # an explicit failure path for any direct caller.
   # ----------------------------------------------------------------------------------
-  check-provider:
-    name: 🔍 Check Coverage Provider
-    runs-on: ubuntu-latest
-    outputs:
-      provider: ${{ steps.check.outputs.provider }}
-      should-run-internal: ${{ steps.check.outputs.should-run-internal }}
-      should-run-codecov: ${{ steps.check.outputs.should-run-codecov }}
+  validate-provider:
+    name: 🔍 Validate Coverage Provider
+    runs-on: ${{ inputs.primary-runner }}
+    timeout-minutes: 2
+    permissions: {}
     steps:
-      - name: 🔧 Parse environment variables
+      - name: ✅ Validate coverage-provider input
         env:
-          ENV_JSON: ${{ inputs.env-json }}
+          COVERAGE_PROVIDER: ${{ inputs.coverage-provider }}
         run: |
-          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
-            echo "$key=$value" >> $GITHUB_ENV
-          done
-
-      - name: 🔍 Check coverage provider
-        id: check
-        run: |
-          echo "🔍 Checking coverage provider configuration..."
-          PROVIDER="${{ env.GO_COVERAGE_PROVIDER }}"
-          echo "provider=$PROVIDER" >> $GITHUB_OUTPUT
-
-          if [[ "$PROVIDER" == "internal" ]]; then
-            echo "✅ Coverage provider is 'internal' - will use go-coverage with GitHub Pages"
-            echo "should-run-internal=true" >> $GITHUB_OUTPUT
-            echo "should-run-codecov=false" >> $GITHUB_OUTPUT
-          elif [[ "$PROVIDER" == "codecov" ]]; then
-            echo "✅ Coverage provider is 'codecov' - will upload to Codecov service"
-            echo "should-run-internal=false" >> $GITHUB_OUTPUT
-            echo "should-run-codecov=true" >> $GITHUB_OUTPUT
-          else
-            echo "❌ Invalid provider: $PROVIDER"
-            echo "should-run-internal=false" >> $GITHUB_OUTPUT
-            echo "should-run-codecov=false" >> $GITHUB_OUTPUT
+          echo "🔍 Validating coverage-provider: $COVERAGE_PROVIDER"
+          if [[ "$COVERAGE_PROVIDER" != "internal" && "$COVERAGE_PROVIDER" != "codecov" ]]; then
+            echo "❌ Invalid coverage-provider: '$COVERAGE_PROVIDER'"
+            echo "   Valid options are: internal, codecov"
+            echo "   Fix GO_COVERAGE_PROVIDER in .github/env/ (e.g. 10-coverage.env / 90-project.env)."
             exit 1
           fi
+          echo "✅ Coverage provider is valid: $COVERAGE_PROVIDER"
 
   # ----------------------------------------------------------------------------------
   # Process Coverage and Deploy to GitHub Pages (Internal Provider)
+  #
+  # Note: Provider selection is driven by the `coverage-provider` workflow input. Test
+  # result validation runs as a coverage-independent job (validate-test-results in
+  # fortress-test-suite.yml), not inline here.
   # ----------------------------------------------------------------------------------
   process-coverage:
     name: 📊 Process Coverage & Deploy (Internal)
-    needs: check-provider
-    if: needs.check-provider.outputs.should-run-internal == 'true'
+    needs: [validate-provider]
+    if: inputs.coverage-provider == 'internal'
     runs-on: ${{ inputs.primary-runner }}
     timeout-minutes: 10
     permissions:
@@ -161,7 +155,12 @@ jobs:
       - name: 📥 Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          persist-credentials: false
           fetch-depth: 0 # Fetch all history including tags for version display
+
+      # Note: test result validation runs as a coverage-independent job
+      # (validate-test-results in fortress-test-suite.yml) so failures are enforced
+      # even when coverage is disabled or on tag builds. This job is gated behind it.
 
       # --------------------------------------------------------------------
       # Setup Go with caching and version management
@@ -2422,8 +2421,8 @@ jobs:
   # ----------------------------------------------------------------------------------
   codecov-upload:
     name: 📈 Upload to Codecov
-    needs: check-provider
-    if: needs.check-provider.outputs.should-run-codecov == 'true'
+    needs: [validate-provider]
+    if: inputs.coverage-provider == 'codecov'
     runs-on: ${{ inputs.primary-runner }}
     timeout-minutes: 5
     permissions:
@@ -2444,7 +2443,12 @@ jobs:
       - name: 📥 Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          persist-credentials: false
           fetch-depth: 2 # Need history for codecov to detect changes
+
+      # Note: test result validation runs as a coverage-independent job
+      # (validate-test-results in fortress-test-suite.yml) so failures are enforced
+      # even when coverage is disabled or on tag builds. This job is gated behind it.
 
       # --------------------------------------------------------------------
       # Download coverage artifact

@@ -7,8 +7,8 @@
 #  This workflow coordinates sub-workflows for improved maintainability:
 #    - fortress-test-matrix.yml: Multi-platform test execution
 #    - fortress-test-fuzz.yml: Fuzz testing execution
-#    - fortress-test-validation.yml: Test result validation
-#    - fortress-coverage.yml: Coverage processing (existing)
+#    - fortress-coverage.yml: Coverage processing (coverage only — validation is
+#      handled by the validate-test-results job in this workflow)
 #
 #  Maintainer: @mrz1836
 #
@@ -168,23 +168,48 @@ jobs:
       github-token: ${{ secrets.github-token }}
 
   # ----------------------------------------------------------------------------------
-  # Test Results Validation (Aggregate all test results)
+  # Test Results Validation (coverage-independent aggregate gate)
+  #
+  # This job MUST be independent of coverage so test failures are always enforced — even
+  # when coverage is disabled, on tag builds, or when the coverage provider is
+  # misconfigured. The test matrix/fuzz jobs run with `continue-on-error: true` (so every
+  # shard finishes and reports its summary) and never re-fail themselves; this aggregate
+  # job is the single thing that turns "a test failed" into "the workflow failed". It
+  # reuses the .github/actions/validate-test-results composite action, wired here as
+  # its own always-running job.
   # ----------------------------------------------------------------------------------
   validate-test-results:
     name: 🔍 Validate Test Results
     needs: [execute-test-matrix, execute-fuzz-tests]
-    if: always() && inputs.go-tests-enabled == 'true' # Always run to validate results even if tests failed
+    # Always run to validate results even if tests "continued on error" above.
+    if: always() && inputs.go-tests-enabled == 'true'
     permissions:
-      contents: read
-      actions: read
-    uses: ./.github/workflows/fortress-test-validation.yml
-    with:
-      env-json: ${{ inputs.env-json }}
-      primary-runner: ${{ inputs.primary-runner }}
-      fuzz-testing-enabled: ${{ inputs.fuzz-testing-enabled }}
+      contents: read # Read repository content for validation
+      actions: read # Required: download CI result artifacts from the test jobs
+    runs-on: ${{ inputs.primary-runner }}
+    timeout-minutes: 10
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: 🔧 Parse environment variables
+        uses: ./.github/actions/parse-env
+        with:
+          env-json: ${{ inputs.env-json }}
+
+      - name: 🔍 Validate test results
+        uses: ./.github/actions/validate-test-results
+        with:
+          fuzz-testing-enabled: ${{ inputs.fuzz-testing-enabled }}
 
   # ----------------------------------------------------------------------------------
-  # Coverage Processing (Existing workflow integration)
+  # Coverage Processing
+  #
+  # Gated behind validate-test-results: without `always()`, this job is skipped when
+  # validation fails, so coverage is never processed for a failing test run. Coverage
+  # remains optional (code-coverage-enabled) and is skipped on tag builds.
   # ----------------------------------------------------------------------------------
   process-coverage:
     name: 📊 Process Coverage
@@ -207,6 +232,7 @@ jobs:
       event-name: ${{ github.event_name }}
       pr-number: ${{ github.event.pull_request.number }}
       go-sum-file: ${{ inputs.go-sum-file }}
+      coverage-provider: ${{ inputs.coverage-provider }}
     secrets:
       github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

@@ -6,6 +6,11 @@
 #
 #  Maintainer: @mrz1836
 #
+#  FAILURE HANDLING:
+#  - Each scan keeps `continue-on-error: true` so one failure does not mask another.
+#    A final `🚨 Aggregate failures` step exits non-zero if any real failure occurred
+#    (Nancy rate-limit / 402 are intentionally inconclusive and do NOT fail the job).
+#
 # ------------------------------------------------------------------------------------
 
 name: GoFortress (Security Scans)
@@ -63,37 +68,50 @@ permissions: {}
 
 jobs:
   # ----------------------------------------------------------------------------------
-  # Ask Nancy (Dependency Checks)
+  # Security Scans (single consolidated job)
+  #
+  # Workflow phases (each preserved as named, conditional, continue-on-error steps):
+  #   📥 Checkout (full history for gitleaks)
+  #   🔧 Parse env / Setup Go / Extract module dir / Setup MAGE-X (shared once)
+  #   💾 Restore + install govulncheck binary cache (if govulncheck enabled)
+  #
+  #   🛡️ Nancy:        write go list → install → run → annotations → summary → upload
+  #   🔐 Govulncheck:  run → annotations → summary → upload
+  #   🕵️ Gitleaks:     repo check → run → annotations → summary/fork notice
+  #
+  #   📊 Collect + upload cache statistics (single entry for merged job)
+  #   🚨 Aggregate failures (exit 1 if any scan reported a real failure)
   # ----------------------------------------------------------------------------------
-  ask-nancy:
-    name: 🛡️ Ask Nancy (Dependency Checks)
+  security-scans:
+    name: 🔒 Security Scans
     runs-on: ${{ inputs.primary-runner }}
-    if: ${{ inputs.enable-nancy }}
+    timeout-minutes: 10
+    if: ${{ inputs.enable-nancy || inputs.enable-govulncheck || inputs.enable-gitleaks }}
     permissions:
-      contents: read
+      contents: read # All scans
+      pull-requests: write # Gitleaks needs to create PR comments
     steps:
-      # --------------------------------------------------------------------
-      # Checkout code (required for local actions)
-      # --------------------------------------------------------------------
+      # ====================================================================
+      # SHARED SETUP
+      # ====================================================================
       - name: 📥 Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # Full history required for Gitleaks (other scans tolerate this)
 
-      # --------------------------------------------------------------------
-      # Parse environment variables
-      # --------------------------------------------------------------------
       - name: 🔧 Parse environment variables
         uses: ./.github/actions/parse-env
         with:
           env-json: ${{ inputs.env-json }}
 
-      # --------------------------------------------------------------------
-      # Setup Go with caching and version management
-      # --------------------------------------------------------------------
+      # Govulncheck may need a newer Go version than the project default — use it
+      # if set; the same Go install also covers Nancy's `go install`.
       - name: 🏗️ Setup Go with Cache
-        id: setup-ask-nancy
+        id: setup-security
         uses: ./.github/actions/setup-go-with-cache
         with:
-          go-version: ${{ inputs.go-primary-version }}
+          go-version: ${{ env.GOVULNCHECK_GO_VERSION || inputs.go-primary-version }}
           matrix-os: ${{ inputs.primary-runner }}
           go-primary-version: ${{ inputs.go-primary-version }}
           go-secondary-version: ${{ inputs.go-primary-version }}
@@ -101,25 +119,65 @@ jobs:
           enable-multi-module: ${{ env.ENABLE_MULTI_MODULE_TESTING }}
           github-token: ${{ secrets.github-token }}
 
-      # --------------------------------------------------------------------
-      # Extract Go module directory from GO_SUM_FILE path
-      # --------------------------------------------------------------------
       - name: 🔧 Extract Go module directory
         uses: ./.github/actions/extract-module-dir
         with:
           go-sum-file: ${{ inputs.go-sum-file }}
 
+      - name: 🔧 Setup MAGE-X
+        if: ${{ inputs.enable-govulncheck }}
+        uses: ./.github/actions/setup-magex
+        with:
+          magex-version: ${{ env.MAGE_X_VERSION }}
+          runner-os: ${{ inputs.primary-runner }}
+          use-local: ${{ env.MAGE_X_USE_LOCAL }}
+
       # --------------------------------------------------------------------
-      # Write the "go" list to file for Nancy
+      # Govulncheck binary cache (restore + install on miss)
       # --------------------------------------------------------------------
-      - name: 📝 Write go list
+      - name: 💾 Restore govulncheck binary cache
+        id: govuln-cache
+        if: ${{ inputs.enable-govulncheck }}
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cache/govulncheck-bin
+          key: ${{ inputs.primary-runner }}-govulncheck-${{ env.GOVULNCHECK_VERSION }}-go${{ env.GOVULNCHECK_GO_VERSION }}
+
+      - name: 🛠️ Make cached govulncheck usable
+        if: ${{ inputs.enable-govulncheck }}
+        run: |
+          set -euo pipefail
+          BIN_DIR="$HOME/.cache/govulncheck-bin"
+          GOVULN_BIN="$BIN_DIR/govulncheck"
+          if [[ -f "$GOVULN_BIN" ]]; then
+            echo "✅ Using cached govulncheck binary"
+            mkdir -p "$(go env GOPATH)/bin"
+            cp "$GOVULN_BIN" "$(go env GOPATH)/bin/"
+          fi
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: 📥 Install govulncheck (cache miss)
+        if: ${{ inputs.enable-govulncheck && steps.govuln-cache.outputs.cache-hit != 'true' }}
+        run: |
+          echo "⬇️ Cache miss – installing govulncheck..."
+          echo "🔧 Installing govulncheck version ${{ env.GOVULNCHECK_VERSION }}..."
+          go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+          mkdir -p ~/.cache/govulncheck-bin
+          cp "$(go env GOPATH)/bin/govulncheck" ~/.cache/govulncheck-bin/
+          echo "✅ govulncheck installed and stored in cache"
+
+      # ====================================================================
+      # NANCY (DEPENDENCY CHECKS)
+      # ====================================================================
+      - name: 📝 Nancy — Write go list
+        if: ${{ inputs.enable-nancy }}
         run: |
           echo "📋 Generating module list for security scanning..."
           GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
 
           if [ "$ENABLE_MULTI_MODULE_TESTING" == "true" ]; then
             echo "🔧 Multi-module enabled - running go list from repository root"
-            echo "📦 go.work will discover all Go modules"
             go list -json -m all > go.list
           elif [ -n "$GO_MODULE_DIR" ]; then
             echo "🔧 Running go list from directory: $GO_MODULE_DIR"
@@ -131,20 +189,16 @@ jobs:
 
           echo "✅ Module list generated successfully"
 
-      # --------------------------------------------------------------------
-      # Install Nancy
-      # --------------------------------------------------------------------
-      - name: 📥 Install Nancy
+      - name: 📥 Nancy — Install
+        if: ${{ inputs.enable-nancy }}
         run: |
           echo "📥 Installing nancy version ${{ env.NANCY_VERSION }}..."
           go install github.com/sonatype-nexus-community/nancy@${{ env.NANCY_VERSION }}
           echo "✅ Nancy installed successfully"
 
-      # --------------------------------------------------------------------
-      # Run Nancy to check for vulnerabilities
-      # --------------------------------------------------------------------
-      - name: 🔍 Ask Nancy
+      - name: 🛡️ Nancy — Run scan
         id: run-nancy
+        if: ${{ inputs.enable-nancy }}
         continue-on-error: true
         env:
           OSSI_USERNAME: ${{ secrets.ossi-username }}
@@ -161,15 +215,11 @@ jobs:
             echo "nancy-status=success" >> $GITHUB_OUTPUT
             echo "✅ Nancy scan completed - no vulnerabilities found"
           elif grep -qi "rate limited by OSS Index" nancy-output.log; then
-            # OSS Index rate-limited the scan; treat as inconclusive, NOT as a CI failure.
-            # Add OSSI_USERNAME and OSSI_TOKEN secrets to authenticate and lift the limit.
             echo "nancy-status=rate-limited" >> $GITHUB_OUTPUT
             echo "⚠️  Nancy scan inconclusive - OSS Index rate-limited the request (not failing CI)."
             echo "    Configure OSSI_USERNAME and OSSI_TOKEN secrets to authenticate and lift the limit."
             echo "    Register at https://ossindex.sonatype.org/user/register"
           elif grep -qi "402 Payment Required" nancy-output.log; then
-            # OSS Index returned 402 (free-tier quota exhausted / paid plan required);
-            # treat as inconclusive, NOT as a CI failure.
             echo "nancy-status=payment-required" >> $GITHUB_OUTPUT
             echo "⚠️  Nancy scan inconclusive - OSS Index returned 402 Payment Required (not failing CI)."
             echo "    Configure OSSI_USERNAME and OSSI_TOKEN secrets to authenticate against your OSS Index account."
@@ -179,46 +229,36 @@ jobs:
             echo "❌ Nancy scan completed - vulnerabilities detected (exit code: $NANCY_EXIT_CODE)"
           fi
 
-      # --------------------------------------------------------------------
-      # Create GitHub Annotations for failures
-      # --------------------------------------------------------------------
-      - name: 📋 Create GitHub Annotations (vulnerabilities)
+      - name: 📋 Nancy — Annotations (vulnerabilities)
         if: always() && steps.run-nancy.outputs.nancy-status == 'failure'
         run: |
           echo "::error title=Nancy Security Scan Failed::Vulnerabilities detected in Go dependencies - see job summary for details"
 
-      # --------------------------------------------------------------------
-      # Create GitHub Annotations for rate-limited scans (warning, not error)
-      # --------------------------------------------------------------------
-      - name: 📋 Create GitHub Annotations (rate-limited)
+      - name: 📋 Nancy — Annotations (rate-limited)
         if: always() && steps.run-nancy.outputs.nancy-status == 'rate-limited'
         run: |
           echo "::warning title=Nancy Rate Limited::OSS Index rate-limited the scan; results inconclusive. Add OSSI_USERNAME and OSSI_TOKEN secrets to authenticate and lift the limit."
 
-      # --------------------------------------------------------------------
-      # Create GitHub Annotations for 402 Payment Required (warning, not error)
-      # --------------------------------------------------------------------
-      - name: 📋 Create GitHub Annotations (payment-required)
+      - name: 📋 Nancy — Annotations (payment-required)
         if: always() && steps.run-nancy.outputs.nancy-status == 'payment-required'
         run: |
           echo "::warning title=Nancy Payment Required::OSS Index returned 402 Payment Required; results inconclusive. Add OSSI_USERNAME and OSSI_TOKEN secrets to authenticate against your OSS Index account."
 
-      # --------------------------------------------------------------------
-      # Summary of Nancy results
-      # --------------------------------------------------------------------
-      - name: 📊 Job Summary
-        if: always()
+      - name: 📊 Nancy — Job Summary
+        if: always() && inputs.enable-nancy
         run: |
           NANCY_STATUS="${{ steps.run-nancy.outputs.nancy-status }}"
 
-          echo "## 🛡️ Nancy Security Scan Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Scan Details | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Tool** | Nancy Sleuth |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Mode** | Loud mode with exclusions |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Scope** | All Go modules |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Version** | ${{ env.NANCY_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## 🛡️ Nancy Security Scan Summary"
+            echo ""
+            echo "| Scan Details | Status |"
+            echo "|---|---|"
+            echo "| **Tool** | Nancy Sleuth |"
+            echo "| **Mode** | Loud mode with exclusions |"
+            echo "| **Scope** | All Go modules |"
+            echo "| **Version** | ${{ env.NANCY_VERSION }} |"
+          } >> $GITHUB_STEP_SUMMARY
 
           if [[ "$NANCY_STATUS" == "success" ]]; then
             echo "| **Result** | ✅ No vulnerabilities found |" >> $GITHUB_STEP_SUMMARY
@@ -230,80 +270,86 @@ jobs:
             echo "| **Result** | ❌ Vulnerabilities detected |" >> $GITHUB_STEP_SUMMARY
           fi
 
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🚫 Excluded Vulnerabilities" >> $GITHUB_STEP_SUMMARY
-          echo "The following vulnerabilities were excluded from the scan:" >> $GITHUB_STEP_SUMMARY
-          echo "${{ env.NANCY_EXCLUDES }}" >> $GITHUB_STEP_SUMMARY
+          {
+            echo ""
+            echo "### 🚫 Excluded Vulnerabilities"
+            echo "The following vulnerabilities were excluded from the scan:"
+            echo "${{ env.NANCY_EXCLUDES }}"
+          } >> $GITHUB_STEP_SUMMARY
 
-          # Rate-limited: explain clearly that CI was NOT failed and how to remediate
           if [[ "$NANCY_STATUS" == "rate-limited" ]]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### ⚠️ OSS Index Rate Limit" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Sonatype's OSS Index rate-limited this request before Nancy could complete the scan." >> $GITHUB_STEP_SUMMARY
-            echo "**This is not a vulnerability detection** and CI has **not** been failed for this run." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**To remediate (recommended):**" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "1. Register a free account at <https://ossindex.sonatype.org/user/register>." >> $GITHUB_STEP_SUMMARY
-            echo "2. Retrieve your username (email) and API token from <https://ossindex.sonatype.org/user/settings>." >> $GITHUB_STEP_SUMMARY
-            echo "3. Add them as repository secrets named \`OSSI_USERNAME\` and \`OSSI_TOKEN\`." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Authenticated requests have a substantially higher rate limit and avoid this state." >> $GITHUB_STEP_SUMMARY
+            {
+              echo ""
+              echo "### ⚠️ OSS Index Rate Limit"
+              echo ""
+              echo "Sonatype's OSS Index rate-limited this request before Nancy could complete the scan."
+              echo "**This is not a vulnerability detection** and CI has **not** been failed for this run."
+              echo ""
+              echo "**To remediate (recommended):**"
+              echo ""
+              echo "1. Register a free account at <https://ossindex.sonatype.org/user/register>."
+              echo "2. Retrieve your username (email) and API token from <https://ossindex.sonatype.org/user/settings>."
+              echo "3. Add them as repository secrets named \`OSSI_USERNAME\` and \`OSSI_TOKEN\`."
+              echo ""
+              echo "Authenticated requests have a substantially higher rate limit and avoid this state."
+            } >> $GITHUB_STEP_SUMMARY
             if [[ -f nancy-output.log ]]; then
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "<details>" >> $GITHUB_STEP_SUMMARY
-              echo "<summary>Click to expand Nancy output</summary>" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo '```' >> $GITHUB_STEP_SUMMARY
-              head -50 nancy-output.log >> $GITHUB_STEP_SUMMARY
-              echo '```' >> $GITHUB_STEP_SUMMARY
-              echo "</details>" >> $GITHUB_STEP_SUMMARY
+              {
+                echo ""
+                echo "<details>"
+                echo "<summary>Click to expand Nancy output</summary>"
+                echo ""
+                echo '```'
+                head -50 nancy-output.log
+                echo '```'
+                echo "</details>"
+              } >> $GITHUB_STEP_SUMMARY
             fi
-          # Payment-required (402): explain clearly that CI was NOT failed and how to remediate
           elif [[ "$NANCY_STATUS" == "payment-required" ]]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### ⚠️ OSS Index Payment Required (402)" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Sonatype's OSS Index returned **402 Payment Required**, indicating the free-tier quota for unauthenticated requests has been exhausted." >> $GITHUB_STEP_SUMMARY
-            echo "**This is not a vulnerability detection** and CI has **not** been failed for this run." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**To remediate (recommended):**" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "1. Register a free account at <https://ossindex.sonatype.org/user/register>." >> $GITHUB_STEP_SUMMARY
-            echo "2. Retrieve your username (email) and API token from <https://ossindex.sonatype.org/user/settings>." >> $GITHUB_STEP_SUMMARY
-            echo "3. Add them as repository secrets named \`OSSI_USERNAME\` and \`OSSI_TOKEN\`." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Authenticated requests have a higher quota and avoid this state." >> $GITHUB_STEP_SUMMARY
+            {
+              echo ""
+              echo "### ⚠️ OSS Index Payment Required (402)"
+              echo ""
+              echo "Sonatype's OSS Index returned **402 Payment Required**, indicating the free-tier quota for unauthenticated requests has been exhausted."
+              echo "**This is not a vulnerability detection** and CI has **not** been failed for this run."
+              echo ""
+              echo "**To remediate (recommended):**"
+              echo ""
+              echo "1. Register a free account at <https://ossindex.sonatype.org/user/register>."
+              echo "2. Retrieve your username (email) and API token from <https://ossindex.sonatype.org/user/settings>."
+              echo "3. Add them as repository secrets named \`OSSI_USERNAME\` and \`OSSI_TOKEN\`."
+              echo ""
+              echo "Authenticated requests have a higher quota and avoid this state."
+            } >> $GITHUB_STEP_SUMMARY
             if [[ -f nancy-output.log ]]; then
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "<details>" >> $GITHUB_STEP_SUMMARY
-              echo "<summary>Click to expand Nancy output</summary>" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo '```' >> $GITHUB_STEP_SUMMARY
-              head -50 nancy-output.log >> $GITHUB_STEP_SUMMARY
-              echo '```' >> $GITHUB_STEP_SUMMARY
-              echo "</details>" >> $GITHUB_STEP_SUMMARY
+              {
+                echo ""
+                echo "<details>"
+                echo "<summary>Click to expand Nancy output</summary>"
+                echo ""
+                echo '```'
+                head -50 nancy-output.log
+                echo '```'
+                echo "</details>"
+              } >> $GITHUB_STEP_SUMMARY
             fi
-          # Real vulnerability failure: keep existing details section
           elif [[ "$NANCY_STATUS" == "failure" ]] && [[ -f nancy-output.log ]]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### 🚨 Vulnerability Details" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "<details>" >> $GITHUB_STEP_SUMMARY
-            echo "<summary>Click to expand full scan output</summary>" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            head -200 nancy-output.log >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "</details>" >> $GITHUB_STEP_SUMMARY
+            {
+              echo ""
+              echo "### 🚨 Vulnerability Details"
+              echo ""
+              echo "<details>"
+              echo "<summary>Click to expand full scan output</summary>"
+              echo ""
+              echo '```'
+              head -200 nancy-output.log
+              echo '```'
+              echo "</details>"
+            } >> $GITHUB_STEP_SUMMARY
           fi
 
-      # --------------------------------------------------------------------
-      # Upload Nancy scan results
-      # --------------------------------------------------------------------
-      - name: 📤 Upload Nancy scan results
-        if: always()
+      - name: 📤 Nancy — Upload scan results
+        if: always() && inputs.enable-nancy
         uses: ./.github/actions/upload-artifact-resilient
         with:
           artifact-name: nancy-scan-results
@@ -311,154 +357,17 @@ jobs:
           retention-days: "7"
           if-no-files-found: ignore
 
-      # --------------------------------------------------------------------
-      # Collect cache statistics
-      # --------------------------------------------------------------------
-      - name: 📊 Collect cache statistics
-        uses: ./.github/actions/collect-cache-stats
-        with:
-          workflow-name: nancy-security
-          job-name: nancy-security
-          os: ${{ inputs.primary-runner }}
-          go-version: ${{ inputs.go-primary-version }}
-          cache-prefix: cache-stats
-          gomod-cache-hit: ${{ steps.setup-ask-nancy.outputs.module-cache-hit }}
-          gobuild-cache-hit: ${{ steps.setup-ask-nancy.outputs.build-cache-hit }}
-
-      # --------------------------------------------------------------------
-      # Upload infrastructure cache statistics
-      # --------------------------------------------------------------------
-      - name: 📤 Upload infrastructure cache statistics
-        uses: ./.github/actions/upload-statistics
-        with:
-          artifact-name: cache-stats-security-nancy
-          artifact-path: cache-stats-nancy-security.json
-
-      # --------------------------------------------------------------------
-      # Fail job if vulnerabilities found
-      #
-      # Only fires when nancy-status == 'failure' (real vulnerabilities).
-      # The 'rate-limited' status is intentionally excluded: an OSS Index rate
-      # limit produces an inconclusive scan, not a vulnerability finding, and
-      # must not red-X CI. See the run-nancy step above for the rate-limit
-      # detection logic.
-      # --------------------------------------------------------------------
-      - name: 🚨 Fail job if vulnerabilities found
-        if: always() && steps.run-nancy.outputs.nancy-status == 'failure'
-        run: |
-          echo "❌ Nancy detected vulnerabilities in dependencies"
-          exit 1
-
-  # ----------------------------------------------------------------------------------
-  # Govulncheck (Vulnerability Checks)
-  # ----------------------------------------------------------------------------------
-  govulncheck:
-    name: 🔐 Run govulncheck (Vulnerability Scan)
-    runs-on: ${{ inputs.primary-runner }}
-    if: ${{ inputs.enable-govulncheck }}
-    permissions:
-      contents: read
-    steps:
-      # --------------------------------------------------------------------
-      # Checkout code (required for local actions)
-      # --------------------------------------------------------------------
-      - name: 📥 Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      # --------------------------------------------------------------------
-      # Parse environment variables
-      # --------------------------------------------------------------------
-      - name: 🔧 Parse environment variables
-        uses: ./.github/actions/parse-env
-        with:
-          env-json: ${{ inputs.env-json }}
-
-      # --------------------------------------------------------------------
-      # Setup Go with caching and version management
-      # Uses GOVULNCHECK_GO_VERSION if set, otherwise falls back to primary version
-      # This allows govulncheck to use a newer Go version for accurate stdlib vulnerability detection
-      # --------------------------------------------------------------------
-      - name: 🏗️ Setup Go with Cache
-        id: setup-govulncheck
-        uses: ./.github/actions/setup-go-with-cache
-        with:
-          go-version: ${{ env.GOVULNCHECK_GO_VERSION || inputs.go-primary-version }}
-          matrix-os: ${{ inputs.primary-runner }}
-          go-primary-version: ${{ inputs.go-primary-version }}
-          go-secondary-version: ${{ inputs.go-primary-version }}
-          go-sum-file: ${{ inputs.go-sum-file }}
-          enable-multi-module: ${{ env.ENABLE_MULTI_MODULE_TESTING }}
-          github-token: ${{ secrets.github-token }}
-
-      # --------------------------------------------------------------------
-      # Extract Go module directory from GO_SUM_FILE path
-      # --------------------------------------------------------------------
-      - name: 🔧 Extract Go module directory
-        uses: ./.github/actions/extract-module-dir
-        with:
-          go-sum-file: ${{ inputs.go-sum-file }}
-
-      # --------------------------------------------------------------------
-      # Setup MAGE-X (required for magex deps:audit command)
-      # --------------------------------------------------------------------
-      - name: 🔧 Setup MAGE-X
-        uses: ./.github/actions/setup-magex
-        with:
-          magex-version: ${{ env.MAGE_X_VERSION }}
-          runner-os: ${{ inputs.primary-runner }}
-          use-local: ${{ env.MAGE_X_USE_LOCAL }}
-
-      # --------------------------------------------------------------------
-      # Restore (and later save) a compact cache for the govulncheck binary
-      # and its vulnerability DB files.
-      # --------------------------------------------------------------------
-      - name: 💾 Restore govulncheck binary cache
-        id: govuln-cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: |
-            ~/.cache/govulncheck-bin
-          key: ${{ inputs.primary-runner }}-govulncheck-${{ env.GOVULNCHECK_VERSION }}-go${{ env.GOVULNCHECK_GO_VERSION }}
-
-      - name: 🛠️ Make cached govulncheck usable
-        run: |
-          set -euo pipefail
-          BIN_DIR="$HOME/.cache/govulncheck-bin"
-          GOVULN_BIN="$BIN_DIR/govulncheck"
-          # If we restored a cache, copy/link it into GOPATH/bin so the binary works.
-          if [[ -f "$GOVULN_BIN" ]]; then
-            echo "✅ Using cached govulncheck binary"
-            mkdir -p "$(go env GOPATH)/bin"
-            cp "$GOVULN_BIN" "$(go env GOPATH)/bin/"
-          fi
-          # Make sure the binary location is on PATH for *all* subsequent steps.
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-
-      # --------------------------------------------------------------------
-      # Install govulncheck *only* when the cache was empty.
-      # --------------------------------------------------------------------
-      - name: 📥 Install govulncheck (cache miss)
-        if: steps.govuln-cache.outputs.cache-hit != 'true'
-        run: |
-          echo "⬇️ Cache miss – installing govulncheck..."
-          echo "🔧 Installing govulncheck version ${{ env.GOVULNCHECK_VERSION }}..."
-          go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
-          # Copy the freshly built binary back into the cache directory
-          mkdir -p ~/.cache/govulncheck-bin
-          cp "$(go env GOPATH)/bin/govulncheck" ~/.cache/govulncheck-bin/
-          echo "✅ govulncheck installed and stored in cache"
-
-      # --------------------------------------------------------------------
-      # Run govulncheck
-      # --------------------------------------------------------------------
-      - name: 🔐 Run govulncheck
+      # ====================================================================
+      # GOVULNCHECK (VULNERABILITY CHECKS)
+      # ====================================================================
+      - name: 🔐 Govulncheck — Run
         id: run-govulncheck
+        if: ${{ inputs.enable-govulncheck }}
         continue-on-error: true
         run: |
           echo "🔍 Running vulnerability analysis..."
           GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
 
-          # Show CVE exclusions if configured
           if [ -n "${MAGE_X_CVE_EXCLUDES:-}" ]; then
             echo "🚫 CVE exclusions configured: $MAGE_X_CVE_EXCLUDES"
           fi
@@ -466,7 +375,6 @@ jobs:
           set +e
           if [ "$ENABLE_MULTI_MODULE_TESTING" == "true" ]; then
             echo "🔧 Multi-module enabled - running magex deps:audit from repository root"
-            echo "📦 magex will discover all Go modules"
             magex deps:audit 2>&1 | tee govulncheck-output.log
             GOVULN_EXIT_CODE=${PIPESTATUS[0]}
           elif [ -n "$GO_MODULE_DIR" ]; then
@@ -489,29 +397,25 @@ jobs:
             echo "❌ Vulnerability scan completed - vulnerabilities detected (exit code: $GOVULN_EXIT_CODE)"
           fi
 
-      # --------------------------------------------------------------------
-      # Create GitHub Annotations for failures
-      # --------------------------------------------------------------------
-      - name: 📋 Create GitHub Annotations
+      - name: 📋 Govulncheck — Annotations
         if: always() && steps.run-govulncheck.outputs.govuln-status == 'failure'
         run: |
           echo "::error title=Govulncheck Failed::Go vulnerabilities detected - see job summary for details"
 
-      # --------------------------------------------------------------------
-      # Summary of govulncheck results
-      # --------------------------------------------------------------------
-      - name: 📊 Job Summary
-        if: always()
+      - name: 📊 Govulncheck — Job Summary
+        if: always() && inputs.enable-govulncheck
         run: |
           GOVULN_STATUS="${{ steps.run-govulncheck.outputs.govuln-status }}"
 
-          echo "## 🔐 govulncheck Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Analysis Details | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Tool** | govulncheck (Official Go Security Tool) |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Installation** | $( [[ '${{ steps.govuln-cache.outputs.cache-hit }}' == 'true' ]] && echo '💾 From cache' || echo '📥 Fresh install' ) |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Scope** | All packages in module |" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## 🔐 govulncheck Summary"
+            echo ""
+            echo "| Analysis Details | Status |"
+            echo "|---|---|"
+            echo "| **Tool** | govulncheck (Official Go Security Tool) |"
+            echo "| **Installation** | $( [[ '${{ steps.govuln-cache.outputs.cache-hit }}' == 'true' ]] && echo '💾 From cache' || echo '📥 Fresh install' ) |"
+            echo "| **Scope** | All packages in module |"
+          } >> $GITHUB_STEP_SUMMARY
 
           if [[ "$GOVULN_STATUS" == "success" ]]; then
             echo "| **Result** | ✅ No vulnerabilities detected |" >> $GITHUB_STEP_SUMMARY
@@ -519,37 +423,38 @@ jobs:
             echo "| **Result** | ❌ Vulnerabilities detected |" >> $GITHUB_STEP_SUMMARY
           fi
 
-          echo "| **Version** | ${{ env.GOVULNCHECK_VERSION }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "| **Version** | ${{ env.GOVULNCHECK_VERSION }} |"
+            echo ""
+          } >> $GITHUB_STEP_SUMMARY
 
-          # Show excluded vulnerabilities if configured
           if [ -n "${MAGE_X_CVE_EXCLUDES:-}" ]; then
-            echo "### 🚫 Excluded Vulnerabilities" >> $GITHUB_STEP_SUMMARY
-            echo "The following vulnerabilities were excluded from the scan:" >> $GITHUB_STEP_SUMMARY
-            echo "\`${MAGE_X_CVE_EXCLUDES}\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
+            {
+              echo "### 🚫 Excluded Vulnerabilities"
+              echo "The following vulnerabilities were excluded from the scan:"
+              echo "\`${MAGE_X_CVE_EXCLUDES}\`"
+              echo ""
+            } >> $GITHUB_STEP_SUMMARY
           fi
 
-          # Show failure details if applicable
           if [[ "$GOVULN_STATUS" != "success" ]] && [[ -f govulncheck-output.log ]]; then
-            echo "### 🚨 Vulnerability Details" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "<details>" >> $GITHUB_STEP_SUMMARY
-            echo "<summary>Click to expand full scan output</summary>" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            head -200 govulncheck-output.log >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "</details>" >> $GITHUB_STEP_SUMMARY
+            {
+              echo "### 🚨 Vulnerability Details"
+              echo ""
+              echo "<details>"
+              echo "<summary>Click to expand full scan output</summary>"
+              echo ""
+              echo '```'
+              head -200 govulncheck-output.log
+              echo '```'
+              echo "</details>"
+            } >> $GITHUB_STEP_SUMMARY
           else
             echo "🎯 **Analysis completed successfully with no security issues found.**" >> $GITHUB_STEP_SUMMARY
           fi
 
-      # --------------------------------------------------------------------
-      # Upload govulncheck results
-      # --------------------------------------------------------------------
-      - name: 📤 Upload govulncheck results
-        if: always()
+      - name: 📤 Govulncheck — Upload results
+        if: always() && inputs.enable-govulncheck
         uses: ./.github/actions/upload-artifact-resilient
         with:
           artifact-name: govulncheck-scan-results
@@ -557,70 +462,12 @@ jobs:
           retention-days: "7"
           if-no-files-found: ignore
 
-      # --------------------------------------------------------------------
-      # Collect cache statistics
-      # --------------------------------------------------------------------
-      - name: 📊 Collect cache statistics
-        uses: ./.github/actions/collect-cache-stats
-        with:
-          workflow-name: govulncheck-security
-          job-name: govulncheck-security
-          os: ${{ inputs.primary-runner }}
-          go-version: ${{ inputs.go-primary-version }}
-          cache-prefix: cache-stats
-          gomod-cache-hit: ${{ steps.setup-govulncheck.outputs.module-cache-hit }}
-          gobuild-cache-hit: ${{ steps.setup-govulncheck.outputs.build-cache-hit }}
-
-      # --------------------------------------------------------------------
-      # Upload infrastructure cache statistics
-      # --------------------------------------------------------------------
-      - name: 📤 Upload infrastructure cache statistics
-        uses: ./.github/actions/upload-statistics
-        with:
-          artifact-name: cache-stats-security-govulncheck
-          artifact-path: cache-stats-govulncheck-security.json
-
-      # --------------------------------------------------------------------
-      # Fail job if vulnerabilities found
-      # --------------------------------------------------------------------
-      - name: 🚨 Fail job if vulnerabilities found
-        if: always() && steps.run-govulncheck.outputs.govuln-status == 'failure'
-        run: |
-          echo "❌ Govulncheck detected vulnerabilities in dependencies"
-          exit 1
-
-  # ----------------------------------------------------------------------------------
-  # Gitleaks (Secret Scanning)
-  # ----------------------------------------------------------------------------------
-  gitleaks:
-    name: 🕵️ Run Gitleaks (Secret Scan)
-    runs-on: ${{ inputs.primary-runner }}
-    if: ${{ inputs.enable-gitleaks }}
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      # --------------------------------------------------------------------
-      # Checkout code (required for local actions)
-      # --------------------------------------------------------------------
-      - name: 📥 Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0 # Fetch all history so Gitleaks can scan commits
-
-      # --------------------------------------------------------------------
-      # Parse environment variables
-      # --------------------------------------------------------------------
-      - name: 🔧 Parse environment variables
-        uses: ./.github/actions/parse-env
-        with:
-          env-json: ${{ inputs.env-json }}
-
-      # --------------------------------------------------------------------
-      # Check repository security conditions
-      # --------------------------------------------------------------------
-      - name: 🔍 Check repository security conditions
-        id: repo-check
+      # ====================================================================
+      # GITLEAKS (SECRET SCANNING)
+      # ====================================================================
+      - name: 🔍 Gitleaks — Check repository security conditions
+        id: gitleaks-repo-check
+        if: ${{ inputs.enable-gitleaks }}
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_ACTOR: ${{ github.actor }}
@@ -634,8 +481,6 @@ jobs:
           echo "Repository: $GITHUB_REPOSITORY"
           echo "Head Ref: $GITHUB_HEAD_REF"
 
-          # For workflow_call, we typically trust the calling workflow from the same repo
-          # For pull_request events, check if head repo matches base repo
           if [[ "$GITHUB_EVENT_NAME" == "workflow_call" ]]; then
             echo "✅ Workflow call from same repository - security scans allowed"
             echo "is_same_repo=true" >> $GITHUB_OUTPUT
@@ -648,9 +493,9 @@ jobs:
             echo "is_same_repo=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: 🔍 Run gitleaks scan
+      - name: 🕵️ Gitleaks — Run scan
         id: run-gitleaks
-        if: steps.repo-check.outputs.is_same_repo == 'true'
+        if: ${{ inputs.enable-gitleaks && steps.gitleaks-repo-check.outputs.is_same_repo == 'true' }}
         continue-on-error: true
         # NOTE: gitleaks/gitleaks-action@v2.3.9 is the latest release and still uses Node.js 20.
         # This will trigger a "Node.js 20 actions are deprecated" warning until the gitleaks
@@ -666,61 +511,129 @@ jobs:
           GITLEAKS_VERSION: ${{ env.GITLEAKS_VERSION }}
           GITLEAKS_CONFIG: ${{ env.GITLEAKS_CONFIG_FILE }}
 
-      # --------------------------------------------------------------------
-      # Create GitHub Annotations for failures
-      # --------------------------------------------------------------------
-      - name: 📋 Create GitHub Annotations
-        if: always() && steps.repo-check.outputs.is_same_repo == 'true' && steps.run-gitleaks.outcome == 'failure'
+      - name: 📋 Gitleaks — Annotations
+        if: always() && inputs.enable-gitleaks && steps.gitleaks-repo-check.outputs.is_same_repo == 'true' && steps.run-gitleaks.outcome == 'failure'
         run: |
           echo "::error title=Gitleaks Secret Scan Failed::Secrets detected in repository - see job summary for details"
 
-      - name: 📊 Job Summary
-        if: always() && steps.repo-check.outputs.is_same_repo == 'true'
+      - name: 📊 Gitleaks — Job Summary
+        if: always() && inputs.enable-gitleaks && steps.gitleaks-repo-check.outputs.is_same_repo == 'true'
         run: |
           GITLEAKS_OUTCOME="${{ steps.run-gitleaks.outcome }}"
 
-          echo "## 🕵️ Gitleaks Secret Scan Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Scan Details | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Tool** | Gitleaks |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Version** | ${{ env.GITLEAKS_VERSION }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Scope** | All commits and files |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Config** | $([ -n "${{ env.GITLEAKS_CONFIG_FILE }}" ] && echo "Custom: \`${{ env.GITLEAKS_CONFIG_FILE }}\`" || echo "Default (built-in rules)") |" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## 🕵️ Gitleaks Secret Scan Summary"
+            echo ""
+            echo "| Scan Details | Status |"
+            echo "|---|---|"
+            echo "| **Tool** | Gitleaks |"
+            echo "| **Version** | ${{ env.GITLEAKS_VERSION }} |"
+            echo "| **Scope** | All commits and files |"
+            echo "| **Config** | $([ -n "${{ env.GITLEAKS_CONFIG_FILE }}" ] && echo "Custom: \`${{ env.GITLEAKS_CONFIG_FILE }}\`" || echo "Default (built-in rules)") |"
+          } >> $GITHUB_STEP_SUMMARY
 
           if [[ "$GITLEAKS_OUTCOME" == "success" ]]; then
-            echo "| **Result** | ✅ No secrets detected |" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "🎯 **Secret scan completed successfully.**" >> $GITHUB_STEP_SUMMARY
+            {
+              echo "| **Result** | ✅ No secrets detected |"
+              echo ""
+              echo "🎯 **Secret scan completed successfully.**"
+            } >> $GITHUB_STEP_SUMMARY
           else
-            echo "| **Result** | ❌ Secrets detected |" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### 🚨 Action Required" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Gitleaks has detected secrets in the repository. Please review the scan output and remove any exposed secrets." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Note:** The detailed findings are available in the Gitleaks-generated summary above this section." >> $GITHUB_STEP_SUMMARY
+            {
+              echo "| **Result** | ❌ Secrets detected |"
+              echo ""
+              echo "### 🚨 Action Required"
+              echo ""
+              echo "Gitleaks has detected secrets in the repository. Please review the scan output and remove any exposed secrets."
+              echo ""
+              echo "**Note:** The detailed findings are available in the Gitleaks-generated summary above this section."
+            } >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: 📊 Fork Security Notice
-        if: steps.repo-check.outputs.is_same_repo == 'false'
+      - name: 📊 Gitleaks — Fork Security Notice
+        if: ${{ inputs.enable-gitleaks && steps.gitleaks-repo-check.outputs.is_same_repo == 'false' }}
         run: |
-          echo "## 🕵️ Gitleaks Secret Scan Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| 🔒 Security Details | ⚠️  Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Tool** | Gitleaks |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Fork Detected** | ${{ github.event.pull_request.head.repo && github.event.pull_request.head.repo.full_name || 'N/A (not a PR event)' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Base Repository** | ${{ github.repository }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Result** | ⚠️  Skipped for security (fork cannot access secrets) |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "🔒 **Secret scanning was skipped because this PR comes from a fork. This is a security feature to prevent secret exposure.**" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## 🕵️ Gitleaks Secret Scan Summary"
+            echo ""
+            echo "| 🔒 Security Details | ⚠️  Status |"
+            echo "|---|---|"
+            echo "| **Tool** | Gitleaks |"
+            echo "| **Fork Detected** | ${{ github.event.pull_request.head.repo && github.event.pull_request.head.repo.full_name || 'N/A (not a PR event)' }} |"
+            echo "| **Base Repository** | ${{ github.repository }} |"
+            echo "| **Result** | ⚠️  Skipped for security (fork cannot access secrets) |"
+            echo ""
+            echo "🔒 **Secret scanning was skipped because this PR comes from a fork. This is a security feature to prevent secret exposure.**"
+          } >> $GITHUB_STEP_SUMMARY
+
+      # ====================================================================
+      # SHARED: cache statistics + final failure aggregation
+      # ====================================================================
+      - name: 📊 Collect cache statistics
+        if: always()
+        uses: ./.github/actions/collect-cache-stats
+        with:
+          workflow-name: security-scans
+          job-name: security-scans
+          os: ${{ inputs.primary-runner }}
+          go-version: ${{ inputs.go-primary-version }}
+          cache-prefix: cache-stats
+          gomod-cache-hit: ${{ steps.setup-security.outputs.module-cache-hit }}
+          gobuild-cache-hit: ${{ steps.setup-security.outputs.build-cache-hit }}
+
+      - name: 📤 Upload infrastructure cache statistics
+        if: always()
+        uses: ./.github/actions/upload-statistics
+        with:
+          artifact-name: cache-stats-security-scans
+          artifact-path: cache-stats-security-scans.json
 
       # --------------------------------------------------------------------
-      # Fail job if secrets found
+      # Aggregate failures: exit non-zero if any scan reported a REAL failure.
+      # Preserves the per-scan isolation while still failing the parent
+      # workflow's `security` job as before.
+      #
+      # Intentionally NOT treated as failures:
+      # - Nancy rate-limited (OSS Index throttled the request — inconclusive)
+      # - Nancy payment-required (OSS Index free-tier exhausted — inconclusive)
+      # - Gitleaks skipped due to fork (security policy, not a finding)
       # --------------------------------------------------------------------
-      - name: 🚨 Fail job if secrets found
-        if: always() && steps.repo-check.outputs.is_same_repo == 'true' && steps.run-gitleaks.outcome == 'failure'
+      - name: 🚨 Aggregate failures
+        if: always()
+        # Security: workflow_call inputs and step results are routed through
+        # `env:` rather than interpolated into the shell body. This prevents
+        # script injection (SonarCloud githubactions script-injection rule) by
+        # passing values as environment data, never splicing them into the script.
+        env:
+          ENABLE_NANCY: ${{ inputs.enable-nancy }}
+          ENABLE_GOVULNCHECK: ${{ inputs.enable-govulncheck }}
+          ENABLE_GITLEAKS: ${{ inputs.enable-gitleaks }}
+          NANCY_STATUS: ${{ steps.run-nancy.outputs.nancy-status }}
+          GOVULN_STATUS: ${{ steps.run-govulncheck.outputs.govuln-status }}
+          GITLEAKS_OUTCOME: ${{ steps.run-gitleaks.outcome }}
+          GITLEAKS_SAME_REPO: ${{ steps.gitleaks-repo-check.outputs.is_same_repo }}
         run: |
-          echo "❌ Gitleaks detected secrets in the repository"
-          exit 1
+          FAILED=0
+
+          if [[ "${ENABLE_NANCY}" == "true" ]] && [[ "${NANCY_STATUS}" == "failure" ]]; then
+            echo "❌ Nancy detected vulnerabilities in dependencies"
+            FAILED=1
+          fi
+
+          if [[ "${ENABLE_GOVULNCHECK}" == "true" ]] && [[ "${GOVULN_STATUS}" == "failure" ]]; then
+            echo "❌ Govulncheck detected vulnerabilities"
+            FAILED=1
+          fi
+
+          if [[ "${ENABLE_GITLEAKS}" == "true" ]] \
+              && [[ "${GITLEAKS_SAME_REPO}" == "true" ]] \
+              && [[ "${GITLEAKS_OUTCOME}" == "failure" ]]; then
+            echo "❌ Gitleaks detected secrets in the repository"
+            FAILED=1
+          fi
+
+          if [[ $FAILED -ne 0 ]]; then
+            exit 1
+          fi
+
+          echo "✅ All enabled security scans passed (or were inconclusive without finding issues)"

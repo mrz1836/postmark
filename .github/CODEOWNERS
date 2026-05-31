@@ -10,8 +10,6 @@
 .github/scripts/* @mrz1836
 .github/workflows/* @mrz1836
 .github/env/* @mrz1836
-.github/.env.base @mrz1836
-.github/.env.custom @mrz1836
 
 # MAGE-X
 .mage.yaml @mrz1836
@@ -43,7 +41,7 @@ codecov.yml @mrz1836
 
 # Security and configuration files
 .github/SECURITY.md @mrz1836
-.github/.gitleaks.toml @mrz1836
+.gitleaksignore @mrz1836
 
 # Repository configuration
 .github/labels.yml @mrz1836

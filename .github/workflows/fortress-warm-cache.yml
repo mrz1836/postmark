@@ -68,6 +68,7 @@ jobs:
       fail-fast: true
       matrix: ${{ fromJSON(inputs.warm-cache-matrix) }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       # --------------------------------------------------------------------
       # Parse environment variables

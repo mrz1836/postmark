@@ -3,8 +3,6 @@
 #
 #  Purpose: YAML formatting configuration for the mage-x (yamlfmt) tool
 #
-#  Maintainer: @mrz1836
-#
 # ------------------------------------------------------------------------------------
 
 formatter:
@@ -73,6 +71,9 @@ exclude:
   - "**/*.swp"
   - "**/*.swo"
   - "**/*~"
+
+  # Test fixtures (intentionally malformed YAML used by ci-tester).
+  - ".github/ci-tester/fixtures/workflow-invalid/.github/workflows/invalid.yml"
 
   # Environment files
   - "**/env/**"
