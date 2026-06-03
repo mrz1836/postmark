@@ -147,7 +147,7 @@ jobs:
       # checkov:skip=CKV_GHA_3:Base branch checkout is intentional and safe
       # sonarcloud:S7631 — false positive: base-ref sparse checkout only (see NOSONAR below)
       - name: 📥 Checkout base repo (sparse)
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 — NOSONAR(S7631): base-ref sparse checkout only; PR head is never checked out or executed
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.2 — NOSONAR(S7631): base-ref sparse checkout only; PR head is never checked out or executed
         with:
           persist-credentials: false
           ref: ${{ github.base_ref || github.ref }}
@@ -751,7 +751,7 @@ jobs:
       # checkov:skip=CKV_GHA_3:Base branch checkout is intentional and safe
       # sonarcloud:S7631 — false positive: base-ref sparse checkout only (see NOSONAR below)
       - name: 📥 Checkout base repo (sparse)
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 — NOSONAR(S7631): base-ref sparse checkout only; PR head is never checked out or executed
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.2 — NOSONAR(S7631): base-ref sparse checkout only; PR head is never checked out or executed
         with:
           persist-credentials: false
           ref: ${{ github.base_ref || github.ref }}
