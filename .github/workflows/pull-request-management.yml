@@ -776,18 +776,18 @@ jobs:
           {
             echo "DEFAULT_ASSIGNEE=$(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_DEFAULT_ASSIGNEE // ""')"
             echo "SKIP_BOT_USERS=$(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_SKIP_BOT_USERS // ""')"
-            echo "FORK_LABEL=$(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_FORK_LABEL // \"fork-pr\"')"
-            echo "TRIAGE_LABEL=$(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_TRIAGE_LABEL // \"requires-manual-review\"')"
-            echo "WELCOME_FORKS=$(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_WELCOME_FORKS // \"true\"')"
-            echo "CLEAN_CACHE=$(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_CLEAN_CACHE_ON_CLOSE // \"true\"')"
+            echo "FORK_LABEL=$(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_FORK_LABEL // "fork-pr"')"
+            echo "TRIAGE_LABEL=$(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_TRIAGE_LABEL // "requires-manual-review"')"
+            echo "WELCOME_FORKS=$(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_WELCOME_FORKS // "true"')"
+            echo "CLEAN_CACHE=$(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_CLEAN_CACHE_ON_CLOSE // "true"')"
           } >> "$GITHUB_ENV"
 
           echo "🔍 Configuration loaded:"
           echo "  👤 Default assignee: $(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_DEFAULT_ASSIGNEE // ""')"
-          echo "  🏷️ Fork label: $(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_FORK_LABEL // \"fork-pr\"')"
-          echo "  🏷️ Triage label: $(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_TRIAGE_LABEL // \"requires-manual-review\"')"
-          echo "  👋 Welcome forks: $(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_WELCOME_FORKS // \"true\"')"
-          echo "  🧹 Clean cache on close: $(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_CLEAN_CACHE_ON_CLOSE // \"true\"')"
+          echo "  🏷️ Fork label: $(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_FORK_LABEL // "fork-pr"')"
+          echo "  🏷️ Triage label: $(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_TRIAGE_LABEL // "requires-manual-review"')"
+          echo "  👋 Welcome forks: $(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_WELCOME_FORKS // "true"')"
+          echo "  🧹 Clean cache on close: $(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_CLEAN_CACHE_ON_CLOSE // "true"')"
 
       # --------------------------------------------------------------------
       # Debug log: confirm fork classification (the job-level `if:` already
@@ -830,6 +830,14 @@ jobs:
             }
 
             const ensureLabels = async (names) => {
+              // Defense-in-depth: never POST blank labels (GitHub rejects them
+              // with a 422). Guards against an empty/misconfigured FORK_LABEL or
+              // TRIAGE_LABEL slipping through.
+              names = names.map(n => (n || '').trim()).filter(Boolean);
+              if (names.length === 0) {
+                core.warning('No fork/triage labels configured; skipping labeling.');
+                return;
+              }
               // Create missing labels lazily with safe colors
               for (const name of names) {
                 try {
@@ -854,7 +862,7 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: prNumber,
-                labels: [process.env.FORK_LABEL, process.env.TRIAGE_LABEL]
+                labels: names
               });
             };
 
