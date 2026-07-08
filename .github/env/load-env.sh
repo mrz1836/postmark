@@ -10,7 +10,7 @@
 #   - Skips 99-local.env when CI=true
 #   - Returns 0 on success, 1 on error, 2 if no .env files found
 #
-# Author: Z + ZAI | License: MIT
+# Author: MrZ1836 | License: MIT
 
 set -euo pipefail
 
