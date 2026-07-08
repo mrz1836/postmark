@@ -64,6 +64,7 @@ jobs:
       - name: 📥 Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false # checkout v7 breaks auth with persisted creds; goreleaser uses env GITHUB_TOKEN
           fetch-depth: 0 # Required for changelog generation
           token: ${{ secrets.github-token }}
 
