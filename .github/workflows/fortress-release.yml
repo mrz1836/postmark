@@ -62,7 +62,7 @@ jobs:
       # Checkout code and set up Go environment
       # --------------------------------------------------------------------
       - name: 📥 Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false # checkout v7 breaks auth with persisted creds; goreleaser uses env GITHUB_TOKEN
           fetch-depth: 0 # Required for changelog generation
