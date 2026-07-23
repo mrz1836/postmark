@@ -25,7 +25,6 @@
        &nbsp;&nbsp;&nbsp;&nbsp; <code>Quality</code> &nbsp;&nbsp;
     </td>
     <td align="left">
-       <a href="https://goreportcard.com/report/github.com/mrz1836/postmark"><img src="https://goreportcard.com/badge/github.com/mrz1836/postmark?style=flat-square" alt="Go Report"></a>
        <a href="https://codecov.io/gh/mrz1836/postmark"><img src="https://codecov.io/gh/mrz1836/postmark/branch/master/graph/badge.svg?style=flat-square" alt="Coverage"></a>
     </td>
   </tr>
