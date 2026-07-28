@@ -45,7 +45,6 @@ When in doubt, check the official docs:
 * 📃 [godoc](https://pkg.go.dev/golang.org/x/tools/cmd/godoc)
 * 🔧 [gofmt](https://golang.org/cmd/gofmt/)
 * 📊 [golangci-lint](https://golangci-lint.run/)
-* 📈 [Go Report Card](https://goreportcard.com/)
 
 <br/>
 
