@@ -42,7 +42,6 @@ We follow [Effective Go](https://golang.org/doc/effective_go.html), plus:
 
 * 📖 [godoc](https://godoc.org/golang.org/x/tools/cmd/godoc)
 * 🧼 [golangci-lint](https://golangci-lint.run/)
-* 🧾 [Go Report Card](https://goreportcard.com/)
 
 Format your code with `gofmt`, lint with `golangci-lint`, and keep your diffs minimal.
 
