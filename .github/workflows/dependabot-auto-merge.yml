@@ -57,7 +57,7 @@ concurrency:
 # Note: Configuration variables are loaded from modular .github/env/ files
 
 jobs:
-  # ----------------------------------------------------------------------------------
+  # -------------------------------------------------g---------------------------------
   # Dependabot processing (single consolidated job)
   #
   # Workflow phases (each preserved as a step):
@@ -746,6 +746,70 @@ jobs:
             echo "Skipping: Auto-merge step"
           fi
 
+      # --------------------------------------------------------------------
+      # Idempotency pre-check (prevents duplicate approvals on synchronize)
+      #
+      # Dependabot rebases its PR on every base-branch change / conflict,
+      # firing a `synchronize` event that re-runs this workflow. Without a
+      # guard, the approve step below re-runs `gh pr review --approve` on
+      # each event and posts a brand-new approval review every time, spamming
+      # the PR timeline. This step computes whether the PR is *already*
+      # approved and whether auto-merge is *already* armed so the next step
+      # can skip the redundant calls. Mirrors the idempotency pattern used in
+      # auto-merge-on-approval.yml (latest-review-per-user + pr.auto_merge).
+      # --------------------------------------------------------------------
+      - name: 🔎 Check existing approval & auto-merge state
+        id: merge-state
+        if: |
+          startsWith(steps.determine-action.outputs.action, 'auto-merge-')
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = context.issue.number;
+
+            // Is auto-merge already armed? (persists across pushes once enabled)
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            const autoMergeEnabled = Boolean(pr.auto_merge);
+
+            // Is the PR already approved? Reduce to the latest review per user
+            // so a stale/dismissed approval (state !== 'APPROVED') correctly
+            // triggers a re-approval for the new head commit.
+            const { data: reviews } = await github.rest.pulls.listReviews({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+            const latestReviews = {};
+            reviews.forEach(review => {
+              const userId = review.user.id;
+              if (!latestReviews[userId] || review.submitted_at > latestReviews[userId].submitted_at) {
+                latestReviews[userId] = review;
+              }
+            });
+            const alreadyApproved = Object.values(latestReviews).some(r => r.state === 'APPROVED');
+
+            console.log('════════════════════════════════════════════════════════════════');
+            console.log('🔎 IDEMPOTENCY PRE-CHECK');
+            console.log('════════════════════════════════════════════════════════════════');
+            console.log(`  Already approved:    ${alreadyApproved}`);
+            console.log(`  Auto-merge enabled:  ${autoMergeEnabled}`);
+            if (alreadyApproved) {
+              console.log('  ⏭️ Will skip re-approval (prevents duplicate review comments)');
+            }
+            if (autoMergeEnabled) {
+              console.log('  ⏭️ Will skip enabling auto-merge (already armed)');
+            }
+            console.log('════════════════════════════════════════════════════════════════');
+
+            core.setOutput('already_approved', String(alreadyApproved));
+            core.setOutput('auto_merge_enabled', String(autoMergeEnabled));
+
       - name: 🚀 Auto-merge approved updates
         if: |
           startsWith(steps.determine-action.outputs.action, 'auto-merge-')
@@ -753,6 +817,8 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
           TOKEN_TYPE: ${{ secrets.GH_PAT_TOKEN && 'PAT' || 'GITHUB_TOKEN' }}
+          ALREADY_APPROVED: ${{ steps.merge-state.outputs.already_approved }}
+          AUTO_MERGE_ENABLED: ${{ steps.merge-state.outputs.auto_merge_enabled }}
         run: |
           echo "════════════════════════════════════════════════════════════════"
           echo "🚀 EXECUTING AUTO-MERGE"
@@ -803,7 +869,13 @@ jobs:
           # Approve the PR
           echo "Step 1: Approving PR..."
           echo "────────────────────────────────────────────────────────────────"
-          if ! gh pr review --approve "$PR_URL" --body "$APPROVAL_MSG: $DEPENDENCY ($VERSION_CHANGE)"; then
+          # Idempotency guard: skip re-approval if the PR is already approved.
+          # Dependabot fires a `synchronize` event on every rebase; without this
+          # guard each event would post a duplicate approval review (timeline spam).
+          if [[ "$ALREADY_APPROVED" == "true" ]]; then
+            echo "✅ PR already approved by automation — skipping re-approval (prevents duplicate reviews)"
+            echo ""
+          elif ! gh pr review --approve "$PR_URL" --body "$APPROVAL_MSG: $DEPENDENCY ($VERSION_CHANGE)"; then
             echo "❌ Failed to approve PR"
             echo "════════════════════════════════════════════════════════════════"
             echo "🚫 AUTO-MERGE FAILED"
@@ -811,14 +883,32 @@ jobs:
             echo "Reason: Could not approve PR via GitHub CLI"
             echo "This is likely a permissions or network issue."
             exit 1
+          else
+            echo "✅ PR approved successfully"
+            echo ""
           fi
-          echo "✅ PR approved successfully"
-          echo ""
 
           # Attempt to enable auto-merge
           echo "Step 2: Enabling auto-merge..."
           echo "────────────────────────────────────────────────────────────────"
-          if gh pr merge --auto --squash "$PR_URL"; then
+          # Idempotency guard: skip if auto-merge is already armed. Auto-merge
+          # persists across pushes once enabled, so re-enabling on every
+          # `synchronize` is redundant noise.
+          if [[ "$AUTO_MERGE_ENABLED" == "true" ]]; then
+            echo "✅ Auto-merge already enabled — skipping"
+            MERGE_OK=true
+          else
+            # Capture output so a concurrency race ("already enabled") can be
+            # treated as success rather than a failure (mirrors auto-merge-on-approval.yml).
+            MERGE_OUTPUT=$(gh pr merge --auto --squash "$PR_URL" 2>&1) && MERGE_OK=true || MERGE_OK=false
+            echo "$MERGE_OUTPUT"
+            if [[ "$MERGE_OK" != "true" ]] && grep -qi "already enabled" <<< "$MERGE_OUTPUT"; then
+              echo "ℹ️ Auto-merge already enabled by another workflow run — treating as success"
+              MERGE_OK=true
+            fi
+          fi
+
+          if [[ "$MERGE_OK" == "true" ]]; then
             echo "✅ Auto-merge enabled successfully"
             echo ""
             echo "════════════════════════════════════════════════════════════════"
