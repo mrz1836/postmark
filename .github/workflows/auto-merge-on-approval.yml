@@ -286,7 +286,9 @@ jobs:
             // Get latest review per user
             const latestReviews = {};
             reviews.forEach(review => {
-              const userId = review.user.id;
+              // review.user is null for deleted accounts - fall back to a unique
+              // key so the review still counts instead of throwing.
+              const userId = review.user?.id ?? `deleted-user:${review.id}`;
               if (!latestReviews[userId] || review.submitted_at > latestReviews[userId].submitted_at) {
                 latestReviews[userId] = review;
               }
