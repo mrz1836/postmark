@@ -183,18 +183,21 @@ jobs:
     permissions:
       contents: read # Read repository content for security scanning
       pull-requests: write # Required: gitleaks needs to create PR comments
+      security-events: write # Required: OSV-Scanner uploads SARIF to GitHub Code Scanning
     uses: ./.github/workflows/fortress-security-scans.yml
     with:
       env-json: ${{ needs.setup.outputs.env-json }}
       enable-nancy: ${{ needs.setup.outputs.nancy-enabled == 'true' }}
       enable-govulncheck: ${{ needs.setup.outputs.govulncheck-enabled == 'true' }}
       enable-gitleaks: ${{ needs.setup.outputs.gitleaks-enabled == 'true' }}
+      enable-osv: ${{ needs.setup.outputs.osv-enabled == 'true' }}
       go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
       primary-runner: ${{ needs.setup.outputs.primary-runner }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
       github-token: ${{ github.event.pull_request.head.repo.fork != true && (secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN) || '' }}
       gitleaks-license: ${{ secrets.GITLEAKS_LICENSE }}
+      guide-token: ${{ secrets.GUIDE_TOKEN }}
       ossi-token: ${{ secrets.OSSI_TOKEN }}
       ossi-username: ${{ secrets.OSSI_USERNAME }}
   # ----------------------------------------------------------------------------------

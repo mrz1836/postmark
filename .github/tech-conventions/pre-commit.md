@@ -29,8 +29,15 @@
 ### Installation
 
 ```bash
-# Install the go-pre-commit tool
-go install github.com/mrz1836/go-pre-commit/cmd/go-pre-commit@latest
+# Install the latest go-pre-commit release into ~/.local/bin (user-writable, no sudo), verified against checksums.txt
+VER=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/mrz1836/go-pre-commit/releases/latest | sed 's#.*/v##')
+OS=$(uname -s | tr '[:upper:]' '[:lower:]'); ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+F="go-pre-commit_${VER}_${OS}_${ARCH}.tar.gz"; U="https://github.com/mrz1836/go-pre-commit/releases/download/v${VER}"
+mkdir -p ~/.local/bin && cd "$(mktemp -d)" && curl -fsSLO "$U/$F" \
+  && WANT=$(curl -fsSL "$U/go-pre-commit_${VER}_checksums.txt" | awk -v f="$F" '$2==f{print $1}') \
+  && GOT=$( { command -v sha256sum >/dev/null && sha256sum "$F" || shasum -a 256 "$F"; } | awk '{print $1}') \
+  && [ -n "$WANT" ] && [ "$WANT" = "$GOT" ] \
+  && tar -xzf "$F" -C ~/.local/bin go-pre-commit
 
 # Install hooks in your repository
 cd your-go-project
@@ -39,6 +46,10 @@ go-pre-commit install
 # Verify installation
 go-pre-commit --version
 ```
+
+> `~/.local/bin` must be on your `PATH` — add `export PATH="$HOME/.local/bin:$PATH"` to
+> your shell profile if `go-pre-commit` isn't found. Installing the release binary into a
+> user-writable directory also lets `go-pre-commit update` self-update it in place later.
 
 ### First Usage
 
@@ -241,10 +252,10 @@ The project has migrated from the embedded GoFortress pre-commit system (`.githu
 
 | Aspect           | Old (Embedded)                             | New (External)                                                         |
 |------------------|--------------------------------------------|------------------------------------------------------------------------|
-| **Location**     | `.github/pre-commit/gofortress-pre-commit` | `go install github.com/mrz1836/go-pre-commit/cmd/go-pre-commit@latest` |
+| **Location**     | `.github/pre-commit/gofortress-pre-commit` | Release binary in `~/.local/bin` (see [Installation](#installation))    |
 | **Installation** | `cd .github/pre-commit && magex build`     | `go-pre-commit install`                                                |
 | **Maintenance**  | Part of repository                         | External tool, versioned independently                                 |
-| **Updates**      | Manual code updates                        | `go install` latest version                                            |
+| **Updates**      | Manual code updates                        | `go-pre-commit update`                                                 |
 | **Distribution** | Repository-specific                        | Reusable across Go projects                                            |
 
 ### Migration Steps
@@ -257,10 +268,7 @@ The project has migrated from the embedded GoFortress pre-commit system (`.githu
 
 2. **Install new system**:
    ```bash
-   # Install external tool
-   go install github.com/mrz1836/go-pre-commit/cmd/go-pre-commit@latest
-
-   # Install hooks
+   # Install the go-pre-commit release binary (see Installation above), then:
    go-pre-commit install
    ```
 
@@ -295,12 +303,9 @@ The project has migrated from the embedded GoFortress pre-commit system (`.githu
 
 ```bash
 # "go-pre-commit not found"
-# Fix: Ensure GOPATH/bin is in your PATH
-echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> ~/.bashrc
+# Fix: Ensure the install directory (~/.local/bin) is in your PATH
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
-
-# Alternative: Install to a directory in your PATH
-go install github.com/mrz1836/go-pre-commit/cmd/go-pre-commit@latest
 ```
 
 **Hook Issues:**
@@ -379,8 +384,15 @@ magex tidy      # Test mod-tidy integration
 
 **Developer Onboarding:**
 ```bash
-# Include in developer setup scripts
-go install github.com/mrz1836/go-pre-commit/cmd/go-pre-commit@latest
+# Include in developer setup scripts (installs the verified release binary into ~/.local/bin)
+VER=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/mrz1836/go-pre-commit/releases/latest | sed 's#.*/v##')
+OS=$(uname -s | tr '[:upper:]' '[:lower:]'); ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+F="go-pre-commit_${VER}_${OS}_${ARCH}.tar.gz"; U="https://github.com/mrz1836/go-pre-commit/releases/download/v${VER}"
+mkdir -p ~/.local/bin && cd "$(mktemp -d)" && curl -fsSLO "$U/$F" \
+  && WANT=$(curl -fsSL "$U/go-pre-commit_${VER}_checksums.txt" | awk -v f="$F" '$2==f{print $1}') \
+  && GOT=$( { command -v sha256sum >/dev/null && sha256sum "$F" || shasum -a 256 "$F"; } | awk '{print $1}') \
+  && [ -n "$WANT" ] && [ "$WANT" = "$GOT" ] \
+  && tar -xzf "$F" -C ~/.local/bin go-pre-commit
 go-pre-commit install
 ```
 
@@ -388,8 +400,8 @@ go-pre-commit install
 
 **Regular Updates:**
 ```bash
-# Update go-pre-commit itself
-go install github.com/mrz1836/go-pre-commit/cmd/go-pre-commit@latest
+# Update go-pre-commit itself (self-update; alias: upgrade)
+go-pre-commit update
 
 # Update tool versions in 10-pre-commit.env
 GO_PRE_COMMIT_GOLANGCI_LINT_VERSION=v2.6.0
@@ -414,7 +426,7 @@ go-pre-commit transforms the pre-commit experience for Go projects by providing:
 The migration from the embedded GoFortress system to the external tool provides better maintainability and reusability while preserving all performance benefits.
 
 **Next Steps:**
-1. Install go-pre-commit: `go install github.com/mrz1836/go-pre-commit/cmd/go-pre-commit@latest`
+1. Install go-pre-commit: download the release binary (see [Installation](#installation))
 2. Set up hooks: `go-pre-commit install`
 3. Verify with: `go-pre-commit run --all-files`
 4. Start enjoying faster, more reliable pre-commit checks

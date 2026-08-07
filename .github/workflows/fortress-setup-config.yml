@@ -85,6 +85,9 @@ on:
       gitleaks-enabled:
         description: "Whether Gitleaks secret scanning is enabled"
         value: ${{ jobs.setup-config.outputs.gitleaks-enabled }}
+      osv-enabled:
+        description: "Whether OSV-Scanner dependency scanning is enabled"
+        value: ${{ jobs.setup-config.outputs.osv-enabled }}
       is-release-run:
         description: "Whether this is a release-eligible run (tag starting with v)"
         value: ${{ jobs.setup-config.outputs.is-release-run }}
@@ -208,6 +211,7 @@ jobs:
       nancy-enabled: ${{ steps.config.outputs.nancy-enabled }}
       govulncheck-enabled: ${{ steps.config.outputs.govulncheck-enabled }}
       gitleaks-enabled: ${{ steps.config.outputs.gitleaks-enabled }}
+      osv-enabled: ${{ steps.config.outputs.osv-enabled }}
       is-release-run: ${{ steps.config.outputs.is-release-run }}
       start-epoch: ${{ steps.timer.outputs.start-epoch }}
       start-time: ${{ steps.timer.outputs.start-time }}
@@ -699,7 +703,7 @@ jobs:
           echo "benchmark-mode=${{ env.BENCHMARK_MODE }}" >> $GITHUB_OUTPUT
           echo "benchmark-timeout=${{ env.BENCHMARK_TIMEOUT }}" >> $GITHUB_OUTPUT
           # Security scans - enable if any individual tool is enabled
-          if [[ "${{ env.ENABLE_SECURITY_SCAN_NANCY }}" == "true" || "${{ env.ENABLE_SECURITY_SCAN_GOVULNCHECK }}" == "true" || "${{ env.ENABLE_SECURITY_SCAN_GITLEAKS }}" == "true" ]]; then
+          if [[ "${{ env.ENABLE_SECURITY_SCAN_NANCY }}" == "true" || "${{ env.ENABLE_SECURITY_SCAN_GOVULNCHECK }}" == "true" || "${{ env.ENABLE_SECURITY_SCAN_GITLEAKS }}" == "true" || "${{ env.ENABLE_SECURITY_SCAN_OSV }}" == "true" ]]; then
             echo "security-scans-enabled=true" >> $GITHUB_OUTPUT
           else
             echo "security-scans-enabled=false" >> $GITHUB_OUTPUT
@@ -707,6 +711,7 @@ jobs:
           echo "nancy-enabled=${{ env.ENABLE_SECURITY_SCAN_NANCY }}" >> $GITHUB_OUTPUT
           echo "govulncheck-enabled=${{ env.ENABLE_SECURITY_SCAN_GOVULNCHECK }}" >> $GITHUB_OUTPUT
           echo "gitleaks-enabled=${{ env.ENABLE_SECURITY_SCAN_GITLEAKS }}" >> $GITHUB_OUTPUT
+          echo "osv-enabled=${{ env.ENABLE_SECURITY_SCAN_OSV }}" >> $GITHUB_OUTPUT
           echo "static-analysis-enabled=${{ env.ENABLE_STATIC_ANALYSIS }}" >> $GITHUB_OUTPUT
           echo "fuzz-testing-enabled=${{ env.ENABLE_FUZZ_TESTING }}" >> $GITHUB_OUTPUT
           echo "go-tests-enabled=${{ env.ENABLE_GO_TESTS }}" >> $GITHUB_OUTPUT
@@ -883,7 +888,8 @@ jobs:
           echo "| **Gitleaks** | $([ "${{ env.ENABLE_SECURITY_SCAN_GITLEAKS }}" == "true" ] && echo "✅" || echo "❌") | $([ "${{ env.ENABLE_SECURITY_SCAN_GITLEAKS }}" == "true" ] && echo "Secret scanning" || echo "Skipped") |" >> $GITHUB_STEP_SUMMARY
           echo "| **Go Linting** | $([ "${{ env.ENABLE_GO_LINT }}" == "true" ] && echo "✅" || echo "❌") | $([ "${{ env.ENABLE_GO_LINT }}" == "true" ] && echo "golangci-lint" || echo "Skipped") |" >> $GITHUB_STEP_SUMMARY
           echo "| **Govulncheck** | $([ "${{ env.ENABLE_SECURITY_SCAN_GOVULNCHECK }}" == "true" ] && echo "✅" || echo "❌") | $([ "${{ env.ENABLE_SECURITY_SCAN_GOVULNCHECK }}" == "true" ] && echo "Go vulnerability scan" || echo "Skipped") |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Nancy** | $([ "${{ env.ENABLE_SECURITY_SCAN_NANCY }}" == "true" ] && echo "✅" || echo "❌") | $([ "${{ env.ENABLE_SECURITY_SCAN_NANCY }}" == "true" ] && echo "Dependency checks" || echo "Skipped") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Nancy** | $([ "${{ env.ENABLE_SECURITY_SCAN_NANCY }}" == "true" ] && echo "✅" || echo "❌") | $([ "${{ env.ENABLE_SECURITY_SCAN_NANCY }}" == "true" ] && echo "Dependency checks" || echo "Skipped (retired)") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **OSV-Scanner** | $([ "${{ env.ENABLE_SECURITY_SCAN_OSV }}" == "true" ] && echo "✅" || echo "❌") | $([ "${{ env.ENABLE_SECURITY_SCAN_OSV }}" == "true" ] && echo "OSV.dev dependency scan" || echo "Skipped") |" >> $GITHUB_STEP_SUMMARY
           echo "| **Pre-Commit** | $([ "${{ env.ENABLE_GO_PRE_COMMIT }}" == "true" ] && echo "✅" || echo "❌") | $([ "${{ env.ENABLE_GO_PRE_COMMIT }}" == "true" ] && echo "17x faster hooks" || echo "Skipped") |" >> $GITHUB_STEP_SUMMARY
           echo "| **Race Detection** | $([ "${{ env.ENABLE_RACE_DETECTION }}" == "true" ] && echo "✅" || echo "❌") | $([ "${{ env.ENABLE_RACE_DETECTION }}" == "true" ] && echo "-race flag" || echo "No race detection") |" >> $GITHUB_STEP_SUMMARY
           echo "| **Static Analysis** | $([ "${{ env.ENABLE_STATIC_ANALYSIS }}" == "true" ] && echo "✅" || echo "❌") | $([ "${{ env.ENABLE_STATIC_ANALYSIS }}" == "true" ] && echo "go vet" || echo "Skipped") |" >> $GITHUB_STEP_SUMMARY

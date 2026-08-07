@@ -1,15 +1,19 @@
 # ------------------------------------------------------------------------------------
 #  Security Scans (Reusable Workflow) (GoFortress)
 #
-#  Purpose: Run all security scanning tools including Nancy (dependency checks),
-#  Govulncheck (Go vulnerability scanning), and Gitleaks (secret scanning).
+#  Purpose: Run all security scanning tools: Govulncheck (Go vulnerability scanning),
+#  OSV-Scanner (multi-source dependency scanning via OSV.dev), Gitleaks (secret
+#  scanning), and Nancy (legacy dependency checks; disabled by default).
 #
 #  Maintainer: @mrz1836
 #
 #  FAILURE HANDLING:
 #  - Each scan keeps `continue-on-error: true` so one failure does not mask another.
-#    A final `🚨 Aggregate failures` step exits non-zero if any real failure occurred
-#    (Nancy rate-limit / 402 are intentionally inconclusive and do NOT fail the job).
+#    A final `🚨 Aggregate failures` step exits non-zero if any real failure occurred.
+#    Intentionally inconclusive (never fail the job): Nancy skipped-no-token / rate-limited /
+#    payment-required / unreachable, and OSV-Scanner network/database errors. OSV findings
+#    fail the job when OSV_SCANNER_FAIL_ON_VULNERABILITY=true (the shipped default);
+#    set it to false to make OSV report-only.
 #
 # ------------------------------------------------------------------------------------
 
@@ -37,6 +41,11 @@ on:
         required: false
         type: boolean
         default: true
+      enable-osv:
+        description: "Enable OSV-Scanner dependency scan"
+        required: false
+        type: boolean
+        default: true
       primary-runner:
         description: "Primary runner OS"
         required: true
@@ -57,10 +66,13 @@ on:
         description: "Gitleaks license key"
         required: false
       ossi-username:
-        description: "OSS Index username or email for Nancy authentication"
+        description: "Deprecated (legacy OSS Index / Nancy v1). Unused by Nancy v2 — kept for backward compatibility."
         required: false
       ossi-token:
-        description: "OSS Index API token for Nancy authentication"
+        description: "Deprecated (legacy OSS Index / Nancy v1). Unused by Nancy v2 — kept for backward compatibility."
+        required: false
+      guide-token:
+        description: "Sonatype Guide Personal Access Token (Bearer) for Nancy v2; exposed to Nancy as GUIDE_TOKEN. If unset, the Nancy scan is skipped with a warning."
         required: false
 
 # Security: Restrict default permissions (jobs must explicitly request what they need)
@@ -77,6 +89,7 @@ jobs:
   #
   #   🛡️ Nancy:        write go list → install → run → annotations → summary → upload
   #   🔐 Govulncheck:  run → annotations → summary → upload
+  #   🛰️ OSV-Scanner:  cache/install → run → annotations → summary → SARIF upload → artifact
   #   🕵️ Gitleaks:     repo check → run → annotations → summary/fork notice
   #
   #   📊 Collect + upload cache statistics (single entry for merged job)
@@ -86,10 +99,11 @@ jobs:
     name: 🔒 Security Scans
     runs-on: ${{ inputs.primary-runner }}
     timeout-minutes: 10
-    if: ${{ inputs.enable-nancy || inputs.enable-govulncheck || inputs.enable-gitleaks }}
+    if: ${{ inputs.enable-nancy || inputs.enable-govulncheck || inputs.enable-gitleaks || inputs.enable-osv }}
     permissions:
       contents: read # All scans
       pull-requests: write # Gitleaks needs to create PR comments
+      security-events: write # OSV-Scanner uploads SARIF results to GitHub Code Scanning
     steps:
       # ====================================================================
       # SHARED SETUP
@@ -168,6 +182,29 @@ jobs:
           echo "✅ govulncheck installed and stored in cache"
 
       # ====================================================================
+      # SHARED VULNERABILITY EXCLUSIONS
+      # ====================================================================
+      # Resolve ONE effective exclusion list for all dependency scanners. Merges the
+      # canonical SECURITY_VULN_EXCLUDES with the legacy per-tool variables
+      # (MAGE_X_CVE_EXCLUDES / NANCY_EXCLUDES) so projects that still set those older
+      # variables keep working (this workflow is synced across many repos). Each scanner
+      # consumes EFFECTIVE_VULN_EXCLUDES and silently ignores IDs outside its namespace.
+      - name: 🚫 Resolve shared vulnerability exclusions
+        if: ${{ inputs.enable-nancy || inputs.enable-govulncheck || inputs.enable-osv }}
+        run: |
+          # Concatenate all sources, split on commas, trim, drop blanks, dedupe
+          # (order-preserving), and re-join. Legacy vars are honored for compatibility.
+          EFFECTIVE="$(printf '%s,%s,%s' \
+            "${SECURITY_VULN_EXCLUDES:-}" "${MAGE_X_CVE_EXCLUDES:-}" "${NANCY_EXCLUDES:-}" \
+            | tr ',' '\n' | sed 's/[[:space:]]//g' | awk 'NF && !seen[$0]++' | paste -sd, -)"
+          echo "EFFECTIVE_VULN_EXCLUDES=${EFFECTIVE}" >> "$GITHUB_ENV"
+          if [[ -n "$EFFECTIVE" ]]; then
+            echo "🚫 Effective shared vulnerability exclusions: ${EFFECTIVE}"
+          else
+            echo "ℹ️  No vulnerability exclusions configured."
+          fi
+
+      # ====================================================================
       # NANCY (DEPENDENCY CHECKS)
       # ====================================================================
       - name: 📝 Nancy — Write go list
@@ -193,7 +230,11 @@ jobs:
         if: ${{ inputs.enable-nancy }}
         run: |
           echo "📥 Installing nancy version ${{ env.NANCY_VERSION }}..."
-          go install github.com/sonatype-nexus-community/nancy@${{ env.NANCY_VERSION }}
+          # Nancy v2+ uses a semantic-import-versioned module path (…/nancy/v2) and
+          # authenticates to the Sonatype Guide backend with a Bearer token (the free
+          # anonymous OSS Index tier was removed in v2). Keep the /v2 suffix in sync
+          # with the major version of NANCY_VERSION; if you roll back to v1.x, drop it.
+          go install github.com/sonatype-nexus-community/nancy/v2@${{ env.NANCY_VERSION }}
           echo "✅ Nancy installed successfully"
 
       - name: 🛡️ Nancy — Run scan
@@ -201,12 +242,36 @@ jobs:
         if: ${{ inputs.enable-nancy }}
         continue-on-error: true
         env:
-          OSSI_USERNAME: ${{ secrets.ossi-username }}
-          OSSI_TOKEN: ${{ secrets.ossi-token }}
+          # Nancy v2 authenticates to the Sonatype Guide backend with a Bearer token
+          # read from the GUIDE_TOKEN env var, sourced from the dedicated `guide-token`
+          # secret (generate a Personal Access Token at
+          # https://guide.sonatype.com/settings/tokens). Routed through `env:` — never
+          # interpolated into the shell body or the command line — so the token is never
+          # exposed in process args or logs. If the secret is absent/empty the scan is
+          # skipped with a warning (see the guard below) instead of failing CI.
+          GUIDE_TOKEN: ${{ secrets.guide-token }}
         run: |
           echo "🔍 Running Nancy security scan..."
+          # Guard: Nancy v2 requires a Sonatype Guide token. If none is configured, skip
+          # the scan entirely — no API calls, no Guide credits consumed — and emit a
+          # warning rather than failing CI or firing an unauthenticated request.
+          if [[ -z "${GUIDE_TOKEN:-}" ]]; then
+            echo "nancy-status=skipped-no-token" >> $GITHUB_OUTPUT
+            echo "⚠️  Nancy scan skipped - no Sonatype Guide token configured (GUIDE_TOKEN secret empty)."
+            echo "    Add a GUIDE_TOKEN repository secret from https://guide.sonatype.com/settings/tokens"
+            echo "    to enable dependency scanning. Not failing CI; govulncheck still covers Go vulns."
+            exit 0
+          fi
           set +e
-          nancy sleuth --loud --exclude-vulnerability ${{ env.NANCY_EXCLUDES }} < go.list 2>&1 | tee nancy-output.log
+          # --skip-update-check: avoid Nancy's GitHub self-update check, which hits
+          # api.github.com on every run and can rate-limit / fail in CI. It is an
+          # unrelated network dependency that we don't want influencing the scan outcome.
+          # (Flag is supported by both v1.2.0 and v2.x.)
+          # Exclusions come from the shared, resolved list (EFFECTIVE_VULN_EXCLUDES).
+          # Nancy's --exclude-vulnerability requires a non-empty argument, so fall back to
+          # a harmless placeholder when the list is empty.
+          NANCY_EXCLUDE_ARG="${EFFECTIVE_VULN_EXCLUDES:-CVE-0000-00000}"
+          nancy sleuth --skip-update-check --loud --exclude-vulnerability "$NANCY_EXCLUDE_ARG" < go.list 2>&1 | tee nancy-output.log
           NANCY_EXIT_CODE=${PIPESTATUS[0]}
           set -e
 
@@ -214,16 +279,24 @@ jobs:
           if [[ $NANCY_EXIT_CODE -eq 0 ]]; then
             echo "nancy-status=success" >> $GITHUB_OUTPUT
             echo "✅ Nancy scan completed - no vulnerabilities found"
-          elif grep -qi "rate limited by OSS Index" nancy-output.log; then
+          elif grep -qiE 'rate limited by OSS Index|Error:.*(429|too many requests)' nancy-output.log; then
             echo "nancy-status=rate-limited" >> $GITHUB_OUTPUT
-            echo "⚠️  Nancy scan inconclusive - OSS Index rate-limited the request (not failing CI)."
-            echo "    Configure OSSI_USERNAME and OSSI_TOKEN secrets to authenticate and lift the limit."
-            echo "    Register at https://ossindex.sonatype.org/user/register"
-          elif grep -qi "402 Payment Required" nancy-output.log; then
+            echo "⚠️  Nancy scan inconclusive - the backend rate-limited the request (not failing CI)."
+            echo "    Set the GUIDE_TOKEN secret to a valid Sonatype Guide token to lift the limit."
+            echo "    Manage tokens at https://guide.sonatype.com/settings/tokens"
+          elif grep -qiE '402 Payment Required|Error:.*(402|payment required|out of credits|credit limit|quota exceeded|usage limit|insufficient credit)' nancy-output.log; then
             echo "nancy-status=payment-required" >> $GITHUB_OUTPUT
-            echo "⚠️  Nancy scan inconclusive - OSS Index returned 402 Payment Required (not failing CI)."
-            echo "    Configure OSSI_USERNAME and OSSI_TOKEN secrets to authenticate against your OSS Index account."
-            echo "    Register at https://ossindex.sonatype.org/user/register"
+            echo "⚠️  Nancy scan inconclusive - Sonatype Guide credits exhausted / payment required (not failing CI)."
+            echo "    The Guide free plan includes a limited number of hits per billing period (e.g. 500),"
+            echo "    which a full dependency scan can consume quickly. Check usage or reduce scan frequency."
+            echo "    Manage credits/token at https://guide.sonatype.com/settings/tokens"
+          elif grep -qiE 'Error:.*(guide API request failed|api/v3/component-report|https?://[^" ]*ossindex|dial tcp|lookup [^ ]+ on |no such host|connection refused|connection reset|network is unreachable|i/o timeout|TLS handshake timeout|context deadline exceeded|Client\.Timeout|server misbehaving|temporary failure in name resolution)' nancy-output.log; then
+            # OSS Index was unreachable (DNS/network/TLS failure or HTTP error) before
+            # Nancy could complete the scan. This is an infrastructure hiccup, not a
+            # vulnerability detection, so it is treated as inconclusive and does NOT fail CI.
+            echo "nancy-status=unreachable" >> $GITHUB_OUTPUT
+            echo "⚠️  Nancy scan inconclusive - OSS Index was unreachable (network/DNS error; not failing CI)."
+            echo "    This is typically a transient connectivity issue with ossindex.sonatype.org."
           else
             echo "nancy-status=failure" >> $GITHUB_OUTPUT
             echo "❌ Nancy scan completed - vulnerabilities detected (exit code: $NANCY_EXIT_CODE)"
@@ -234,15 +307,25 @@ jobs:
         run: |
           echo "::error title=Nancy Security Scan Failed::Vulnerabilities detected in Go dependencies - see job summary for details"
 
+      - name: 📋 Nancy — Annotations (skipped — no token)
+        if: always() && steps.run-nancy.outputs.nancy-status == 'skipped-no-token'
+        run: |
+          echo "::warning title=Nancy Skipped::No Sonatype Guide token configured (GUIDE_TOKEN secret empty), so the dependency scan was skipped. CI was not failed. Add a GUIDE_TOKEN secret from https://guide.sonatype.com/settings/tokens to enable it."
+
       - name: 📋 Nancy — Annotations (rate-limited)
         if: always() && steps.run-nancy.outputs.nancy-status == 'rate-limited'
         run: |
-          echo "::warning title=Nancy Rate Limited::OSS Index rate-limited the scan; results inconclusive. Add OSSI_USERNAME and OSSI_TOKEN secrets to authenticate and lift the limit."
+          echo "::warning title=Nancy Rate Limited::Sonatype Guide rate-limited the scan; results inconclusive. CI was not failed."
 
       - name: 📋 Nancy — Annotations (payment-required)
         if: always() && steps.run-nancy.outputs.nancy-status == 'payment-required'
         run: |
-          echo "::warning title=Nancy Payment Required::OSS Index returned 402 Payment Required; results inconclusive. Add OSSI_USERNAME and OSSI_TOKEN secrets to authenticate against your OSS Index account."
+          echo "::warning title=Nancy Payment Required::Sonatype Guide credits exhausted / 402 Payment Required; results inconclusive. CI was not failed. The Guide free plan has a limited number of hits per billing period."
+
+      - name: 📋 Nancy — Annotations (unreachable)
+        if: always() && steps.run-nancy.outputs.nancy-status == 'unreachable'
+        run: |
+          echo "::warning title=Nancy Unreachable::The Sonatype Guide / OSS Index backend was unreachable (network/DNS/TLS error); results inconclusive. CI was not failed. This is usually a transient connectivity issue and will clear on the next run."
 
       - name: 📊 Nancy — Job Summary
         if: always() && inputs.enable-nancy
@@ -262,10 +345,14 @@ jobs:
 
           if [[ "$NANCY_STATUS" == "success" ]]; then
             echo "| **Result** | ✅ No vulnerabilities found |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$NANCY_STATUS" == "skipped-no-token" ]]; then
+            echo "| **Result** | ⏭️ Skipped — no Sonatype Guide token configured (CI not failed) |" >> $GITHUB_STEP_SUMMARY
           elif [[ "$NANCY_STATUS" == "rate-limited" ]]; then
-            echo "| **Result** | ⚠️ Rate limited by OSS Index — scan inconclusive (CI not failed) |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Result** | ⚠️ Rate limited by Sonatype Guide — scan inconclusive (CI not failed) |" >> $GITHUB_STEP_SUMMARY
           elif [[ "$NANCY_STATUS" == "payment-required" ]]; then
-            echo "| **Result** | ⚠️ OSS Index returned 402 Payment Required — scan inconclusive (CI not failed) |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Result** | ⚠️ Sonatype Guide 402 / credits exhausted — scan inconclusive (CI not failed) |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$NANCY_STATUS" == "unreachable" ]]; then
+            echo "| **Result** | ⚠️ Guide/OSS Index unreachable (network/DNS error) — scan inconclusive (CI not failed) |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| **Result** | ❌ Vulnerabilities detected |" >> $GITHUB_STEP_SUMMARY
           fi
@@ -274,22 +361,35 @@ jobs:
             echo ""
             echo "### 🚫 Excluded Vulnerabilities"
             echo "The following vulnerabilities were excluded from the scan:"
-            echo "${{ env.NANCY_EXCLUDES }}"
+            echo "${{ env.EFFECTIVE_VULN_EXCLUDES }}"
           } >> $GITHUB_STEP_SUMMARY
 
-          if [[ "$NANCY_STATUS" == "rate-limited" ]]; then
+          if [[ "$NANCY_STATUS" == "skipped-no-token" ]]; then
             {
               echo ""
-              echo "### ⚠️ OSS Index Rate Limit"
+              echo "### ⏭️ Nancy Skipped — No Sonatype Guide Token"
               echo ""
-              echo "Sonatype's OSS Index rate-limited this request before Nancy could complete the scan."
+              echo "Nancy v2 requires a **Sonatype Guide** Bearer token, and no \`GUIDE_TOKEN\` secret is configured, so the dependency scan was skipped. **CI was not failed.**"
+              echo ""
+              echo "**To enable Nancy:**"
+              echo ""
+              echo "1. Generate a Personal Access Token at <https://guide.sonatype.com/settings/tokens>."
+              echo "2. Add it as a repository secret named \`GUIDE_TOKEN\`."
+              echo ""
+              echo "> **Heads up:** the Guide **free plan** meters usage (~500 hits/billing period) and a full scan of this repo queries ~100–200 components, so it can be exhausted in a few runs. \`govulncheck\` is already enabled in this pipeline and covers Go vulnerabilities for free."
+            } >> $GITHUB_STEP_SUMMARY
+          elif [[ "$NANCY_STATUS" == "rate-limited" ]]; then
+            {
+              echo ""
+              echo "### ⚠️ Sonatype Guide Rate Limit"
+              echo ""
+              echo "Sonatype's backend rate-limited this request before Nancy could complete the scan."
               echo "**This is not a vulnerability detection** and CI has **not** been failed for this run."
               echo ""
               echo "**To remediate (recommended):**"
               echo ""
-              echo "1. Register a free account at <https://ossindex.sonatype.org/user/register>."
-              echo "2. Retrieve your username (email) and API token from <https://ossindex.sonatype.org/user/settings>."
-              echo "3. Add them as repository secrets named \`OSSI_USERNAME\` and \`OSSI_TOKEN\`."
+              echo "1. Generate a Personal Access Token at <https://guide.sonatype.com/settings/tokens>."
+              echo "2. Add it as a repository secret named \`GUIDE_TOKEN\` (Nancy v2 reads it as the Bearer token)."
               echo ""
               echo "Authenticated requests have a substantially higher rate limit and avoid this state."
             } >> $GITHUB_STEP_SUMMARY
@@ -308,18 +408,40 @@ jobs:
           elif [[ "$NANCY_STATUS" == "payment-required" ]]; then
             {
               echo ""
-              echo "### ⚠️ OSS Index Payment Required (402)"
+              echo "### ⚠️ Sonatype Guide Credits Exhausted / Payment Required (402)"
               echo ""
-              echo "Sonatype's OSS Index returned **402 Payment Required**, indicating the free-tier quota for unauthenticated requests has been exhausted."
+              echo "Sonatype Guide returned **402 Payment Required**, indicating the account's credit allotment for the current billing period has been exhausted."
               echo "**This is not a vulnerability detection** and CI has **not** been failed for this run."
               echo ""
-              echo "**To remediate (recommended):**"
+              echo "> **Note:** the Guide **free plan** includes a limited number of hits per billing period (e.g. ~500). A full dependency scan of this repo queries ~100–200 components, so a handful of runs can exhaust it. Consider reducing how often Nancy runs (e.g. release/tag or a weekly schedule only) or relying on \`govulncheck\`, which is already enabled in this pipeline and is free."
               echo ""
-              echo "1. Register a free account at <https://ossindex.sonatype.org/user/register>."
-              echo "2. Retrieve your username (email) and API token from <https://ossindex.sonatype.org/user/settings>."
-              echo "3. Add them as repository secrets named \`OSSI_USERNAME\` and \`OSSI_TOKEN\`."
+              echo "**To remediate:**"
               echo ""
-              echo "Authenticated requests have a higher quota and avoid this state."
+              echo "1. Check your usage / plan at <https://guide.sonatype.com>."
+              echo "2. Generate a Personal Access Token at <https://guide.sonatype.com/settings/tokens>."
+              echo "3. Store it in the \`GUIDE_TOKEN\` repository secret (Nancy v2 reads it as the Bearer token)."
+            } >> $GITHUB_STEP_SUMMARY
+            if [[ -f nancy-output.log ]]; then
+              {
+                echo ""
+                echo "<details>"
+                echo "<summary>Click to expand Nancy output</summary>"
+                echo ""
+                echo '```'
+                head -50 nancy-output.log
+                echo '```'
+                echo "</details>"
+              } >> $GITHUB_STEP_SUMMARY
+            fi
+          elif [[ "$NANCY_STATUS" == "unreachable" ]]; then
+            {
+              echo ""
+              echo "### ⚠️ OSS Index Unreachable"
+              echo ""
+              echo "Nancy could not reach Sonatype's OSS Index (\`ossindex.sonatype.org\`) due to a network, DNS, or TLS error, so the scan could not complete."
+              echo "**This is not a vulnerability detection** and CI has **not** been failed for this run."
+              echo ""
+              echo "This is typically a transient connectivity issue on the runner and will usually clear on the next run. If it persists, verify that the runner has outbound network access to \`ossindex.sonatype.org\` (HTTPS/443)."
             } >> $GITHUB_STEP_SUMMARY
             if [[ -f nancy-output.log ]]; then
               {
@@ -364,12 +486,17 @@ jobs:
         id: run-govulncheck
         if: ${{ inputs.enable-govulncheck }}
         continue-on-error: true
+        env:
+          # govulncheck (via `magex deps:audit`) reads MAGE_X_CVE_EXCLUDES. Feed it the
+          # resolved effective list (shared list merged with any legacy vars) so every
+          # scanner stays in sync.
+          MAGE_X_CVE_EXCLUDES: ${{ env.EFFECTIVE_VULN_EXCLUDES }}
         run: |
           echo "🔍 Running vulnerability analysis..."
           GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
 
           if [ -n "${MAGE_X_CVE_EXCLUDES:-}" ]; then
-            echo "🚫 CVE exclusions configured: $MAGE_X_CVE_EXCLUDES"
+            echo "🚫 Shared vulnerability exclusions: $MAGE_X_CVE_EXCLUDES"
           fi
 
           set +e
@@ -428,11 +555,11 @@ jobs:
             echo ""
           } >> $GITHUB_STEP_SUMMARY
 
-          if [ -n "${MAGE_X_CVE_EXCLUDES:-}" ]; then
+          if [ -n "${EFFECTIVE_VULN_EXCLUDES:-}" ]; then
             {
               echo "### 🚫 Excluded Vulnerabilities"
               echo "The following vulnerabilities were excluded from the scan:"
-              echo "\`${MAGE_X_CVE_EXCLUDES}\`"
+              echo "\`${EFFECTIVE_VULN_EXCLUDES}\`"
               echo ""
             } >> $GITHUB_STEP_SUMMARY
           fi
@@ -459,6 +586,201 @@ jobs:
         with:
           artifact-name: govulncheck-scan-results
           artifact-path: govulncheck-output.log
+          retention-days: "7"
+          if-no-files-found: ignore
+
+      # ====================================================================
+      # OSV-SCANNER (MULTI-SOURCE DEPENDENCY SCANNING)
+      # ====================================================================
+      # OSV-Scanner (google/osv-scanner) checks Go dependencies against the OSV.dev
+      # database (GHSA, the Go vuln DB, and 30+ other advisory sources). It replaces
+      # Nancy, which now requires the credit-metered Sonatype Guide backend. Free, no
+      # account or API key. Findings are published to GitHub Code Scanning as SARIF.
+      #
+      # Resilience contract (mirrors the other scanners):
+      #   exit 0         → success (no known vulnerabilities)
+      #   exit 1         → vulnerabilities found (fails CI when
+      #                    OSV_SCANNER_FAIL_ON_VULNERABILITY=true, the shipped default;
+      #                    report-only when it is set to false)
+      #   any other exit → tooling / network / OSV.dev database error → inconclusive,
+      #                    NEVER fails CI (same philosophy as Nancy/govulncheck)
+      #
+      # The binary is version-pinned and cached exactly like govulncheck.
+      - name: 💾 Restore OSV-Scanner binary cache
+        id: osv-cache
+        if: ${{ inputs.enable-osv }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/osv-scanner-bin
+          key: ${{ inputs.primary-runner }}-osv-scanner-${{ env.OSV_SCANNER_VERSION }}-go${{ env.GOVULNCHECK_GO_VERSION }}
+
+      - name: 🛠️ Make cached OSV-Scanner usable
+        if: ${{ inputs.enable-osv }}
+        run: |
+          set -euo pipefail
+          BIN_DIR="$HOME/.cache/osv-scanner-bin"
+          OSV_BIN="$BIN_DIR/osv-scanner"
+          if [[ -f "$OSV_BIN" ]]; then
+            echo "✅ Using cached OSV-Scanner binary"
+            mkdir -p "$(go env GOPATH)/bin"
+            cp "$OSV_BIN" "$(go env GOPATH)/bin/"
+          fi
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: 📥 Install OSV-Scanner (cache miss)
+        if: ${{ inputs.enable-osv && steps.osv-cache.outputs.cache-hit != 'true' }}
+        env:
+          # Config value (from committed env files) routed through env rather than
+          # interpolated into the shell body — script-injection-safe by convention.
+          OSV_SCANNER_VERSION: ${{ env.OSV_SCANNER_VERSION }}
+        run: |
+          set -euo pipefail
+          echo "⬇️ Cache miss – installing OSV-Scanner ${OSV_SCANNER_VERSION}..."
+          # Pinned module path (v2 semantic-import versioning); go install verifies the
+          # download against the Go checksum database for supply-chain integrity.
+          go install "github.com/google/osv-scanner/v2/cmd/osv-scanner@${OSV_SCANNER_VERSION}"
+          mkdir -p ~/.cache/osv-scanner-bin
+          cp "$(go env GOPATH)/bin/osv-scanner" ~/.cache/osv-scanner-bin/
+          echo "✅ OSV-Scanner installed and stored in cache"
+
+      - name: 🛰️ OSV-Scanner — Run scan
+        id: run-osv
+        if: ${{ inputs.enable-osv }}
+        continue-on-error: true
+        run: |
+          echo "🔍 Running OSV-Scanner dependency scan..."
+          # Build an OSV-Scanner config from the shared single-source exclusion list.
+          # Each comma-separated advisory ID becomes an [[IgnoredVulns]] entry. IDs are
+          # sanitized to [A-Za-z0-9-] (the advisory-ID charset) to keep the TOML safe.
+          OSV_CONFIG_ARGS=()
+          if [[ -n "${EFFECTIVE_VULN_EXCLUDES:-}" ]]; then
+            OSV_CFG="$(mktemp)"
+            {
+              echo "# Auto-generated from the shared exclusion list — do not edit."
+              IFS=',' read -ra _ids <<< "${EFFECTIVE_VULN_EXCLUDES}" || true
+              for _id in "${_ids[@]}"; do
+                _id="${_id//[^A-Za-z0-9-]/}"
+                [[ -z "$_id" ]] && continue
+                printf '[[IgnoredVulns]]\nid = "%s"\nreason = "Excluded via the shared vulnerability exclusion list"\n' "$_id"
+              done
+            } > "$OSV_CFG"
+            echo "🔕 Applying shared vulnerability exclusions: ${EFFECTIVE_VULN_EXCLUDES}"
+            OSV_CONFIG_ARGS=(--config "$OSV_CFG")
+          fi
+          set +e
+          # Authoritative scan → SARIF for GitHub Code Scanning; exit code drives status.
+          osv-scanner scan source -r . \
+            "${OSV_CONFIG_ARGS[@]}" \
+            --format sarif \
+            --output-file osv-results.sarif \
+            --verbosity error
+          OSV_EXIT_CODE=$?
+          # Best-effort human-readable summary; its result NEVER affects the status.
+          osv-scanner scan source -r . \
+            "${OSV_CONFIG_ARGS[@]}" \
+            --format markdown \
+            --output-file osv-results.md \
+            --verbosity error >/dev/null 2>&1 || true
+          set -e
+
+          echo "osv-exit-code=$OSV_EXIT_CODE" >> $GITHUB_OUTPUT
+          if [[ $OSV_EXIT_CODE -eq 0 ]]; then
+            echo "osv-status=success" >> $GITHUB_OUTPUT
+            echo "✅ OSV-Scanner completed - no known vulnerabilities found"
+          elif [[ $OSV_EXIT_CODE -eq 1 ]]; then
+            echo "osv-status=vulnerabilities" >> $GITHUB_OUTPUT
+            echo "⚠️  OSV-Scanner found known vulnerabilities - see Code Scanning / job summary"
+          else
+            # 127/128/etc. → tooling, network, or OSV.dev/database error. Inconclusive.
+            echo "osv-status=error" >> $GITHUB_OUTPUT
+            echo "⚠️  OSV-Scanner did not complete (exit $OSV_EXIT_CODE) - inconclusive, not failing CI"
+          fi
+
+      - name: 📋 OSV-Scanner — Annotations (vulnerabilities)
+        if: always() && steps.run-osv.outputs.osv-status == 'vulnerabilities'
+        env:
+          OSV_FAIL: ${{ env.OSV_SCANNER_FAIL_ON_VULNERABILITY }}
+        run: |
+          if [[ "${OSV_FAIL}" == "true" ]]; then
+            echo "::error title=OSV-Scanner::Known vulnerabilities found in dependencies — see the Security tab (Code Scanning) and job summary."
+          else
+            echo "::warning title=OSV-Scanner::Known vulnerabilities found in dependencies (report-only mode) — see the Security tab (Code Scanning) and job summary."
+          fi
+
+      - name: 📋 OSV-Scanner — Annotations (inconclusive)
+        if: always() && steps.run-osv.outputs.osv-status == 'error'
+        run: |
+          echo "::warning title=OSV-Scanner Inconclusive::OSV-Scanner did not complete (network / OSV.dev / tooling error). Results inconclusive; CI was not failed. Usually transient."
+
+      - name: 📊 OSV-Scanner — Job Summary
+        if: always() && inputs.enable-osv
+        env:
+          OSV_STATUS: ${{ steps.run-osv.outputs.osv-status }}
+          OSV_FAIL: ${{ env.OSV_SCANNER_FAIL_ON_VULNERABILITY }}
+        run: |
+          {
+            echo "## 🛰️ OSV-Scanner Summary"
+            echo ""
+            echo "| Scan Details | Status |"
+            echo "|---|---|"
+            echo "| **Tool** | OSV-Scanner (google/osv-scanner) |"
+            echo "| **Database** | OSV.dev (GHSA, Go vuln DB, +30 sources) |"
+            echo "| **Scope** | Go modules (recursive source scan) |"
+            echo "| **Version** | ${{ env.OSV_SCANNER_VERSION }} |"
+          } >> $GITHUB_STEP_SUMMARY
+
+          # Precompute presentation values in plain variables (avoids fragile nested
+          # quoting inside echo/command-substitution).
+          if [[ "${OSV_FAIL}" == "true" ]]; then
+            ENFORCEMENT="Blocking (fail on findings)"
+            VULN_ICON="❌"
+          else
+            ENFORCEMENT="Report-only (warn)"
+            VULN_ICON="⚠️"
+          fi
+          echo "| **Enforcement** | ${ENFORCEMENT} |" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "$OSV_STATUS" == "success" ]]; then
+            echo "| **Result** | ✅ No known vulnerabilities found |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "$OSV_STATUS" == "vulnerabilities" ]]; then
+            echo "| **Result** | ${VULN_ICON} Known vulnerabilities found — details in Code Scanning |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| **Result** | ⚠️ Inconclusive — scanner/network error (CI not failed) |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [[ "$OSV_STATUS" == "vulnerabilities" ]] && [[ -f osv-results.md ]]; then
+            {
+              echo ""
+              echo "### 🚨 Vulnerability Details"
+              echo ""
+              echo "<details>"
+              echo "<summary>Click to expand OSV-Scanner findings</summary>"
+              echo ""
+              cat osv-results.md
+              echo ""
+              echo "</details>"
+            } >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: 📤 OSV-Scanner — Upload SARIF to Code Scanning
+        # Publishes findings to the repository's Security tab. Resilient: a Code
+        # Scanning hiccup must not fail the security job.
+        if: always() && inputs.enable-osv && hashFiles('osv-results.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        with:
+          sarif_file: osv-results.sarif
+          category: osv-scanner
+
+      - name: 📤 OSV-Scanner — Upload scan artifacts
+        if: always() && inputs.enable-osv
+        uses: ./.github/actions/upload-artifact-resilient
+        with:
+          artifact-name: osv-scanner-results
+          artifact-path: |
+            osv-results.sarif
+            osv-results.md
           retention-days: "7"
           if-no-files-found: ignore
 
@@ -594,8 +916,10 @@ jobs:
       # workflow's `security` job as before.
       #
       # Intentionally NOT treated as failures:
-      # - Nancy rate-limited (OSS Index throttled the request — inconclusive)
-      # - Nancy payment-required (OSS Index free-tier exhausted — inconclusive)
+      # - Nancy skipped-no-token (no Sonatype Guide token configured — scan not run)
+      # - Nancy rate-limited (backend throttled the request — inconclusive)
+      # - Nancy payment-required (Sonatype Guide credits exhausted — inconclusive)
+      # - Nancy unreachable (Guide/OSS Index network/DNS/TLS error — inconclusive)
       # - Gitleaks skipped due to fork (security policy, not a finding)
       # --------------------------------------------------------------------
       - name: 🚨 Aggregate failures
@@ -608,10 +932,13 @@ jobs:
           ENABLE_NANCY: ${{ inputs.enable-nancy }}
           ENABLE_GOVULNCHECK: ${{ inputs.enable-govulncheck }}
           ENABLE_GITLEAKS: ${{ inputs.enable-gitleaks }}
+          ENABLE_OSV: ${{ inputs.enable-osv }}
           NANCY_STATUS: ${{ steps.run-nancy.outputs.nancy-status }}
           GOVULN_STATUS: ${{ steps.run-govulncheck.outputs.govuln-status }}
           GITLEAKS_OUTCOME: ${{ steps.run-gitleaks.outcome }}
           GITLEAKS_SAME_REPO: ${{ steps.gitleaks-repo-check.outputs.is_same_repo }}
+          OSV_STATUS: ${{ steps.run-osv.outputs.osv-status }}
+          OSV_FAIL_ON_VULN: ${{ env.OSV_SCANNER_FAIL_ON_VULNERABILITY }}
         run: |
           FAILED=0
 
@@ -630,6 +957,18 @@ jobs:
               && [[ "${GITLEAKS_OUTCOME}" == "failure" ]]; then
             echo "❌ Gitleaks detected secrets in the repository"
             FAILED=1
+          fi
+
+          # OSV-Scanner fails the job ONLY when it found vulnerabilities AND enforcement
+          # is enabled. Inconclusive states (network / OSV.dev / database errors) never
+          # fail CI — same resilience contract as the other dependency scanners.
+          if [[ "${ENABLE_OSV}" == "true" ]] \
+              && [[ "${OSV_STATUS}" == "vulnerabilities" ]] \
+              && [[ "${OSV_FAIL_ON_VULN}" == "true" ]]; then
+            echo "❌ OSV-Scanner detected known vulnerabilities in dependencies"
+            FAILED=1
+          elif [[ "${ENABLE_OSV}" == "true" ]] && [[ "${OSV_STATUS}" == "vulnerabilities" ]]; then
+            echo "⚠️  OSV-Scanner found vulnerabilities (report-only mode; not failing CI)"
           fi
 
           if [[ $FAILED -ne 0 ]]; then
