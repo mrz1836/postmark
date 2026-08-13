@@ -41,7 +41,7 @@ on:
         description: "GitHub token for authentication"
         required: true
       slack-webhook:
-        description: "Slack webhook URL for notifications"
+        description: "Slack webhook URL for GoReleaser release announcements (optional; drives announce.slack in .goreleaser.yml)"
         required: false
 
 # Security: Restrict default permissions (jobs must explicitly request what they need)
@@ -57,6 +57,13 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write # Required: "magex release" creates GitHub releases and uploads assets
+    env:
+      # Route the tag ref through env: so it is never substituted into a shell/git command
+      # via ${{ }} (which would execute a tag named e.g. "v1$(cmd)" at assignment time).
+      # The tag is additionally validated against a strict semver regex in the
+      # "Validate version tag" step BEFORE any use. Tag creation is restricted to
+      # code-owners, so this is defense-in-depth.
+      TAG_REF: ${{ github.ref_name }}
     steps:
       # --------------------------------------------------------------------
       # Checkout code and set up Go environment
@@ -76,8 +83,23 @@ jobs:
           ENV_JSON: ${{ inputs.env-json }}
         run: |
           echo "📋 Setting environment variables..."
-          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
-            echo "$key=$value" >> $GITHUB_ENV
+          # Harden $GITHUB_ENV writes (defense-in-depth): base64 the value so newlines and
+          # special chars can't corrupt the read loop; accept only valid env-var names and
+          # reject values with an embedded newline (which could inject arbitrary extra vars).
+          # base64's decode flag differs by platform (GNU: -d, BSD/macOS: -D) — detect it.
+          if printf '' | base64 -d >/dev/null 2>&1; then B64D=-d; else B64D=-D; fi
+          echo "$ENV_JSON" | jq -r 'to_entries[] | .key, (.value | tostring | @base64)' | while IFS= read -r key; do
+            IFS= read -r value_b64
+            if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+              echo "⚠️ Skipping invalid env var name: $key" >&2
+              continue
+            fi
+            value=$(printf '%s' "$value_b64" | base64 "$B64D")
+            if [[ "$value" == *$'\n'* ]]; then
+              echo "⚠️ Skipping $key: value contains a newline" >&2
+              continue
+            fi
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
           done
 
       # --------------------------------------------------------------------
@@ -103,7 +125,7 @@ jobs:
         run: |
           echo "🔍 Validating version tag format..."
 
-          TAG="${{ github.ref_name }}"
+          TAG="$TAG_REF"  # from job-level env: (never string-spliced into shell)
 
           # Check if tag matches semantic versioning pattern
           if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-[a-zA-Z0-9\.\-]+)?(\+[a-zA-Z0-9\.\-]+)?$ ]]; then
@@ -148,8 +170,10 @@ jobs:
       # --------------------------------------------------------------------
       - name: 🔧 Extract GoReleaser version
         id: extract-goreleaser
+        env:
+          ENV_JSON: ${{ inputs.env-json }}
         run: |
-          GORELEASER_VERSION=$(echo '${{ inputs.env-json }}' | jq -r '.MAGE_X_GORELEASER_VERSION // empty')
+          GORELEASER_VERSION=$(echo "$ENV_JSON" | jq -r '.MAGE_X_GORELEASER_VERSION // empty')
 
           if [[ -z "$GORELEASER_VERSION" || "$GORELEASER_VERSION" == "null" ]]; then
             echo "❌ ERROR: MAGE_X_GORELEASER_VERSION not found in environment configuration" >&2
@@ -188,9 +212,10 @@ jobs:
         id: validate-goreleaser-configuration
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GO_MODULE_DIR: ${{ env.GO_MODULE_DIR }}
         run: |
           echo "🔍 Validating GoReleaser configuration via MAGE-X..."
-          GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
+          # GO_MODULE_DIR is provided via env: (routed, not string-spliced into the shell)
 
           if [ -n "$GO_MODULE_DIR" ]; then
             echo "🔧 Running magex release:validate from directory: $GO_MODULE_DIR"
@@ -224,12 +249,12 @@ jobs:
         run: |
           echo "📋 Extracting changelog information..."
 
-          # Get previous tag for comparison
-          PREVIOUS_TAG=$(git describe --tags --abbrev=0 ${{ github.ref_name }}^ 2>/dev/null || echo "")
+          # Get previous tag for comparison (TAG_REF is env-routed and semver-validated)
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 "$TAG_REF^" 2>/dev/null || echo "")
 
           if [[ -n "$PREVIOUS_TAG" ]]; then
             echo "📊 Comparing with previous tag: $PREVIOUS_TAG"
-            COMMIT_COUNT=$(git rev-list --count ${PREVIOUS_TAG}..${{ github.ref_name }})
+            COMMIT_COUNT=$(git rev-list --count "${PREVIOUS_TAG}..${TAG_REF}")
             echo "🔸 Total commits since $PREVIOUS_TAG: $COMMIT_COUNT"
             echo "previous_tag=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
 
@@ -238,7 +263,7 @@ jobs:
             CHANGELOG_CONTENT=""
 
             # Get commit messages between tags
-            COMMITS=$(git log --pretty=format:"%s" ${PREVIOUS_TAG}..${{ github.ref_name }} 2>/dev/null || echo "")
+            COMMITS=$(git log --pretty=format:"%s" "${PREVIOUS_TAG}..${TAG_REF}" 2>/dev/null || echo "")
 
             if [[ -n "$COMMITS" ]]; then
               # Group commits by type
@@ -278,7 +303,7 @@ jobs:
                 CHANGELOG_CONTENT+="### 🔧 Other Changes\n${OTHER}\n"
               fi
             else
-              CHANGELOG_CONTENT="No commits found between $PREVIOUS_TAG and ${{ github.ref_name }}"
+              CHANGELOG_CONTENT="No commits found between $PREVIOUS_TAG and $TAG_REF"
             fi
 
             # Store changelog content using heredoc to handle multiline
@@ -303,14 +328,23 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SKIP_GORELEASER_TESTS: "true"
+          # GoReleaser's announce.slack integration reads SLACK_WEBHOOK from the environment.
+          # Wired through here so a repo that flips announce.slack.enabled: true in its
+          # .goreleaser.yml (and sets the SLACK_WEBHOOK secret) gets release announcements.
+          # Harmless when unset or when announce.slack is disabled — GoReleaser no-ops it.
+          SLACK_WEBHOOK: ${{ secrets.slack-webhook }}
+          # Route config-derived values through env: so they never reach the shell parser
+          # via ${{ }} (avoids single-quote/`$()` breakout if a value ever contains them).
+          ENV_JSON: ${{ inputs.env-json }}
+          GO_MODULE_DIR: ${{ env.GO_MODULE_DIR }}
         run: |
           echo "🚀 Building and publishing release with GoReleaser..."
 
-          # Extract ENABLE_GODOCS_PUBLISHING from environment
-          ENABLE_GODOCS=$(echo '${{ inputs.env-json }}' | jq -r '.ENABLE_GODOCS_PUBLISHING // "false"')
+          # Extract ENABLE_GODOCS_PUBLISHING from environment (ENV_JSON provided via env:)
+          ENABLE_GODOCS=$(echo "$ENV_JSON" | jq -r '.ENABLE_GODOCS_PUBLISHING // "false"')
 
           # Run release with or without godocs based on configuration
-          GO_MODULE_DIR="${{ env.GO_MODULE_DIR }}"
+          # GO_MODULE_DIR is provided via env:
 
           if [[ "$ENABLE_GODOCS" == "true" ]]; then
             echo "📚 Running release with godocs publishing enabled..."
@@ -377,6 +411,12 @@ jobs:
       # --------------------------------------------------------------------
       - name: 📊 Generate release summary
         if: always()
+        env:
+          # changelog_content is built from raw commit subjects (attacker-influenceable via
+          # merged PRs); route it and previous_tag through env: so they are never
+          # interpolated into the shell. TAG_REF comes from the job-level env: above.
+          PREVIOUS_TAG: ${{ steps.changelog.outputs.previous_tag }}
+          CHANGELOG_CONTENT: ${{ steps.changelog.outputs.changelog_content }}
         run: |
           echo "# 🚀 Release Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -386,7 +426,7 @@ jobs:
           echo "| Version | \`${{ steps.validate-tag.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Pre-release | ${{ steps.validate-tag.outputs.is_prerelease }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Repository | ${{ github.repository }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Release URL | [View Release](https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Release URL | [View Release](https://github.com/${{ github.repository }}/releases/tag/$TAG_REF) |" >> $GITHUB_STEP_SUMMARY
 
           # Add Go Docs status
           if [[ "${{ steps.goreleaser.outputs.godocs_published }}" == "true" ]]; then
@@ -399,15 +439,15 @@ jobs:
 
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [[ -n "${{ steps.changelog.outputs.previous_tag }}" ]]; then
+          if [[ -n "$PREVIOUS_TAG" ]]; then
             echo "## 📝 Changelog" >> $GITHUB_STEP_SUMMARY
-            echo "Comparing: \`${{ steps.changelog.outputs.previous_tag }}\` → \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "Comparing: \`$PREVIOUS_TAG\` → \`$TAG_REF\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "${{ steps.changelog.outputs.changelog_content }}" >> $GITHUB_STEP_SUMMARY
+            echo "$CHANGELOG_CONTENT" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           else
             echo "## 📝 Changelog" >> $GITHUB_STEP_SUMMARY
-            echo "${{ steps.changelog.outputs.changelog_content }}" >> $GITHUB_STEP_SUMMARY
+            echo "$CHANGELOG_CONTENT" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
 
@@ -415,7 +455,7 @@ jobs:
           if [[ "${{ steps.goreleaser.outcome }}" == "success" ]]; then
             echo "✅ **Release completed successfully!**" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "🎉 Your release is now available at: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+            echo "🎉 Your release is now available at: https://github.com/${{ github.repository }}/releases/tag/$TAG_REF" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ **Release workflow encountered issues**" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY

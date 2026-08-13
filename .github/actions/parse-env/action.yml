@@ -18,6 +18,12 @@
 #
 #  Maintainer: @mrz1836
 #
+#  SECURITY INVARIANT: only invoke this action (and its siblings under `.github/actions/`)
+#  from `push` / `pull_request` runs with a powerless (read-only on forks) token. Values
+#  that could be influenced by a PR are routed through `env:` and referenced as quoted
+#  "$VAR". Do NOT wire these actions to `pull_request_target` / `workflow_run` (privileged
+#  token on an untrusted ref) without first auditing every `${{ }}`→shell/jq sink.
+#
 # ------------------------------------------------------------------------------------
 
 name: "Parse Environment Variables"
@@ -55,16 +61,24 @@ runs:
           exit 1
         fi
 
-        # Parse and set each variable (exact pattern from existing workflows)
-        echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
-          # Validate key name (basic safety check)
-          if [[ -z "$key" ]]; then
-            echo "⚠️  WARNING: Skipping empty variable name" >&2
+        # Parse and set each variable. Harden $GITHUB_ENV writes (defense-in-depth):
+        # base64-encode values so newlines/special chars can't corrupt the read loop,
+        # accept only valid env-var names, and reject newline-bearing values (which could
+        # otherwise inject arbitrary extra env vars). base64's decode flag differs by
+        # platform (GNU: -d, BSD/macOS: -D) — detect it.
+        if printf '' | base64 -d >/dev/null 2>&1; then B64D=-d; else B64D=-D; fi
+        echo "$ENV_JSON" | jq -r 'to_entries[] | .key, (.value | tostring | @base64)' | while IFS= read -r key; do
+          IFS= read -r value_b64
+          if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            echo "⚠️  WARNING: Skipping invalid variable name: $key" >&2
             continue
           fi
-
-          # Set the environment variable
-          echo "$key=$value" >> $GITHUB_ENV
+          value=$(printf '%s' "$value_b64" | base64 "$B64D")
+          if [[ "$value" == *$'\n'* ]]; then
+            echo "⚠️  WARNING: Skipping $key: value contains a newline" >&2
+            continue
+          fi
+          printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
         done
 
         # Count and report variables set

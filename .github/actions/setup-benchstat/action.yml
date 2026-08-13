@@ -115,12 +115,20 @@ runs:
     - name: ⬇️ Install benchstat (cache miss)
       if: steps.version-check.outputs.skip != 'true' && steps.benchstat-cache.outputs.cache-hit != 'true'
       shell: bash
+      env:
+        # Route the version through env: so it can never break out of the go install
+        # command via ${{ }} interpolation (completes the safe pattern; version is config).
+        BENCHSTAT_VERSION: ${{ inputs.benchstat-version }}
       run: |
         echo "⬇️ Cache miss – installing benchstat via go install..."
-        echo "📋 Installing benchstat version: ${{ inputs.benchstat-version }}"
+        echo "📋 Installing benchstat version: $BENCHSTAT_VERSION"
 
-        # Install benchstat
-        go install "golang.org/x/perf/cmd/benchstat@${{ inputs.benchstat-version }}"
+        # Install benchstat. Version is pinned in config and verified by Go's checksum DB
+        # (sum.golang.org), so SonarCloud S8545 is a known false positive here. Inline
+        # NOSONAR is NOT honored by Sonar's GitHub Actions analyzer — suppress it via
+        # SonarCloud config (Quality Profile, or an Analysis-Scope / properties exclusion
+        # for rule githubactions:S8545 on .github/actions/**).
+        go install "golang.org/x/perf/cmd/benchstat@${BENCHSTAT_VERSION}"
 
         # Cache the binary for future runs
         mkdir -p ~/.cache/benchstat-bin

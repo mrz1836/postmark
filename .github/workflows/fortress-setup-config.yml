@@ -12,6 +12,15 @@
 #    (`fortress.yml`) calls this workflow directly off `paths-check`, with no
 #    `env-json` input — env loading happens inside.
 #
+#  SECURITY INVARIANT (load-bearing — read before changing triggers):
+#  - This workflow and the composite actions under `.github/actions/` are only ever invoked
+#    from `push` / `pull_request` runs with a powerless (read-only on forks) token. Some
+#    steps still interpolate CI-/config-controlled `${{ ... }}` values into shell and jq.
+#    DO NOT wire any of them to `pull_request_target` or `workflow_run` (which carry a
+#    privileged token while checking out an untrusted ref) without first routing every
+#    `${{ }}`→shell/jq sink through `env:` and referencing quoted `"$VAR"`. See the Phase-1
+#    security fixes (e.g. fortress-coverage.yml / dependabot-auto-merge.yml) for the pattern.
+#
 # ------------------------------------------------------------------------------------
 name: GoFortress (Setup Configuration)
 on:
@@ -312,8 +321,23 @@ jobs:
           echo "📋 Parsing environment variables..."
 
           # Extract each variable from JSON and set as output
-          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
-            echo "$key=$value" >> $GITHUB_ENV
+          # Harden $GITHUB_ENV writes (defense-in-depth): base64 the value so newlines and
+          # special chars can't corrupt the read loop; accept only valid env-var names and
+          # reject values with an embedded newline (which could inject arbitrary extra vars).
+          # base64's decode flag differs by platform (GNU: -d, BSD/macOS: -D) — detect it.
+          if printf '' | base64 -d >/dev/null 2>&1; then B64D=-d; else B64D=-D; fi
+          echo "$ENV_JSON" | jq -r 'to_entries[] | .key, (.value | tostring | @base64)' | while IFS= read -r key; do
+            IFS= read -r value_b64
+            if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+              echo "⚠️ Skipping invalid env var name: $key" >&2
+              continue
+            fi
+            value=$(printf '%s' "$value_b64" | base64 "$B64D")
+            if [[ "$value" == *$'\n'* ]]; then
+              echo "⚠️ Skipping $key: value contains a newline" >&2
+              continue
+            fi
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
           done
 
           echo "✅ Environment variables parsed successfully"

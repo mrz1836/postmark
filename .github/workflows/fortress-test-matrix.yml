@@ -120,9 +120,12 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     # Redis service container (conditionally enabled)
+    # The busybox placeholder (used when Redis is disabled) is digest-pinned to remove the
+    # floating ":latest" tag. The redis image intentionally follows inputs.redis-version, so
+    # it is tag-based by design (digest-pinning would defeat that configurability).
     services:
       redis:
-        image: ${{ inputs.redis-enabled == 'true' && format('redis:{0}', inputs.redis-version) || 'busybox:latest' }}
+        image: ${{ inputs.redis-enabled == 'true' && format('redis:{0}', inputs.redis-version) || 'busybox@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616' }}
         options: ${{ inputs.redis-enabled == 'true' && format('--health-cmd "redis-cli ping" --health-interval {0}s --health-timeout {1}s --health-retries {2}', inputs.redis-health-interval, inputs.redis-health-timeout, inputs.redis-health-retries) || '--entrypoint sh' }}
         ports:
           - ${{ inputs.redis-enabled == 'true' && format('{0}:{0}', inputs.redis-port) || '9999:9999' }}

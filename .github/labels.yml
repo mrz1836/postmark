@@ -80,19 +80,19 @@
   description: "Security-related issue, vulnerability, or fix"
   color: d73a4a
 - name: "size/L"
-  description: "Large change (201–500 lines)"
+  description: "Large change (201-500 lines)"
   color: 01579b
 - name: "size/M"
-  description: "Medium change (51–200 lines)"
+  description: "Medium change (51-200 lines)"
   color: 0288d1
 - name: "size/S"
-  description: "Small change (11–50 lines)"
+  description: "Small change (11-50 lines)"
   color: 4fc3f7
 - name: "size/XL"
   description: "Very large change (>500 lines)"
   color: 002f6c
 - name: "size/XS"
-  description: "Very small change (≤10 lines)"
+  description: "Very small change (<=10 lines)"
   color: b3e5fc
 - name: "stale"
   description: "Old, unused, stale"

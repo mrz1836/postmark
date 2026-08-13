@@ -460,7 +460,12 @@ runs:
         echo "🔐 Configuring git authentication for private Go modules..."
         echo "📋 GOPRIVATE=$GOPRIVATE"
 
-        # Configure git to use the token for HTTPS URLs
+        # Configure git to use the token for HTTPS URLs.
+        # SECURITY: this writes the token into the job's global git config (~/.gitconfig).
+        # It is deliberately job-lifetime — subsequent `go mod download` steps in the SAME
+        # job need it — and the GitHub-hosted runner is ephemeral and single-tenant, so the
+        # config is destroyed when the job ends. Do not persist this beyond the job (e.g. into
+        # a cache) and keep this step gated to private-module runs only.
         git config --global url."https://x-access-token:${PRIVATE_MODULE_TOKEN}@github.com/".insteadOf "https://github.com/"
 
         # Set GONOSUMDB to match GOPRIVATE if not explicitly set

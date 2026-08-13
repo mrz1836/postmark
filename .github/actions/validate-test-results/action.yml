@@ -52,6 +52,14 @@ runs:
         echo "🔍 Validating test results from CI mode output..."
         source .github/scripts/parse-test-label.sh
 
+        # Guard against bash arithmetic-eval injection: artifact-derived counts flow into
+        # $(( )) and [[ -gt ]]. Coerce each to a bare non-negative integer so a crafted
+        # JSONL value like "a[$(cmd)]" becomes 0 instead of being evaluated as code.
+        to_int() {
+          local v="${1//[[:space:]]/}"
+          if [[ "$v" =~ ^[0-9]+$ ]]; then printf '%s' "$v"; else printf '0'; fi
+        }
+
         VALIDATION_FAILED=false
         TOTAL_FAILURES=0
         TOTAL_UNIQUE=0
@@ -95,11 +103,11 @@ runs:
 
             if [[ -n "$SUMMARY" ]]; then
               STATUS=$(echo "$SUMMARY" | jq -r '.summary.status // "unknown"')
-              PASSED=$(echo "$SUMMARY" | jq -r '.summary.passed // 0')
-              FAILED=$(echo "$SUMMARY" | jq -r '.summary.failed // 0')
-              SKIPPED=$(echo "$SUMMARY" | jq -r '.summary.skipped // 0')
-              UNIQUE=$(echo "$SUMMARY" | jq -r '.summary.unique_total // 0')
-              TOTAL=$(echo "$SUMMARY" | jq -r '.summary.total // 0')
+              PASSED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.passed // 0')")
+              FAILED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.failed // 0')")
+              SKIPPED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.skipped // 0')")
+              UNIQUE=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.unique_total // 0')")
+              TOTAL=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.total // 0')")
               DURATION=$(echo "$SUMMARY" | jq -r '.summary.duration // "unknown"')
 
               echo "  • Status: $STATUS"
@@ -143,7 +151,9 @@ runs:
             else
               echo "  ⚠️ No summary found in JSONL file"
 
-              FAILURE_COUNT=$(grep -c '"type":"failure"' "$jsonl_file" 2>/dev/null || echo "0")
+              # grep -c exits 1 on zero matches; ignore its status (it still prints 0) so
+              # the step can't hard-fail under bash -e/pipefail when there are no failures.
+              FAILURE_COUNT=$(to_int "$(grep -c '"type":"failure"' "$jsonl_file" 2>/dev/null || true)")
               if [[ "$FAILURE_COUNT" -gt 0 ]]; then
                 echo "  • Found $FAILURE_COUNT failure entries"
                 VALIDATION_FAILED=true
@@ -161,7 +171,9 @@ runs:
             if grep -q "^FAIL" "$log_file" 2>/dev/null || grep -q "--- FAIL:" "$log_file" 2>/dev/null; then
               echo "  ❌ Found test failures in log file"
               VALIDATION_FAILED=true
-              FAIL_COUNT=$(grep -c "^--- FAIL:" "$log_file" 2>/dev/null || echo "1")
+              # grep -c exits 1 on zero matches; ignore its status (it still prints 0).
+              FAIL_COUNT=$(to_int "$(grep -c "^--- FAIL:" "$log_file" 2>/dev/null || true)")
+              [[ "$FAIL_COUNT" -gt 0 ]] || FAIL_COUNT=1 # we already matched a FAIL above
               TOTAL_FAILURES=$((TOTAL_FAILURES + FAIL_COUNT))
             fi
           done < <(find ci-results/ -name "test-output.log" -print0 2>/dev/null)
@@ -199,11 +211,22 @@ runs:
         set -uo pipefail
         source .github/scripts/parse-test-label.sh
 
+        # Coerce artifact-derived counts to integers (arithmetic-eval injection guard) and
+        # strip backticks from artifact-derived text before it is written into the job
+        # summary (prevents markdown code-span / fenced-block breakout & content spoofing).
+        to_int() {
+          local v="${1//[[:space:]]/}"
+          if [[ "$v" =~ ^[0-9]+$ ]]; then printf '%s' "$v"; else printf '0'; fi
+        }
+        # Strip backticks AND control chars (except tab/newline) from artifact-derived text:
+        # prevents code-span/fenced-block breakout and control-character (ANSI/NUL) spoofing.
+        strip_bt() { printf '%s' "$1" | LC_ALL=C tr -d '\000-\010\013-\037\140\177'; }
+
         echo "## 🔍 Test Validation Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
 
         # Count artifacts
-        MATRIX_JOBS=$(find ci-results/ -name "*.jsonl" 2>/dev/null | wc -l || echo "0")
+        MATRIX_JOBS=$(to_int "$(find ci-results/ -name "*.jsonl" 2>/dev/null | wc -l)")
         echo "- **Matrix Jobs Validated**: $MATRIX_JOBS" >> $GITHUB_STEP_SUMMARY
 
         # Aggregate results from JSONL files
@@ -216,11 +239,11 @@ runs:
         while IFS= read -r -d '' jsonl_file; do
           SUMMARY=$(grep '"type":"summary"' "$jsonl_file" 2>/dev/null | head -1 || echo "")
           if [[ -n "$SUMMARY" ]]; then
-            PASSED=$(echo "$SUMMARY" | jq -r '.summary.passed // 0')
-            FAILED=$(echo "$SUMMARY" | jq -r '.summary.failed // 0')
-            SKIPPED=$(echo "$SUMMARY" | jq -r '.summary.skipped // 0')
-            UNIQUE=$(echo "$SUMMARY" | jq -r '.summary.unique_total // 0')
-            TOTAL=$(echo "$SUMMARY" | jq -r '.summary.total // 0')
+            PASSED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.passed // 0')")
+            FAILED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.failed // 0')")
+            SKIPPED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.skipped // 0')")
+            UNIQUE=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.unique_total // 0')")
+            TOTAL=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.total // 0')")
             TOTAL_PASSED=$((TOTAL_PASSED + PASSED))
             TOTAL_FAILED=$((TOTAL_FAILED + FAILED))
             TOTAL_SKIPPED=$((TOTAL_SKIPPED + SKIPPED))
@@ -256,14 +279,14 @@ runs:
               ARTIFACT_DIR=$(basename "$(dirname "$jsonl_file")")
             fi
 
-            TEST_LABEL=$(parse_test_label "$ARTIFACT_DIR" "$JSONL_NAME")
+            TEST_LABEL=$(strip_bt "$(parse_test_label "$ARTIFACT_DIR" "$JSONL_NAME")")
 
             SUMMARY=$(grep '"type":"summary"' "$jsonl_file" 2>/dev/null | head -1 || echo "")
 
             if [[ -n "$SUMMARY" ]]; then
               STATUS=$(echo "$SUMMARY" | jq -r '.summary.status // "unknown"')
-              PASSED=$(echo "$SUMMARY" | jq -r '.summary.passed // 0')
-              FAILED=$(echo "$SUMMARY" | jq -r '.summary.failed // 0')
+              PASSED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.passed // 0')")
+              FAILED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.failed // 0')")
 
               if [[ "$STATUS" == "passed" ]]; then
                 echo "- ✅ **$TEST_LABEL**: $PASSED tests passed" >> $GITHUB_STEP_SUMMARY
@@ -292,12 +315,14 @@ runs:
                 break 2
               fi
 
-              TEST=$(echo "$line" | jq -r '.failure.test // "unknown"')
-              PKG=$(echo "$line" | jq -r '.failure.package // "unknown"' | sed 's|.*/||')
-              FAIL_TYPE=$(echo "$line" | jq -r '.failure.type // "test"')
-              ERROR_MSG=$(echo "$line" | jq -r '.failure.error // ""')
-              OUTPUT=$(echo "$line" | jq -r '.failure.output // ""')
-              STACK=$(echo "$line" | jq -r '.failure.stack // ""')
+              # Strip backticks from artifact-derived text so it cannot break out of the
+              # markdown code spans / fenced blocks it is written into below.
+              TEST=$(strip_bt "$(echo "$line" | jq -r '.failure.test // "unknown"')")
+              PKG=$(strip_bt "$(echo "$line" | jq -r '.failure.package // "unknown"' | sed 's|.*/||')")
+              FAIL_TYPE=$(strip_bt "$(echo "$line" | jq -r '.failure.type // "test"')")
+              ERROR_MSG=$(strip_bt "$(echo "$line" | jq -r '.failure.error // ""')")
+              OUTPUT=$(strip_bt "$(echo "$line" | jq -r '.failure.output // ""')")
+              STACK=$(strip_bt "$(echo "$line" | jq -r '.failure.stack // ""')")
 
               echo "<details>" >> $GITHUB_STEP_SUMMARY
               echo "<summary>❌ <code>$TEST</code> ($PKG) - $FAIL_TYPE</summary>" >> $GITHUB_STEP_SUMMARY
@@ -332,7 +357,7 @@ runs:
               # For fuzz tests, show fuzz-specific info
               FUZZ_INFO=$(echo "$line" | jq -r '.failure.fuzz_info // null')
               if [[ "$FUZZ_INFO" != "null" && -n "$FUZZ_INFO" ]]; then
-                CORPUS=$(echo "$FUZZ_INFO" | jq -r '.corpus_path // ""')
+                CORPUS=$(strip_bt "$(echo "$FUZZ_INFO" | jq -r '.corpus_path // ""')")
                 if [[ -n "$CORPUS" && "$CORPUS" != "null" ]]; then
                   echo "" >> $GITHUB_STEP_SUMMARY
                   echo "**Fuzz Corpus:** \`$CORPUS\`" >> $GITHUB_STEP_SUMMARY
