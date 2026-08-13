@@ -150,8 +150,23 @@ jobs:
           ENV_JSON: ${{ inputs.env-json }}
         run: |
           echo "📋 Setting environment variables..."
-          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
-            echo "$key=$value" >> $GITHUB_ENV
+          # Harden $GITHUB_ENV writes (defense-in-depth): base64 the value so newlines and
+          # special chars can't corrupt the read loop; accept only valid env-var names and
+          # reject values with an embedded newline (which could inject arbitrary extra vars).
+          # base64's decode flag differs by platform (GNU: -d, BSD/macOS: -D) — detect it.
+          if printf '' | base64 -d >/dev/null 2>&1; then B64D=-d; else B64D=-D; fi
+          echo "$ENV_JSON" | jq -r 'to_entries[] | .key, (.value | tostring | @base64)' | while IFS= read -r key; do
+            IFS= read -r value_b64
+            if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+              echo "⚠️ Skipping invalid env var name: $key" >&2
+              continue
+            fi
+            value=$(printf '%s' "$value_b64" | base64 "$B64D")
+            if [[ "$value" == *$'\n'* ]]; then
+              echo "⚠️ Skipping $key: value contains a newline" >&2
+              continue
+            fi
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
           done
 
       # --------------------------------------------------------------------

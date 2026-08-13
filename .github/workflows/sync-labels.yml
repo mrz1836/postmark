@@ -119,22 +119,6 @@ jobs:
 
     steps:
       # --------------------------------------------------------------------
-      # Log token configuration
-      # --------------------------------------------------------------------
-      - name: 🔑 Log token configuration
-        env:
-          ENV_JSON: ${{ needs.load-env.outputs.env-json }}
-          GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
-        run: |
-          PREFERRED_TOKEN=$(echo "$ENV_JSON" | jq -r '.PREFERRED_GITHUB_TOKEN')
-
-          if [[ "$PREFERRED_TOKEN" == "GH_PAT_TOKEN" && -n "$GH_PAT_TOKEN" ]]; then
-            echo "✅ Using Personal Access Token (PAT) for label operations"
-          else
-            echo "✅ Using default GITHUB_TOKEN for label operations"
-          fi
-
-      # --------------------------------------------------------------------
       # Checkout repository
       # --------------------------------------------------------------------
       - name: 📥 Checkout code
@@ -307,27 +291,21 @@ jobs:
       - name: 🏷️ Sync labels from manifest
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          ENV_JSON: ${{ needs.load-env.outputs.env-json }}
-          GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
           DRY_RUN: ${{ github.event.inputs.dry_run }}
           LABELS_JSON: ${{ steps.parse_labels.outputs.labels_json }}
           LABELS_COUNT: ${{ steps.parse_labels.outputs.labels_count }}
         with:
-          github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             // Configuration
             const isDryRun = process.env.DRY_RUN === 'true';
             const labelsJson = process.env.LABELS_JSON;
             const labelsCount = process.env.LABELS_COUNT;
-            const envJson = JSON.parse(process.env.ENV_JSON);
-            const preferredToken = envJson.PREFERRED_GITHUB_TOKEN;
-            const isUsingPAT = preferredToken === 'GH_PAT_TOKEN' && process.env.GH_PAT_TOKEN !== '';
 
             console.log('🏷️ === Label Sync Configuration ===');
             console.log(`📊 Labels count: ${labelsCount}`);
             console.log(`🔧 Dry run mode: ${isDryRun ? 'ENABLED (no changes will be made)' : 'DISABLED (changes will be applied)'}`);
             console.log(`📁 Repository: ${context.repo.owner}/${context.repo.repo}`);
-            console.log(`🔑 Token type: ${isUsingPAT ? 'Personal Access Token (PAT)' : 'Default GITHUB_TOKEN'}`);
 
 
             // Helper function to normalize color (remove # and ensure lowercase)
@@ -531,7 +509,7 @@ jobs:
         env:
           LABELS_JSON: ${{ steps.parse_labels.outputs.labels_json }}
         with:
-          github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const labelsJson = process.env.LABELS_JSON;
 
@@ -623,9 +601,14 @@ jobs:
           echo "## 📋 Commit Source (Audit Trail)" >> $GITHUB_STEP_SUMMARY
           echo "| Detail | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          # Commit author/committer names are attacker-influenceable; sanitize before writing
+          # them into the markdown table (strip control chars, neutralize | and ` so they
+          # cannot break out of the table column or open a code span).
+          SAFE_COMMITTER=$(printf '%s' "$COMMITTER_NAME" | LC_ALL=C tr -d '\000-\037\177' | tr '|`' '  ')
+          SAFE_AUTHOR=$(printf '%s' "$AUTHOR_NAME" | LC_ALL=C tr -d '\000-\037\177' | tr '|`' '  ')
           echo "| Commit SHA | \`$COMMIT_SHA\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Committer | $COMMITTER_NAME |" >> $GITHUB_STEP_SUMMARY
-          echo "| Author | $AUTHOR_NAME |" >> $GITHUB_STEP_SUMMARY
+          echo "| Committer | $SAFE_COMMITTER |" >> $GITHUB_STEP_SUMMARY
+          echo "| Author | $SAFE_AUTHOR |" >> $GITHUB_STEP_SUMMARY
           if [ "$IS_MERGE" = "true" ]; then
             echo "| Type | 🔀 Merge commit (from PR) |" >> $GITHUB_STEP_SUMMARY
             if [ -n "$PR_NUMBER" ]; then

@@ -147,6 +147,12 @@ runs:
 
         echo "🗂️ Processing ${#VERSION_ARRAY[@]} Redis versions..."
 
+        # Per-run private scratch dir (mktemp) instead of predictable /tmp/version_* paths,
+        # which are guessable and could be pre-created/symlinked by another process.
+        # (No EXIT trap: the ( ) subshell below can inherit it and delete the dir mid-loop
+        # on some bash builds; the dir is removed explicitly after the loop instead.)
+        WARM_TMPDIR=$(mktemp -d)
+
         for i in "${!VERSION_ARRAY[@]}"; do
           VERSION=$(echo "${VERSION_ARRAY[$i]}" | xargs) # trim whitespace
 
@@ -219,21 +225,21 @@ runs:
             echo "📊 Image size: ${IMAGE_SIZE_MB}MB"
 
             # Save results to temporary files for parent shell
-            echo "true" > "/tmp/version_success_${i}"
-            echo "$IMAGE_SIZE_MB" > "/tmp/version_size_${i}"
-            echo "$CACHE_KEY" > "/tmp/version_key_${i}"
+            echo "true" > "${WARM_TMPDIR}/version_success_${i}"
+            echo "$IMAGE_SIZE_MB" > "${WARM_TMPDIR}/version_size_${i}"
+            echo "$CACHE_KEY" > "${WARM_TMPDIR}/version_key_${i}"
 
           ) && VERSION_SUCCESS="true" || VERSION_SUCCESS="false"
 
           # Read results from temporary files
-          if [[ -f "/tmp/version_success_${i}" ]]; then
-            VERSION_SUCCESS=$(cat "/tmp/version_success_${i}")
+          if [[ -f "${WARM_TMPDIR}/version_success_${i}" ]]; then
+            VERSION_SUCCESS=$(cat "${WARM_TMPDIR}/version_success_${i}")
           fi
-          if [[ -f "/tmp/version_size_${i}" ]]; then
-            VERSION_SIZE=$(cat "/tmp/version_size_${i}")
+          if [[ -f "${WARM_TMPDIR}/version_size_${i}" ]]; then
+            VERSION_SIZE=$(cat "${WARM_TMPDIR}/version_size_${i}")
           fi
-          if [[ -f "/tmp/version_key_${i}" ]]; then
-            VERSION_KEY=$(cat "/tmp/version_key_${i}")
+          if [[ -f "${WARM_TMPDIR}/version_key_${i}" ]]; then
+            VERSION_KEY=$(cat "${WARM_TMPDIR}/version_key_${i}")
           fi
 
           # Update tracking based on results
@@ -254,8 +260,11 @@ runs:
           fi
 
           # Clean up temporary files
-          rm -f "/tmp/version_success_${i}" "/tmp/version_size_${i}" "/tmp/version_key_${i}"
+          rm -f "${WARM_TMPDIR}/version_success_${i}" "${WARM_TMPDIR}/version_size_${i}" "${WARM_TMPDIR}/version_key_${i}"
         done
+
+        # Remove the private scratch dir now that the loop is done
+        rm -rf "$WARM_TMPDIR"
 
         # Determine overall warming status
         if [[ $WARMING_ERRORS -eq 0 ]]; then

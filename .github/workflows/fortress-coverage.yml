@@ -55,9 +55,6 @@ on:
       CODECOV_TOKEN:
         description: "Codecov token for uploading coverage (required when coverage-provider is codecov)"
         required: false
-      GH_PAT_TOKEN:
-        description: "Personal access token for enhanced GitHub API access (optional, falls back to github-token)"
-        required: false
 
 # Security: Restrict default permissions (jobs must explicitly request what they need)
 permissions: {}
@@ -90,6 +87,25 @@ jobs:
           fi
           echo "✅ Coverage provider is valid: $COVERAGE_PROVIDER"
 
+      # --------------------------------------------------------------------
+      # Hard gate: reject shell/jq-unsafe branch names before any downstream
+      # job runs. branch-name (= github.head_ref || github.ref_name at the
+      # caller) is attacker-controlled for fork PRs and flows into shell and
+      # jq programs throughout this workflow. Both downstream jobs `needs:`
+      # this one, and this job holds `permissions: {}`, so the check runs with
+      # no token. Per-sink env-routing downstream is defense-in-depth on top.
+      # --------------------------------------------------------------------
+      - name: 🔒 Validate branch name is shell/jq-safe
+        env:
+          BRANCH_NAME: ${{ inputs.branch-name }}
+        run: |
+          echo "🔒 Validating branch name: $BRANCH_NAME"
+          if [[ ! "$BRANCH_NAME" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "❌ Unsafe branch name rejected (must match ^[A-Za-z0-9._/-]+\$): '$BRANCH_NAME'"
+            exit 1
+          fi
+          echo "✅ Branch name is safe"
+
   # ----------------------------------------------------------------------------------
   # Process Coverage and Deploy to GitHub Pages (Internal Provider)
   #
@@ -104,12 +120,22 @@ jobs:
     runs-on: ${{ inputs.primary-runner }}
     timeout-minutes: 10
     permissions:
-      contents: write # Required: Push coverage data to gh-pages branch
-      pages: write # Required: Deploy to GitHub Pages
-      id-token: write # Required: GitHub Pages authentication
-      pull-requests: write # Required: Create PR comments with coverage
+      # gh-pages is deployed via a plain `git push origin gh-pages` (see below), which
+      # only needs `contents: write`. No actions/deploy-pages or OIDC is used anywhere in
+      # this job, so `pages: write` and `id-token: write` were unused and are removed to
+      # shrink the blast radius of this write+token-bearing job.
+      contents: write # Required: Push coverage data to gh-pages branch (git push)
+      pull-requests: write # Required: go-coverage creates/updates the PR coverage comment AND reads PR metadata. Creating an issue-comment on a PR requires pull-requests: write — issues: write alone 403s ("Resource not accessible by integration").
+      issues: write # Required: go-coverage issue-comment API calls (pull-requests: write above is what actually authorizes the PR comment)
       statuses: write # Required: Create commit status checks
       actions: read # Required: Download artifacts from workflow runs
+    env:
+      # Route attacker-influenceable inputs through env: so they never reach the shell/jq
+      # parser via ${{ }} interpolation. branch-name is also validated up-front against
+      # ^[A-Za-z0-9._/-]+$ in the validate-provider job (which both coverage jobs need),
+      # the hard gate; env-routing here (and jq `env.` lookups below) is defense-in-depth.
+      BRANCH_NAME: ${{ inputs.branch-name }}
+      REPO_FULL_NAME: ${{ github.repository }}
 
     steps:
       # --------------------------------------------------------------------
@@ -119,8 +145,23 @@ jobs:
         env:
           ENV_JSON: ${{ inputs.env-json }}
         run: |
-          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
-            echo "$key=$value" >> $GITHUB_ENV
+          # Harden $GITHUB_ENV writes (defense-in-depth): base64 the value so newlines and
+          # special chars can't corrupt the read loop; accept only valid env-var names and
+          # reject values with an embedded newline (which could inject arbitrary extra vars).
+          # base64's decode flag differs by platform (GNU: -d, BSD/macOS: -D) — detect it.
+          if printf '' | base64 -d >/dev/null 2>&1; then B64D=-d; else B64D=-D; fi
+          echo "$ENV_JSON" | jq -r 'to_entries[] | .key, (.value | tostring | @base64)' | while IFS= read -r key; do
+            IFS= read -r value_b64
+            if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+              echo "⚠️ Skipping invalid env var name: $key" >&2
+              continue
+            fi
+            value=$(printf '%s' "$value_b64" | base64 "$B64D")
+            if [[ "$value" == *$'\n'* ]]; then
+              echo "⚠️ Skipping $key: value contains a newline" >&2
+              continue
+            fi
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
           done
 
       - name: 🔧 Setup branch helper functions
@@ -270,7 +311,7 @@ jobs:
             else
               echo "📦 Building local development version of go-coverage"
               echo "  Building from source at: $GITHUB_WORKSPACE/cmd/go-coverage"
-              echo "  Branch: ${{ inputs.branch-name }}"
+              echo "  Branch: $BRANCH_NAME"
               echo "  Commit: ${{ inputs.commit-sha }}"
 
               # Build from local source
@@ -332,7 +373,7 @@ jobs:
         # Download history for all branches to enable trend analysis
         if: github.event_name == 'push'
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.github-token }}
         run: |
           echo "📥 Downloading previous coverage history using GitHub API..."
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -358,24 +399,29 @@ jobs:
 
           # Get recent workflow runs that may have recorded history (include failed deployments)
           echo "🔍 Fetching recent workflow runs with potential history data..."
-          CURRENT_BRANCH="${{ inputs.branch-name }}"
+          CURRENT_BRANCH="$BRANCH_NAME"  # from job-level env: (validated at caller)
           echo "📌 Current branch: $CURRENT_BRANCH"
 
           # First try to get completed runs from current branch (success OR failure after history step)
           # This includes runs that recorded coverage history but failed in later steps (like deployment)
-          WORKFLOW_RUNS=$(gh api repos/${{ github.repository }}/actions/runs \
-            --jq ".workflow_runs[] | select(.status == \"completed\" and (.conclusion == \"success\" or .conclusion == \"failure\") and .head_branch == \"$CURRENT_BRANCH\") | .id" \
+          # Provenance filter: only ingest coverage history from THIS repo's own push runs.
+          # Excludes fork PR runs (.event != "push") and fork-owned runs (head_repository
+          # mismatch) that could otherwise poison trend data by naming a branch "master".
+          # Values are read via gojq's env.* (gh api embeds gojq) — never string-spliced.
+          WORKFLOW_RUNS=$(gh api "repos/$REPO_FULL_NAME/actions/runs" \
+            --jq '.workflow_runs[] | select(.status == "completed" and (.conclusion == "success" or .conclusion == "failure") and .event == "push" and .head_repository.full_name == env.REPO_FULL_NAME and .head_branch == env.BRANCH_NAME) | .id' \
             --paginate 2>/dev/null | head -8 || echo "")
 
           # If no runs found for current branch and it's not the default branch, check default branch history
           if [[ -z "$WORKFLOW_RUNS" ]]; then
             # Detect the default branch dynamically
-            DEFAULT_BRANCH=$(gh api repos/${{ github.repository }} --jq '.default_branch' 2>/dev/null || echo "")
+            DEFAULT_BRANCH=$(gh api "repos/$REPO_FULL_NAME" --jq '.default_branch' 2>/dev/null || echo "")
+            export DEFAULT_BRANCH  # expose to gojq env.* in the filter below
 
             if [[ -n "$DEFAULT_BRANCH" ]] && [[ "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]]; then
               echo "ℹ️ No history found for branch '$CURRENT_BRANCH', checking $DEFAULT_BRANCH branch..."
-              WORKFLOW_RUNS=$(gh api repos/${{ github.repository }}/actions/runs \
-                --jq ".workflow_runs[] | select(.status == \"completed\" and (.conclusion == \"success\" or .conclusion == \"failure\") and .head_branch == \"$DEFAULT_BRANCH\") | .id" \
+              WORKFLOW_RUNS=$(gh api "repos/$REPO_FULL_NAME/actions/runs" \
+                --jq '.workflow_runs[] | select(.status == "completed" and (.conclusion == "success" or .conclusion == "failure") and .event == "push" and .head_repository.full_name == env.REPO_FULL_NAME and .head_branch == env.DEFAULT_BRANCH) | .id' \
                 --paginate 2>/dev/null | head -5 || echo "")
             fi
           fi
@@ -405,7 +451,7 @@ jobs:
             echo ""
             echo "🔍 Checking run $run_id for coverage history artifacts..."
 
-            ARTIFACTS=$(gh api repos/${{ github.repository }}/actions/runs/$run_id/artifacts --paginate \
+            ARTIFACTS=$(gh api "repos/$REPO_FULL_NAME/actions/runs/$run_id/artifacts" --paginate \
               --jq '.artifacts[] | select(.name | startswith("coverage-history-")) | .archive_download_url' \
               2>/dev/null || echo "")
 
@@ -445,7 +491,12 @@ jobs:
                   done
 
                   if [[ "$DOWNLOAD_SUCCESS" == "true" ]]; then
-                    if unzip -q "history-$run_id.zip" 2>/dev/null; then
+                    # Zip-slip guard: reject archives containing absolute paths or parent
+                    # traversal (../) before extracting; treat all contents as data only.
+                    if unzip -Z1 "history-$run_id.zip" 2>/dev/null | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+                      echo "    ⚠️ Unsafe archive paths detected (absolute or '..'); skipping extraction"
+                      rm -f "history-$run_id.zip"
+                    elif unzip -q "history-$run_id.zip" 2>/dev/null; then
                       rm -f "history-$run_id.zip"
                       echo "    ✅ Extracted history from run $run_id"
 
@@ -593,7 +644,7 @@ jobs:
           continue-on-error: ${{ env.ARTIFACT_DOWNLOAD_CONTINUE_ON_ERROR }}
       - name: 📊 Process coverage data
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.github-token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           GITHUB_PR_NUMBER: ${{ inputs.pr-number || github.event.pull_request.number }}
@@ -656,7 +707,7 @@ jobs:
 
           # Create clean output directory with branch-specific structure
           OUTPUT_DIR="$REPO_ROOT/pages-deploy"
-          BRANCH_NAME="${{ inputs.branch-name }}"
+          # BRANCH_NAME is provided via job-level env: (validated at caller)
           BRANCH_OUTPUT_DIR="$OUTPUT_DIR/coverage/branch/$BRANCH_NAME"
 
           echo ""
@@ -976,7 +1027,7 @@ jobs:
           # Record coverage in history
           if ! "$GO_COVERAGE_BINARY" history \
             --add "$COVERAGE_FILE" \
-            --branch "${{ inputs.branch-name }}" \
+            --branch "$BRANCH_NAME" \
             --commit "${{ inputs.commit-sha }}" \
             --format text; then
             echo "⚠️ Failed to record history"
@@ -1069,8 +1120,11 @@ jobs:
               echo "📋 Searching for recent artifacts with base coverage..."
 
               # Get recent successful runs on base branch
-              RECENT_RUNS=$(gh api repos/${{ github.repository }}/actions/runs \
-                --jq ".workflow_runs[] | select(.status == \"completed\" and .conclusion == \"success\" and .head_branch == \"$BASE_BRANCH\") | .id" \
+              # Provenance filter: only compare against THIS repo's own push runs on the
+              # base branch. Excludes fork PR runs (.event != "push") and fork-owned runs
+              # (head_repository mismatch). Values read via gojq env.* — never string-spliced.
+              RECENT_RUNS=$(gh api "repos/$REPO_FULL_NAME/actions/runs" \
+                --jq '.workflow_runs[] | select(.status == "completed" and .conclusion == "success" and .event == "push" and .head_repository.full_name == env.REPO_FULL_NAME and .head_branch == env.GITHUB_BASE_REF) | .id' \
                 --paginate 2>/dev/null | head -3 || echo "")
 
               if [[ -n "$RECENT_RUNS" ]]; then
@@ -1078,7 +1132,7 @@ jobs:
                   echo "🔍 Checking run $run_id for coverage artifacts..."
 
                   # Look for coverage-data artifact
-                  COVERAGE_ARTIFACTS=$(gh api repos/${{ github.repository }}/actions/runs/$run_id/artifacts --paginate \
+                  COVERAGE_ARTIFACTS=$(gh api "repos/$REPO_FULL_NAME/actions/runs/$run_id/artifacts" --paginate \
                     --jq '.artifacts[] | select(.name == "coverage-data") | .archive_download_url' \
                     2>/dev/null || echo "")
 
@@ -1100,8 +1154,12 @@ jobs:
                       if [[ -s "base-coverage-artifact.zip" ]]; then
                         echo "✅ Downloaded base coverage artifact ($(wc -c < base-coverage-artifact.zip) bytes)"
 
-                        # Extract and find coverage file
-                        if unzip -q "base-coverage-artifact.zip" 2>/dev/null; then
+                        # Extract and find coverage file.
+                        # Zip-slip guard: reject archives containing absolute paths or parent
+                        # traversal (../) before extracting; treat all contents as data only.
+                        if unzip -Z1 "base-coverage-artifact.zip" 2>/dev/null | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+                          echo "⚠️ Unsafe archive paths detected (absolute or '..'); skipping extraction"
+                        elif unzip -q "base-coverage-artifact.zip" 2>/dev/null; then
                           # Look for coverage files with common extensions
                           BASE_PROFILE=$(find . -name "*.out" -o -name "*.txt" -o -name "coverage.*" | grep -E '\.(out|txt)$' | head -1)
                           if [[ -n "$BASE_PROFILE" ]] && [[ -f "$BASE_PROFILE" ]]; then
@@ -1169,7 +1227,7 @@ jobs:
 
 
           # Get URLs for the comment - use branch-specific URLs for PRs
-          BRANCH_NAME="${{ inputs.branch-name }}"
+          # BRANCH_NAME is provided via job-level env: (validated at caller)
           BADGE_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/coverage/branch/$BRANCH_NAME/coverage.svg"
           REPORT_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/coverage/branch/$BRANCH_NAME/"
 
@@ -1576,7 +1634,7 @@ jobs:
 
           REPO_ROOT="$(pwd)"
           DEPLOY_DIR="$REPO_ROOT/pages-deploy"
-          BRANCH_NAME="${{ inputs.branch-name }}"
+          # BRANCH_NAME is provided via job-level env: (validated at caller)
           TEMP_PAGES_DIR="/tmp/gh-pages-deploy-$$"
 
           # Determine if we're in PR context
@@ -2058,7 +2116,7 @@ jobs:
           echo "🔍 Testing deployed URLs..."
 
           BASE_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
-          BRANCH_NAME="${{ inputs.branch-name }}"
+          # BRANCH_NAME is provided via job-level env: (validated at caller)
 
           # First, check if this is likely a first deployment
           echo "🔍 Checking deployment status..."
@@ -2428,6 +2486,10 @@ jobs:
     permissions:
       contents: read
       actions: read # Required: Download artifacts from workflow runs
+    env:
+      # See process-coverage: branch-name is validated at the caller; env-route as
+      # defense-in-depth so it never reaches the shell via ${{ }} interpolation.
+      BRANCH_NAME: ${{ inputs.branch-name }}
     steps:
       # --------------------------------------------------------------------
       # Setup and environment
@@ -2436,8 +2498,23 @@ jobs:
         env:
           ENV_JSON: ${{ inputs.env-json }}
         run: |
-          echo "$ENV_JSON" | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' | while IFS='=' read -r key value; do
-            echo "$key=$value" >> $GITHUB_ENV
+          # Harden $GITHUB_ENV writes (defense-in-depth): base64 the value so newlines and
+          # special chars can't corrupt the read loop; accept only valid env-var names and
+          # reject values with an embedded newline (which could inject arbitrary extra vars).
+          # base64's decode flag differs by platform (GNU: -d, BSD/macOS: -D) — detect it.
+          if printf '' | base64 -d >/dev/null 2>&1; then B64D=-d; else B64D=-D; fi
+          echo "$ENV_JSON" | jq -r 'to_entries[] | .key, (.value | tostring | @base64)' | while IFS= read -r key; do
+            IFS= read -r value_b64
+            if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+              echo "⚠️ Skipping invalid env var name: $key" >&2
+              continue
+            fi
+            value=$(printf '%s' "$value_b64" | base64 "$B64D")
+            if [[ "$value" == *$'\n'* ]]; then
+              echo "⚠️ Skipping $key: value contains a newline" >&2
+              continue
+            fi
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
           done
 
       - name: 📥 Checkout code
@@ -2585,7 +2662,7 @@ jobs:
             "pages_deployed": ${PAGES_DEPLOYED},
             "coverage_file": "coverage.txt",
             "provider": "codecov",
-            "branch": "${{ inputs.branch-name }}",
+            "branch": "${BRANCH_NAME}",
             "commit": "${{ inputs.commit-sha }}",
             "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "workflow": "fortress-coverage",

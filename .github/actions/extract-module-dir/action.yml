@@ -45,8 +45,10 @@ runs:
     - name: 🔧 Extract Go module directory
       id: extract
       shell: bash
+      env:
+        # Route the input through env: (never string-spliced into the shell)
+        GO_SUM_FILE: ${{ inputs.go-sum-file }}
       run: |
-        GO_SUM_FILE="${{ inputs.go-sum-file }}"
         GO_MODULE_DIR=$(dirname "$GO_SUM_FILE")
 
         # Handle root directory case (dirname returns ".")

@@ -167,8 +167,14 @@ jobs:
       - name: 🔍 Check conditions and enable auto-merge
         id: process
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          # actions/github-script only wires the token into the injected `github`
+          # Octokit client — it never sets process.env.GITHUB_TOKEN. The script
+          # below shells out to `gh pr merge` via execSync and reads
+          # process.env.GITHUB_TOKEN directly, so it must be set explicitly here.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          github-token: ${{ secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const { owner, repo } = context.repo;
             const prNumber = context.payload.pull_request.number;
@@ -200,34 +206,30 @@ jobs:
             // Check if we should skip fork PRs
             // ————————————————————————————————————————————————————————————————
 
-            // Handle edge case: fork repository deleted/inaccessible (pr.head.repo is null)
+            // Handle edge case: fork repository deleted/inaccessible (pr.head.repo is null).
+            // Fail CLOSED — provenance cannot be verified, so never auto-merge, independent
+            // of the AUTO_MERGE_SKIP_FORK_PRS toggle.
             if (!pr.head.repo) {
-              console.log('⚠️  PR head repository is null (fork may have been deleted)');
-              if (process.env.SKIP_FORK_PRS === 'true') {
-                console.log('🍴 Skipping PR with deleted fork source (security policy)');
-                core.setOutput('action', 'skip-deleted-fork');
-                return;
-              }
-              // If not skipping forks, log and continue (will be treated as same-repo PR)
-              console.log('⚠️  Continuing with auto-merge processing (null repo treated as same-repo)');
-            } else {
-              // Safe to access pr.head.repo.full_name now
+              console.log('⚠️  PR head repository is null (fork may have been deleted) — refusing to auto-merge');
+              core.setOutput('action', 'skip-deleted-fork');
+              return;
+            }
+
+            // Hard guard: fork PRs are NEVER auto-merged, independent of the
+            // AUTO_MERGE_SKIP_FORK_PRS toggle. Auto-approving/merging fork-authored code is
+            // unsafe, and the GITHUB_TOKEN is read-only on fork PRs anyway.
+            {
               const headRepoFullName = pr.head.repo.full_name;
               const baseRepoFullName = `${owner}/${repo}`;
               const isForkPR = headRepoFullName !== baseRepoFullName;
 
-              if (isForkPR && process.env.SKIP_FORK_PRS === 'true') {
-                console.log('🍴 Skipping fork PR (security policy: fork PRs are not auto-merged)');
+              if (isForkPR) {
+                console.log('🍴 Skipping fork PR (security policy: fork PRs are never auto-merged)');
                 console.log(`   Fork source: ${headRepoFullName}`);
                 console.log(`   Base repository: ${baseRepoFullName}`);
-                console.log('   Security reason: Fork PRs require manual maintainer review before merge');
-
-                // Note: Comments are not posted to fork PRs due to read-only GITHUB_TOKEN permissions
-                // Fork PR welcome/labeling is handled by pull-request-management.yml's fork job
-                if (process.env.COMMENT_ON_FORK_SKIP === 'true') {
-                  console.log('   ℹ️  Comment posting skipped for fork PR (handled by PR mgmt fork job)');
+                if (process.env.SKIP_FORK_PRS !== 'true') {
+                  console.log('   ℹ️  (AUTO_MERGE_SKIP_FORK_PRS is not "true", but fork-skip is hard-enforced for safety)');
                 }
-
                 core.setOutput('action', 'skip-fork');
                 return;
               }
@@ -295,7 +297,11 @@ jobs:
             });
 
             const currentReviews = Object.values(latestReviews);
-            const approvals = currentReviews.filter(r => r.state === 'APPROVED').length;
+            // Only count approvals from users with write-ish access (OWNER/MEMBER/COLLABORATOR).
+            // Prevents a drive-by APPROVED review from an external account from satisfying the
+            // approval threshold. Defense-in-depth on top of branch protection + CODEOWNERS.
+            const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+            const approvals = currentReviews.filter(r => r.state === 'APPROVED' && TRUSTED_ASSOCIATIONS.has(r.author_association)).length;
             const changesRequested = currentReviews.filter(r => r.state === 'CHANGES_REQUESTED').length;
             const requestedReviewers = (pr.requested_reviewers || []).length;
             const minApprovals = parseInt(process.env.MIN_APPROVALS);
@@ -304,30 +310,10 @@ jobs:
             console.log(`✅ Required approvals: ${minApprovals}`);
 
             // ————————————————————————————————————————————————————————————————
-            // Determine if we should enable auto-merge
-            // ————————————————————————————————————————————————————————————————
-            let shouldEnableAutoMerge = approvals >= minApprovals && changesRequested === 0;
-
-            if (process.env.REQUIRE_ALL_REVIEWS === 'true' && requestedReviewers > 0) {
-              shouldEnableAutoMerge = false;
-            }
-
-            if (!shouldEnableAutoMerge) {
-              if (approvals < minApprovals) {
-                console.log(`⏳ Needs ${minApprovals - approvals} more approval(s)`);
-              }
-              if (changesRequested > 0) {
-                console.log('🚫 Has "Changes Requested" reviews');
-              }
-              if (process.env.REQUIRE_ALL_REVIEWS === 'true' && requestedReviewers > 0) {
-                console.log(`⏳ Has ${requestedReviewers} pending reviewer request(s)`);
-              }
-              core.setOutput('action', 'conditions-not-met');
-              return;
-            }
-
-            // ————————————————————————————————————————————————————————————————
-            // Check if this is a disable event
+            // Check if this is a disable event (a CHANGES_REQUESTED review). This MUST run
+            // before the approval-threshold check below — otherwise the "conditions-not-met"
+            // early return makes this block unreachable (dead code) exactly when a
+            // changes-requested review needs to disable an already-armed auto-merge.
             // ————————————————————————————————————————————————————————————————
             if (context.eventName === 'pull_request_review' &&
                 context.payload.review &&
@@ -368,6 +354,29 @@ jobs:
                   // Don't fail workflow, but log the error properly
                 }
               }
+              return;
+            }
+
+            // ————————————————————————————————————————————————————————————————
+            // Determine if we should enable auto-merge
+            // ————————————————————————————————————————————————————————————————
+            let shouldEnableAutoMerge = approvals >= minApprovals && changesRequested === 0;
+
+            if (process.env.REQUIRE_ALL_REVIEWS === 'true' && requestedReviewers > 0) {
+              shouldEnableAutoMerge = false;
+            }
+
+            if (!shouldEnableAutoMerge) {
+              if (approvals < minApprovals) {
+                console.log(`⏳ Needs ${minApprovals - approvals} more approval(s)`);
+              }
+              if (changesRequested > 0) {
+                console.log('🚫 Has "Changes Requested" reviews');
+              }
+              if (process.env.REQUIRE_ALL_REVIEWS === 'true' && requestedReviewers > 0) {
+                console.log(`⏳ Has ${requestedReviewers} pending reviewer request(s)`);
+              }
+              core.setOutput('action', 'conditions-not-met');
               return;
             }
 

@@ -76,11 +76,15 @@ runs:
     - name: 🗄️ Configure Redis Settings
       id: redis-config
       shell: bash
+      env:
+        # Route env-json through env: (matches parse-env). A single-quote-wrapped ${{ }}
+        # in the run: body can be broken out of by any value containing a single quote,
+        # so keep it as data the shell never parses.
+        ENV_JSON: ${{ inputs.env-json }}
       run: |
         echo "🗄️ Configuring Redis service settings..."
 
-        # Parse environment JSON for Redis settings
-        ENV_JSON='${{ inputs.env-json }}'
+        # Redis settings are parsed from ENV_JSON (provided via env:)
 
         # Validate JSON format
         if ! echo "$ENV_JSON" | jq empty 2>/dev/null; then

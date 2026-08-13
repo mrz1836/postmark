@@ -111,9 +111,6 @@ on:
       CODECOV_TOKEN:
         description: "Codecov token for uploading coverage (required when coverage-provider is codecov)"
         required: false
-      GH_PAT_TOKEN:
-        description: "Personal access token for enhanced GitHub API access (optional, falls back to github-token)"
-        required: false
 
 # Security: Restrict default permissions (jobs must explicitly request what they need)
 permissions: {}
@@ -216,10 +213,14 @@ jobs:
     needs: [execute-test-matrix, validate-test-results]
     if: inputs.go-tests-enabled == 'true' && inputs.code-coverage-enabled == 'true' && !startsWith(github.ref, 'refs/tags/')
     permissions:
+      # Mirror of fortress-coverage.yml's process-coverage job perms. gh-pages is deployed
+      # via a plain `git push` (contents: write) — no actions/deploy-pages or OIDC is used,
+      # so pages:write and id-token:write are intentionally NOT granted here (removing them
+      # from the caller ensures the token minted for the reusable workflow never carries
+      # those scopes).
       contents: write # Write repository content and push to gh-pages branch for coverage processing
-      pull-requests: write # Required: Coverage workflow needs to create PR comments
-      pages: write # Required: Coverage workflow needs to deploy to GitHub Pages
-      id-token: write # Required: Coverage workflow needs GitHub Pages authentication
+      pull-requests: write # Required: go-coverage creates the PR coverage comment (PR issue-comments require pull-requests: write) and reads PR metadata
+      issues: write # Required: go-coverage posts/updates PR comments via the issues comments API
       statuses: write # Required: Coverage workflow needs to create commit status checks
       actions: read # Required: Coverage workflow needs to access artifacts from workflow runs
     uses: ./.github/workflows/fortress-coverage.yml
@@ -234,5 +235,5 @@ jobs:
       go-sum-file: ${{ inputs.go-sum-file }}
       coverage-provider: ${{ inputs.coverage-provider }}
     secrets:
-      github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+      github-token: ${{ secrets.github-token }}
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

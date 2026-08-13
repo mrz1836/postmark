@@ -172,14 +172,23 @@ jobs:
       # Log dependency information
       # --------------------------------------------------------------------
       - name: 📋 Log dependency details
+        env:
+          # Metadata via env: (never string-spliced into the shell)
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DEPENDENCY: ${{ steps.metadata.outputs.dependency-names }}
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          DEP_TYPE: ${{ steps.metadata.outputs.dependency-type }}
+          PKG_ECOSYSTEM: ${{ steps.metadata.outputs.package-ecosystem }}
+          PREV_VERSION: ${{ steps.metadata.outputs.previous-version }}
+          NEW_VERSION: ${{ steps.metadata.outputs.new-version }}
         run: |
-          echo "🔍 Analyzing Dependabot PR #${{ github.event.pull_request.number }}..."
+          echo "🔍 Analyzing Dependabot PR #${PR_NUMBER}..."
           echo "════════════════════════════════════════════════════════════════"
-          echo "📦 Dependency: ${{ steps.metadata.outputs.dependency-names }}"
-          echo "🔄 Update type: ${{ steps.metadata.outputs.update-type }}"
-          echo "📁 Dependency type: ${{ steps.metadata.outputs.dependency-type }}"
-          echo "🌐 Package ecosystem: ${{ steps.metadata.outputs.package-ecosystem }}"
-          echo "⬆️ Version: ${{ steps.metadata.outputs.previous-version }} → ${{ steps.metadata.outputs.new-version }}"
+          echo "📦 Dependency: $DEPENDENCY"
+          echo "🔄 Update type: $UPDATE_TYPE"
+          echo "📁 Dependency type: $DEP_TYPE"
+          echo "🌐 Package ecosystem: $PKG_ECOSYSTEM"
+          echo "⬆️ Version: $PREV_VERSION → $NEW_VERSION"
           echo "════════════════════════════════════════════════════════════════"
 
       # --------------------------------------------------------------------
@@ -190,7 +199,14 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-          PR_BODY: ${{ github.event.pull_request.body }}
+          # Structured Dependabot metadata — routed via env: (never string-spliced into
+          # shell or the GraphQL query). PR_BODY is intentionally NOT read: it embeds the
+          # upstream-controlled changelog, so free-text matching there let non-security
+          # updates self-escalate onto the auto-merge-security path.
+          DEPENDENCY: ${{ steps.metadata.outputs.dependency-names }}
+          PKG_ECOSYSTEM: ${{ steps.metadata.outputs.package-ecosystem }}
+          PREV_VERSION: ${{ steps.metadata.outputs.previous-version }}
+          NEW_VERSION: ${{ steps.metadata.outputs.new-version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "════════════════════════════════════════════════════════════════"
@@ -221,95 +237,101 @@ jobs:
             echo "  ❌ NO MATCH: No security indicators in labels/title"
           fi
 
-          # Check 2: PR body for security/vulnerability indicators
-          echo ""
-          echo "📄 Check 2: Scanning PR body for security indicators..."
+          # Check 2 (removed): the PR body embeds the upstream-controlled changelog, so
+          # free-text matching there ("security"/"CVE-"/"GHSA-") let a non-security update
+          # self-escalate onto the auto-merge-security path. Security is now derived only
+          # from PR labels/title (above) and the structured advisory match below.
 
-          if [[ "${PR_BODY,,}" == *"security"* ]]; then
-            echo "  ✅ MATCH: 'security' found in PR body"
-            echo "is_security=true" >> $GITHUB_OUTPUT
-            echo "════════════════════════════════════════════════════════════════"
-            echo "🎯 RESULT: Security update detected (via PR body - 'security')"
-            echo "════════════════════════════════════════════════════════════════"
-            exit 0
-          elif [[ "${PR_BODY,,}" == *"vulnerability"* ]]; then
-            echo "  ✅ MATCH: 'vulnerability' found in PR body"
-            echo "is_security=true" >> $GITHUB_OUTPUT
-            echo "════════════════════════════════════════════════════════════════"
-            echo "🎯 RESULT: Security update detected (via PR body - 'vulnerability')"
-            echo "════════════════════════════════════════════════════════════════"
-            exit 0
-          elif [[ "$PR_BODY" == *"CVE-"* ]]; then
-            echo "  ✅ MATCH: CVE identifier found in PR body"
-            echo "is_security=true" >> $GITHUB_OUTPUT
-            echo "════════════════════════════════════════════════════════════════"
-            echo "🎯 RESULT: Security update detected (via PR body - CVE)"
-            echo "════════════════════════════════════════════════════════════════"
-            exit 0
-          elif [[ "$PR_BODY" == *"GHSA-"* ]]; then
-            echo "  ✅ MATCH: GitHub Security Advisory found in PR body"
-            echo "is_security=true" >> $GITHUB_OUTPUT
-            echo "════════════════════════════════════════════════════════════════"
-            echo "🎯 RESULT: Security update detected (via PR body - GHSA)"
-            echo "════════════════════════════════════════════════════════════════"
-            exit 0
+          # Check 3: Structured advisory match. Treat this as a security update ONLY when a
+          # published advisory for the CORRECT ecosystem has a first-patched version that
+          # THIS bump actually crosses (prev < patched <= new). Replaces the old
+          # "any historical GO advisory = security" heuristic that let unrelated/long-fixed
+          # advisories flip a routine update onto the auto-merge-security path.
+          echo ""
+          echo "🌐 Check 3: Structured GitHub Security Advisory match..."
+          echo "  Package: $DEPENDENCY ($PKG_ECOSYSTEM)  bump: $PREV_VERSION → $NEW_VERSION"
+
+          # Map Dependabot's package-ecosystem to the GraphQL SecurityAdvisoryEcosystem enum.
+          case "$PKG_ECOSYSTEM" in
+            go_modules|gomod) GQL_ECOSYSTEM="GO" ;;
+            npm_and_yarn)     GQL_ECOSYSTEM="NPM" ;;
+            pip)              GQL_ECOSYSTEM="PIP" ;;
+            composer)         GQL_ECOSYSTEM="COMPOSER" ;;
+            cargo)            GQL_ECOSYSTEM="RUST" ;;
+            nuget)            GQL_ECOSYSTEM="NUGET" ;;
+            bundler)          GQL_ECOSYSTEM="RUBYGEMS" ;;
+            maven|gradle)     GQL_ECOSYSTEM="MAVEN" ;;
+            pub)              GQL_ECOSYSTEM="PUB" ;;
+            swift)            GQL_ECOSYSTEM="SWIFT" ;;
+            github_actions)   GQL_ECOSYSTEM="ACTIONS" ;;
+            *)                GQL_ECOSYSTEM="" ;;
+          esac
+
+          IS_SECURITY=false
+          if [[ -z "$GQL_ECOSYSTEM" ]]; then
+            echo "  ⏭️ No advisory ecosystem mapping for '$PKG_ECOSYSTEM' — cannot confirm; treating as non-security"
+          elif [[ -z "$DEPENDENCY" || "$DEPENDENCY" == "null" ]]; then
+            echo "  ⏭️ No dependency name — treating as non-security"
+          elif [[ -z "$PREV_VERSION" || -z "$NEW_VERSION" ]]; then
+            echo "  ⏭️ Missing previous/new version — treating as non-security"
           else
-            echo "  ❌ NO MATCH: No security indicators in PR body"
-          fi
-
-          # Check 3: Query GitHub Security Advisories for Go ecosystem
-          echo ""
-          echo "🌐 Check 3: Querying GitHub Security Advisories API..."
-          DEPENDENCY="${{ steps.metadata.outputs.dependency-names }}"
-          echo "  Package: $DEPENDENCY"
-          echo "  Ecosystem: GO"
-
-          # Query for vulnerabilities affecting this package
-          echo "  Executing GraphQL query..."
-          ADVISORIES=$(gh api graphql -f query='
-            query($ecosystem: SecurityAdvisoryEcosystem!, $package: String!) {
-              securityVulnerabilities(first: 10, ecosystem: $ecosystem, package: $package) {
-                nodes {
-                  advisory {
-                    severity
-                    publishedAt
-                    summary
-                  }
-                  vulnerableVersionRange
+            # $GQL_ECOSYSTEM (from the fixed map) and $DEPENDENCY are passed as GraphQL
+            # variables (parameterized) — never concatenated into the query text.
+            PATCHED=$(gh api graphql -f query='
+              query($ecosystem: SecurityAdvisoryEcosystem!, $package: String!) {
+                securityVulnerabilities(first: 100, ecosystem: $ecosystem, package: $package) {
+                  nodes { firstPatchedVersion { identifier } }
                 }
-              }
-            }' -f ecosystem=GO -f package="$DEPENDENCY" --jq '.data.securityVulnerabilities.nodes | length' 2>/dev/null || echo "0")
+              }' -f ecosystem="$GQL_ECOSYSTEM" -f package="$DEPENDENCY" \
+              --jq '.data.securityVulnerabilities.nodes[] | select(.firstPatchedVersion != null) | .firstPatchedVersion.identifier' 2>/dev/null || echo "")
 
-          echo "  Advisories found: $ADVISORIES"
+            # version_lt A B → true when A < B by version sort (a leading "v" is ignored).
+            version_lt() {
+              local a="${1#v}" b="${2#v}"
+              [[ "$a" == "$b" ]] && return 1
+              [[ "$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n1)" == "$a" ]]
+            }
 
-          if [[ "$ADVISORIES" -gt 0 ]]; then
-            echo "  ✅ MATCH: $ADVISORIES vulnerabilities found in GitHub Advisories"
-            echo "is_security=true" >> $GITHUB_OUTPUT
-            echo "════════════════════════════════════════════════════════════════"
-            echo "🎯 RESULT: Security update detected (via GitHub Advisories)"
-            echo "════════════════════════════════════════════════════════════════"
-            exit 0
-          else
-            echo "  ❌ NO MATCH: No vulnerabilities found in GitHub Advisories"
-            echo "is_security=false" >> $GITHUB_OUTPUT
-            echo "════════════════════════════════════════════════════════════════"
-            echo "🎯 RESULT: Not a security update"
-            echo "════════════════════════════════════════════════════════════════"
+            while IFS= read -r patched; do
+              [[ -z "$patched" ]] && continue
+              # Vulnerable before the fix AND fixed at/after it → this bump IS a security fix.
+              if version_lt "$PREV_VERSION" "$patched" && ! version_lt "$NEW_VERSION" "$patched"; then
+                echo "  ✅ Advisory match: $PREV_VERSION < $patched <= $NEW_VERSION"
+                IS_SECURITY=true
+                break
+              fi
+            done <<< "$PATCHED"
           fi
+
+          echo "════════════════════════════════════════════════════════════════"
+          if [[ "$IS_SECURITY" == "true" ]]; then
+            echo "is_security=true" >> "$GITHUB_OUTPUT"
+            echo "🎯 RESULT: Security update detected (advisory patched-version match)"
+          else
+            echo "  ❌ NO MATCH: bump does not cross a known advisory's patched version"
+            echo "is_security=false" >> "$GITHUB_OUTPUT"
+            echo "🎯 RESULT: Not a security update"
+          fi
+          echo "════════════════════════════════════════════════════════════════"
 
       # --------------------------------------------------------------------
       # Determine action based on configuration and update type
       # --------------------------------------------------------------------
       - name: 🎯 Determine action
         id: determine-action
+        env:
+          # Metadata / prior-step outputs via env: (never string-spliced into the shell)
+          UPDATE_TYPE_IN: ${{ steps.metadata.outputs.update-type }}
+          DEP_TYPE_IN: ${{ steps.metadata.outputs.dependency-type }}
+          IS_SECURITY_IN: ${{ steps.check-security.outputs.is_security }}
         run: |
           echo "════════════════════════════════════════════════════════════════"
           echo "🎯 ACTION DETERMINATION LOGIC"
           echo "════════════════════════════════════════════════════════════════"
 
-          UPDATE_TYPE="${{ steps.metadata.outputs.update-type }}"
-          DEP_TYPE="${{ steps.metadata.outputs.dependency-type }}"
-          IS_SECURITY="${{ steps.check-security.outputs.is_security }}"
+          UPDATE_TYPE="$UPDATE_TYPE_IN"
+          DEP_TYPE="$DEP_TYPE_IN"
+          IS_SECURITY="$IS_SECURITY_IN"
           ACTION="none"
 
           echo "📊 Input Variables:"
@@ -362,13 +384,21 @@ jobs:
             echo "🔍 Checking Rule 2: Patch updates (direct dependencies)..."
             if [[ "$UPDATE_TYPE" == "version-update:semver-patch" ]]; then
               echo "  ✅ UPDATE_TYPE == patch"
-              if [[ "$DEP_TYPE" != "indirect" ]]; then
-                echo "  ✅ DEP_TYPE != indirect (is direct)"
+              if [[ "$DEP_TYPE" == "direct:production" ]]; then
+                # SECURITY: never auto-merge NON-security production patches. A malicious or
+                # broken patch release of a production dependency ships straight to users, so
+                # require a human. Genuine security patches are handled earlier by Rule 1.
+                echo "  🔒 DEP_TYPE == direct:production — excluded from patch auto-merge"
+                ACTION="manual-review"
+                echo "  🎯 MATCH! Action: $ACTION"
+                echo "  📝 Reason: Production patch requires manual review (supply-chain safety)"
+              elif [[ "$DEP_TYPE" != "indirect" ]]; then
+                echo "  ✅ DEP_TYPE is direct:development"
                 if [[ "${{ env.AUTO_MERGE_PATCH }}" == "true" ]]; then
                   echo "  ✅ AUTO_MERGE_PATCH == true"
                   ACTION="auto-merge-patch"
                   echo "  🎯 MATCH! Action: $ACTION"
-                  echo "  📝 Reason: Patch update for direct dependency with auto-merge enabled"
+                  echo "  📝 Reason: Patch update for direct dev dependency with auto-merge enabled"
                 else
                   echo "  ❌ AUTO_MERGE_PATCH == false"
                   ACTION="manual-review"
@@ -571,16 +601,27 @@ jobs:
 
       - name: ⚠️ Alert on major version bump
         if: steps.determine-action.outputs.action == 'alert-major' || steps.determine-action.outputs.action == 'alert-security-major'
+        env:
+          # Route metadata through env: and read it via process.env in the script so
+          # PR-derived values can never break out of the JS string literals.
+          DEPENDENCY: ${{ steps.metadata.outputs.dependency-names }}
+          NEW_VERSION: ${{ steps.metadata.outputs.new-version }}
+          PREV_VERSION: ${{ steps.metadata.outputs.previous-version }}
+          DEP_TYPE: ${{ steps.metadata.outputs.dependency-type }}
+          PKG_ECOSYSTEM: ${{ steps.metadata.outputs.package-ecosystem }}
+          IS_SECURITY: ${{ steps.check-security.outputs.is_security }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const issueNumber = context.issue.number;
-            const dependency = '${{ steps.metadata.outputs.dependency-names }}';
-            const newVersion = '${{ steps.metadata.outputs.new-version }}';
-            const previousVersion = '${{ steps.metadata.outputs.previous-version }}';
-            const maintainer = '${{ env.MAINTAINER }}';
-            const isSecurity = '${{ steps.check-security.outputs.is_security }}' === 'true';
+            const dependency = process.env.DEPENDENCY;
+            const newVersion = process.env.NEW_VERSION;
+            const previousVersion = process.env.PREV_VERSION;
+            const maintainer = process.env.MAINTAINER;
+            const depType = process.env.DEP_TYPE;
+            const packageEcosystem = process.env.PKG_ECOSYSTEM;
+            const isSecurity = process.env.IS_SECURITY === 'true';
 
             const emoji = isSecurity ? '🚨' : '⚠️';
             const prefix = isSecurity ? '**SECURITY** - ' : '';
@@ -589,8 +630,8 @@ jobs:
 
             **Dependency:** \`${dependency}\`
             **Version:** \`${previousVersion}\` → \`${newVersion}\`
-            **Type:** ${{ steps.metadata.outputs.dependency-type }}
-            **Ecosystem:** ${{ steps.metadata.outputs.package-ecosystem }}
+            **Type:** ${depType}
+            **Ecosystem:** ${packageEcosystem}
             ${isSecurity ? '\n🔒 **This is a security update with potential breaking changes**' : ''}
 
             This requires manual review for potential breaking changes.
@@ -657,22 +698,30 @@ jobs:
 
       - name: 🔍 Alert on minor production dependency
         if: steps.determine-action.outputs.action == 'alert-minor-prod'
+        env:
+          # Route metadata through env: and read it via process.env in the script so
+          # PR-derived values can never break out of the JS string literals.
+          DEPENDENCY: ${{ steps.metadata.outputs.dependency-names }}
+          NEW_VERSION: ${{ steps.metadata.outputs.new-version }}
+          PREV_VERSION: ${{ steps.metadata.outputs.previous-version }}
+          PKG_ECOSYSTEM: ${{ steps.metadata.outputs.package-ecosystem }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const issueNumber = context.issue.number;
-            const dependency = '${{ steps.metadata.outputs.dependency-names }}';
-            const newVersion = '${{ steps.metadata.outputs.new-version }}';
-            const previousVersion = '${{ steps.metadata.outputs.previous-version }}';
-            const maintainer = '${{ env.MAINTAINER }}';
+            const dependency = process.env.DEPENDENCY;
+            const newVersion = process.env.NEW_VERSION;
+            const previousVersion = process.env.PREV_VERSION;
+            const maintainer = process.env.MAINTAINER;
+            const packageEcosystem = process.env.PKG_ECOSYSTEM;
 
             const commentBody = `🔍 @${maintainer} – **Minor production dependency update**
 
             **Dependency:** \`${dependency}\`
             **Version:** \`${previousVersion}\` → \`${newVersion}\`
             **Type:** Production dependency
-            **Ecosystem:** ${{ steps.metadata.outputs.package-ecosystem }}
+            **Ecosystem:** ${packageEcosystem}
 
             Please review for potential feature changes or compatibility issues.
 
@@ -708,6 +757,11 @@ jobs:
       # Auto-merge approved updates
       # --------------------------------------------------------------------
       - name: 📊 Log auto-merge decision
+        env:
+          # Metadata via env: (never string-spliced into the shell)
+          DEPENDENCY: ${{ steps.metadata.outputs.dependency-names }}
+          PREV_VERSION: ${{ steps.metadata.outputs.previous-version }}
+          NEW_VERSION: ${{ steps.metadata.outputs.new-version }}
         run: |
           ACTION="${{ steps.determine-action.outputs.action }}"
           if [[ "$ACTION" == auto-merge-* ]]; then
@@ -715,8 +769,8 @@ jobs:
             echo "🚀 AUTO-MERGE - WILL EXECUTE"
             echo "════════════════════════════════════════════════════════════════"
             echo "Action: $ACTION"
-            echo "Dependency: ${{ steps.metadata.outputs.dependency-names }}"
-            echo "Version: ${{ steps.metadata.outputs.previous-version }} → ${{ steps.metadata.outputs.new-version }}"
+            echo "Dependency: $DEPENDENCY"
+            echo "Version: $PREV_VERSION → $NEW_VERSION"
             echo "Next steps:"
             echo "  1. Approve the PR with appropriate message"
             echo "  2. Enable auto-merge (squash)"
@@ -817,18 +871,29 @@ jobs:
           startsWith(steps.determine-action.outputs.action, 'auto-merge-')
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
+          # SECURITY (least privilege): GH_PAT_TOKEN should be a FINE-GRAINED, single-repo
+          # PAT scoped to ONLY "Pull requests: write" + "Contents: write" (nothing else).
+          # It is used to approve + arm auto-merge; because approving as the CODEOWNER can
+          # satisfy required-review/CODEOWNERS branch protection, its scope must be minimal.
+          # Do NOT grant it admin, workflow, or org scopes. Configure at repo → Settings →
+          # Secrets → Actions → GH_PAT_TOKEN.
           GH_TOKEN: ${{ secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
           TOKEN_TYPE: ${{ secrets.GH_PAT_TOKEN && 'PAT' || 'GITHUB_TOKEN' }}
           ALREADY_APPROVED: ${{ steps.merge-state.outputs.already_approved }}
           AUTO_MERGE_ENABLED: ${{ steps.merge-state.outputs.auto_merge_enabled }}
+          # Metadata via env: — this step holds GH_PAT_TOKEN, so PR-derived values
+          # (dependency name / versions) must never reach the shell parser via ${{ }}.
+          DEPENDENCY: ${{ steps.metadata.outputs.dependency-names }}
+          PREV_VERSION: ${{ steps.metadata.outputs.previous-version }}
+          NEW_VERSION: ${{ steps.metadata.outputs.new-version }}
         run: |
           echo "════════════════════════════════════════════════════════════════"
           echo "🚀 EXECUTING AUTO-MERGE"
           echo "════════════════════════════════════════════════════════════════"
 
           ACTION="${{ steps.determine-action.outputs.action }}"
-          DEPENDENCY="${{ steps.metadata.outputs.dependency-names }}"
-          VERSION_CHANGE="${{ steps.metadata.outputs.previous-version }} → ${{ steps.metadata.outputs.new-version }}"
+          # DEPENDENCY / PREV_VERSION / NEW_VERSION come from env: (never string-spliced)
+          VERSION_CHANGE="$PREV_VERSION → $NEW_VERSION"
 
           echo "Processing: $ACTION"
           echo "Dependency: $DEPENDENCY"
@@ -966,21 +1031,28 @@ jobs:
         if: |
           startsWith(steps.determine-action.outputs.action, 'auto-merge-') ||
           startsWith(steps.determine-action.outputs.action, 'alert-')
+        env:
+          # Route metadata / prior-step outputs through env: and read via process.env so
+          # PR-derived values never break out of the JS string literals below.
+          ACTION: ${{ steps.determine-action.outputs.action }}
+          DEP_TYPE: ${{ steps.metadata.outputs.dependency-type }}
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          IS_SECURITY: ${{ steps.check-security.outputs.is_security }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const action = '${{ steps.determine-action.outputs.action }}';
+            const action = process.env.ACTION;
             const labels = [];
 
-            // Add auto-merge labels if applicable
+            // Add auto-merge labels if applicable (AUTO_MERGE_LABELS is a job-level env var)
             if (action.startsWith('auto-merge-')) {
-              const autoMergeLabels = '${{ env.AUTO_MERGE_LABELS }}'.split(',').map(l => l.trim());
+              const autoMergeLabels = (process.env.AUTO_MERGE_LABELS || '').split(',').map(l => l.trim()).filter(Boolean);
               labels.push(...autoMergeLabels);
             }
 
             // Add dependency type label
-            const depType = '${{ steps.metadata.outputs.dependency-type }}';
+            const depType = process.env.DEP_TYPE;
             if (depType === 'direct:development') {
               labels.push('dev-dependency');
             } else if (depType === 'direct:production') {
@@ -990,7 +1062,7 @@ jobs:
             }
 
             // Add update type label
-            const updateType = '${{ steps.metadata.outputs.update-type }}';
+            const updateType = process.env.UPDATE_TYPE;
             if (updateType === 'version-update:semver-patch') {
               labels.push('patch-update');
             } else if (updateType === 'version-update:semver-minor') {
@@ -1000,7 +1072,7 @@ jobs:
             }
 
             // Add security label if applicable
-            if ('${{ steps.check-security.outputs.is_security }}' === 'true') {
+            if (process.env.IS_SECURITY === 'true') {
               labels.push('security');
             }
 

@@ -75,12 +75,20 @@ runs:
     - name: ⬇️ Install mage (cache miss)
       if: steps.mage-cache.outputs.cache-hit != 'true'
       shell: bash
+      env:
+        # Route the version through env: so it can never break out of the go install
+        # command via ${{ }} interpolation (completes the safe pattern; version is config).
+        MAGE_VERSION: ${{ inputs.mage-version }}
       run: |
         echo "⬇️ Cache miss – installing mage via go install..."
-        echo "📋 Installing mage version: ${{ inputs.mage-version }}"
+        echo "📋 Installing mage version: $MAGE_VERSION"
 
-        # Install mage
-        go install "github.com/magefile/mage@${{ inputs.mage-version }}"
+        # Install mage. Version is pinned in config and verified by Go's checksum DB
+        # (sum.golang.org), so SonarCloud S8545 is a known false positive here. Inline
+        # NOSONAR is NOT honored by Sonar's GitHub Actions analyzer — suppress it via
+        # SonarCloud config (Quality Profile, or an Analysis-Scope / properties exclusion
+        # for rule githubactions:S8545 on .github/actions/**).
+        go install "github.com/magefile/mage@${MAGE_VERSION}"
 
         # Cache the binary for future runs
         mkdir -p ~/.cache/mage-bin

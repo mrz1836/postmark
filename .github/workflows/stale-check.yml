@@ -80,22 +80,6 @@ jobs:
         uses: ./.github/actions/load-env
 
       # --------------------------------------------------------------------
-      # Log token configuration
-      # --------------------------------------------------------------------
-      - name: 🔑 Log token configuration
-        env:
-          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
-          GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
-        run: |
-          PREFERRED_TOKEN=$(echo "$ENV_JSON" | jq -r '.PREFERRED_GITHUB_TOKEN')
-
-          if [[ "$PREFERRED_TOKEN" == "GH_PAT_TOKEN" && -n "$GH_PAT_TOKEN" ]]; then
-            echo "✅ Using Personal Access Token (PAT) for stale check operations"
-          else
-            echo "✅ Using default GITHUB_TOKEN for stale check operations"
-          fi
-
-      # --------------------------------------------------------------------
       # Extract environment variables
       # --------------------------------------------------------------------
       - name: 🔧 Extract stale configuration
@@ -155,11 +139,8 @@ jobs:
       # --------------------------------------------------------------------
       - name: 📋 Process stale issues
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
-          GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
         with:
-          github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const staleCutoff = '${{ steps.dates.outputs.stale_cutoff }}';
             const closeCutoff = '${{ steps.dates.outputs.close_cutoff }}';
@@ -167,13 +148,9 @@ jobs:
             const exemptLabels = '${{ steps.config.outputs.exempt-issue-labels }}'.split(',').map(l => l.trim()).filter(l => l);
             const operationsLimit = parseInt('${{ steps.config.outputs.operations-per-run }}');
             const daysBeforeClose = parseInt('${{ steps.config.outputs.days-before-close }}');
-            const envJson = JSON.parse(process.env.ENV_JSON);
-            const preferredToken = envJson.PREFERRED_GITHUB_TOKEN;
-            const isUsingPAT = preferredToken === 'GH_PAT_TOKEN' && process.env.GH_PAT_TOKEN !== '';
 
             console.log('📋 === Processing Issues ===');
             console.log(`🏷️ Exempt labels: ${exemptLabels.join(', ')}`);
-            console.log(`🔑 Token type: ${isUsingPAT ? 'Personal Access Token (PAT)' : 'Default GITHUB_TOKEN'}`);
 
             let operationsCount = 0;
             let processedCount = 0;
@@ -296,7 +273,7 @@ jobs:
         env:
           ENV_JSON: ${{ steps.load-env.outputs.env-json }}
         with:
-          github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const staleCutoff = '${{ steps.dates.outputs.stale_cutoff }}';
             const closeCutoff = '${{ steps.dates.outputs.close_cutoff }}';
@@ -429,7 +406,7 @@ jobs:
       - name: 🏷️ Remove stale labels from updated items
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
-          github-token: ${{ secrets.GH_PAT_TOKEN != '' && secrets.GH_PAT_TOKEN || secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const staleCutoff = new Date('${{ steps.dates.outputs.stale_cutoff }}');
             const staleLabel = '${{ steps.config.outputs.stale-label }}';
@@ -540,19 +517,10 @@ jobs:
       # --------------------------------------------------------------------
       - name: 📊 Generate workflow summary
         if: always()
-        env:
-          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
-          GH_PAT_TOKEN: ${{ secrets.GH_PAT_TOKEN }}
         run: |
           echo "🚀 Generating workflow summary..."
 
-          # Determine which token was used
-          PREFERRED_TOKEN=$(echo "$ENV_JSON" | jq -r '.PREFERRED_GITHUB_TOKEN')
-          if [[ "$PREFERRED_TOKEN" == "GH_PAT_TOKEN" && -n "$GH_PAT_TOKEN" ]]; then
-            TOKEN_TYPE="🔑 Personal Access Token (PAT)"
-          else
-            TOKEN_TYPE="🔑 Default GITHUB_TOKEN"
-          fi
+          TOKEN_TYPE="🔑 Default GITHUB_TOKEN"
 
           {
             echo "# 🧹 Stale Check Workflow Summary"
