@@ -221,6 +221,20 @@ runs:
         # Strip backticks AND control chars (except tab/newline) from artifact-derived text:
         # prevents code-span/fenced-block breakout and control-character (ANSI/NUL) spoofing.
         strip_bt() { printf '%s' "$1" | LC_ALL=C tr -d '\000-\010\013-\037\140\177'; }
+        # esc_html: strip_bt PLUS escape the HTML metacharacters &, <, > (& first, to avoid
+        # double-encoding). Use ONLY for artifact-derived values written into the summary's raw
+        # HTML (<summary>/<code>) or into markdown text where GitHub interprets inline HTML —
+        # otherwise a crafted value (e.g. a subtest name) could close a tag early and spoof the
+        # rendered structure. Do NOT use inside markdown code spans/fences, where entities are
+        # rendered literally (there strip_bt alone already prevents breakout).
+        esc_html() {
+          local s
+          s=$(strip_bt "$1")
+          s=${s//&/&amp;}
+          s=${s//</&lt;}
+          s=${s//>/&gt;}
+          printf '%s' "$s"
+        }
 
         echo "## 🔍 Test Validation Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
@@ -279,7 +293,7 @@ runs:
               ARTIFACT_DIR=$(basename "$(dirname "$jsonl_file")")
             fi
 
-            TEST_LABEL=$(strip_bt "$(parse_test_label "$ARTIFACT_DIR" "$JSONL_NAME")")
+            TEST_LABEL=$(esc_html "$(parse_test_label "$ARTIFACT_DIR" "$JSONL_NAME")")
 
             SUMMARY=$(grep '"type":"summary"' "$jsonl_file" 2>/dev/null | head -1 || echo "")
 
@@ -315,11 +329,14 @@ runs:
                 break 2
               fi
 
-              # Strip backticks from artifact-derived text so it cannot break out of the
-              # markdown code spans / fenced blocks it is written into below.
-              TEST=$(strip_bt "$(echo "$line" | jq -r '.failure.test // "unknown"')")
-              PKG=$(strip_bt "$(echo "$line" | jq -r '.failure.package // "unknown"' | sed 's|.*/||')")
-              FAIL_TYPE=$(strip_bt "$(echo "$line" | jq -r '.failure.type // "test"')")
+              # TEST/PKG/FAIL_TYPE are embedded directly in the raw HTML of the <summary>
+              # line below (<code>$TEST</code> ($PKG) - $FAIL_TYPE), so they are HTML-escaped
+              # to keep a crafted value from closing a tag early and spoofing the structure.
+              # ERROR_MSG/OUTPUT/STACK go inside markdown code spans/fences, where HTML is not
+              # interpreted, so backtick+control stripping (strip_bt) is enough there.
+              TEST=$(esc_html "$(echo "$line" | jq -r '.failure.test // "unknown"')")
+              PKG=$(esc_html "$(echo "$line" | jq -r '.failure.package // "unknown"' | sed 's|.*/||')")
+              FAIL_TYPE=$(esc_html "$(echo "$line" | jq -r '.failure.type // "test"')")
               ERROR_MSG=$(strip_bt "$(echo "$line" | jq -r '.failure.error // ""')")
               OUTPUT=$(strip_bt "$(echo "$line" | jq -r '.failure.output // ""')")
               STACK=$(strip_bt "$(echo "$line" | jq -r '.failure.stack // ""')")
