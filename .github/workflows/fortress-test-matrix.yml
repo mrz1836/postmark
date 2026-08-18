@@ -458,3 +458,26 @@ jobs:
           artifact-path: coverage.txt
           retention-days: "7"
           continue-on-error: "false"
+
+      # --------------------------------------------------------------------
+      # Enforce the real test outcome
+      # --------------------------------------------------------------------
+      # The 🧪 Run tests step uses continue-on-error so coverage/artifact steps
+      # still run on failure; it records the real result in
+      # steps.run-tests.outputs.test-exit-code. THIS gate is what actually fails
+      # the job on a non-zero exit. It is intentionally independent of the
+      # structured ci-results.jsonl parsing (validate-test-results): a package
+      # killed by a signal (e.g. "signal: hangup") or a build/vet failure emits
+      # no per-test FAIL event, so JSONL-based checks miss it while the process
+      # exit code does not. Without this gate a real failure is masked and only
+      # resurfaces downstream as the misleading "coverage file not found".
+      - name: 🚦 Enforce test exit code
+        if: ${{ !cancelled() }}
+        run: |
+          CODE="${{ steps.run-tests.outputs.test-exit-code }}"
+          if [[ "$CODE" != "0" ]]; then
+            echo "::error title=Test Suite Failed (${{ matrix.name }})::go test exited with code '${CODE:-<unset>}' on ${{ matrix.os }} / Go ${{ matrix.go-version }} — see the '🧪 Run tests' step and job summary"
+            echo "❌ Failing job: test process exited '${CODE:-<unset>}' (expected 0)."
+            exit 1
+          fi
+          echo "✅ Test process exited 0"
