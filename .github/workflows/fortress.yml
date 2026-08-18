@@ -146,7 +146,7 @@ jobs:
       contents: read # Read repository content for setup configuration
     uses: ./.github/workflows/fortress-setup-config.yml
     secrets:
-      github-token: ${{ github.event.pull_request.head.repo.fork != true && secrets.GITHUB_TOKEN || '' }}
+      github-token: ${{ github.event.pull_request.head.repo.fork != true && (secrets.GH_PRIVATE_REPO_TOKEN || secrets.GITHUB_TOKEN) || '' }}
   # ----------------------------------------------------------------------------------
   # Warm Go Caches (Secrets optional: only needed when GOPRIVATE is set for private modules)
   # ----------------------------------------------------------------------------------
@@ -167,7 +167,7 @@ jobs:
       redis-cache-force-pull: ${{ needs.setup.outputs.redis-cache-force-pull }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
-      github-token: ${{ github.event.pull_request.head.repo.fork != true && secrets.GITHUB_TOKEN || '' }}
+      github-token: ${{ github.event.pull_request.head.repo.fork != true && (secrets.GH_PRIVATE_REPO_TOKEN || secrets.GITHUB_TOKEN) || '' }}
   # ----------------------------------------------------------------------------------
   # Security Scans (FORK-UNSAFE: Requires secrets - skipped on fork PRs)
   # ----------------------------------------------------------------------------------
@@ -195,7 +195,7 @@ jobs:
       primary-runner: ${{ needs.setup.outputs.primary-runner }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
-      github-token: ${{ github.event.pull_request.head.repo.fork != true && secrets.GITHUB_TOKEN || '' }}
+      github-token: ${{ github.event.pull_request.head.repo.fork != true && (secrets.GH_PRIVATE_REPO_TOKEN || secrets.GITHUB_TOKEN) || '' }}
       gitleaks-license: ${{ secrets.GITLEAKS_LICENSE }}
       guide-token: ${{ secrets.GUIDE_TOKEN }}
       ossi-token: ${{ secrets.OSSI_TOKEN }}
@@ -221,7 +221,7 @@ jobs:
       pre-commit-enabled: ${{ needs.setup.outputs.pre-commit-enabled }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
-      github-token: ${{ github.event.pull_request.head.repo.fork != true && secrets.GITHUB_TOKEN || '' }}
+      github-token: ${{ github.event.pull_request.head.repo.fork != true && (secrets.GH_PRIVATE_REPO_TOKEN || secrets.GITHUB_TOKEN) || '' }}
   # ----------------------------------------------------------------------------------
   # Code Quality Checks (Secrets optional: only needed when GOPRIVATE is set for private modules)
   # ----------------------------------------------------------------------------------
@@ -244,7 +244,7 @@ jobs:
       static-analysis-enabled: ${{ needs.setup.outputs.static-analysis-enabled }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
-      github-token: ${{ github.event.pull_request.head.repo.fork != true && secrets.GITHUB_TOKEN || '' }}
+      github-token: ${{ github.event.pull_request.head.repo.fork != true && (secrets.GH_PRIVATE_REPO_TOKEN || secrets.GITHUB_TOKEN) || '' }}
   # ----------------------------------------------------------------------------------
   # Test Suite (FORK-UNSAFE: Requires CODECOV_TOKEN for coverage - skipped on fork PRs)
   # ----------------------------------------------------------------------------------
@@ -289,7 +289,7 @@ jobs:
       redis-trust-service-health: ${{ needs.setup.outputs.redis-trust-service-health }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
-      github-token: ${{ github.event.pull_request.head.repo.fork != true && secrets.GITHUB_TOKEN || '' }}
+      github-token: ${{ github.event.pull_request.head.repo.fork != true && (secrets.GH_PRIVATE_REPO_TOKEN || secrets.GITHUB_TOKEN) || '' }}
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
   # ----------------------------------------------------------------------------------
   # Benchmark Suite (Secrets optional: only needed when GOPRIVATE is set for private modules)
@@ -322,7 +322,7 @@ jobs:
       redis-trust-service-health: ${{ needs.setup.outputs.redis-trust-service-health }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
-      github-token: ${{ github.event.pull_request.head.repo.fork != true && secrets.GITHUB_TOKEN || '' }}
+      github-token: ${{ github.event.pull_request.head.repo.fork != true && (secrets.GH_PRIVATE_REPO_TOKEN || secrets.GITHUB_TOKEN) || '' }}
   # ----------------------------------------------------------------------------------
   # Final Status Check
   # ----------------------------------------------------------------------------------
@@ -523,7 +523,7 @@ jobs:
       golangci-lint-version: ${{ needs.code-quality.outputs.golangci-lint-version }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}
     secrets:
-      github-token: ${{ github.event.pull_request.head.repo.fork != true && secrets.GITHUB_TOKEN || '' }}
+      github-token: ${{ github.event.pull_request.head.repo.fork != true && (secrets.GH_PRIVATE_REPO_TOKEN || secrets.GITHUB_TOKEN) || '' }}
       slack-webhook: ${{ secrets.SLACK_WEBHOOK || '' }}
     permissions:
       contents: write # Required: goreleaser needs to create GitHub releases
