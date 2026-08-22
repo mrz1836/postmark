@@ -51,14 +51,9 @@ runs:
         set -uo pipefail
         echo "🔍 Validating test results from CI mode output..."
         source .github/scripts/parse-test-label.sh
-
-        # Guard against bash arithmetic-eval injection: artifact-derived counts flow into
-        # $(( )) and [[ -gt ]]. Coerce each to a bare non-negative integer so a crafted
-        # JSONL value like "a[$(cmd)]" becomes 0 instead of being evaluated as code.
-        to_int() {
-          local v="${1//[[:space:]]/}"
-          if [[ "$v" =~ ^[0-9]+$ ]]; then printf '%s' "$v"; else printf '0'; fi
-        }
+        # to_int (arithmetic-eval injection guard) and effective_failures (process-level
+        # failures count as 1) are shared so this step and the summary step can't drift.
+        source .github/scripts/test-result-helpers.sh
 
         VALIDATION_FAILED=false
         TOTAL_FAILURES=0
@@ -109,6 +104,10 @@ runs:
               UNIQUE=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.unique_total // 0')")
               TOTAL=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.total // 0')")
               DURATION=$(echo "$SUMMARY" | jq -r '.summary.duration // "unknown"')
+              # exit_code is the real `go test` process exit code (added in mage-x's
+              # CI summary as a ground-truth signal independent of parsed counts).
+              # Older mage-x versions omit it; // 0 keeps this backward compatible.
+              EXIT_CODE=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.exit_code // 0')")
 
               echo "  • Status: $STATUS"
               echo "  • Passed: $PASSED"
@@ -117,14 +116,34 @@ runs:
               echo "  • Unique Tests: $UNIQUE"
               echo "  • Test Runs: $TOTAL"
               echo "  • Duration: $DURATION"
+              if [[ "$EXIT_CODE" -gt 0 ]]; then
+                echo "  • Exit Code: $EXIT_CODE"
+              fi
 
               TOTAL_UNIQUE=$((TOTAL_UNIQUE + UNIQUE))
               TOTAL_TESTS=$((TOTAL_TESTS + TOTAL))
               TOTAL_SKIPPED=$((TOTAL_SKIPPED + SKIPPED))
 
-              if [[ "$STATUS" == "failed" ]] || [[ "$FAILED" -gt 0 ]]; then
+              # Do not trust "failed" test counts alone: a build failure, or any
+              # other process-level failure the summary doesn't attribute to a
+              # specific package or test, reports status "error"/"failed" and/or a
+              # non-zero exit_code while failed can still be 0. Any one of these
+              # signals disagreeing with "everything passed" must fail validation.
+              # effective_failures() encodes exactly that predicate (>0 == failed)
+              # and counts a detail-less process failure as 1, so TOTAL_FAILURES —
+              # and the final "N failure(s) detected" message — never undercounts
+              # to 0 for a job that failed.
+              FAILURES=$(effective_failures "$STATUS" "$FAILED" "$EXIT_CODE")
+              if [[ "$FAILURES" -gt 0 ]]; then
                 VALIDATION_FAILED=true
-                TOTAL_FAILURES=$((TOTAL_FAILURES + FAILED))
+                TOTAL_FAILURES=$((TOTAL_FAILURES + FAILURES))
+
+                if [[ "$FAILED" -eq 0 ]]; then
+                  echo ""
+                  echo "  🚨 Process failed (status=$STATUS, exit_code=$EXIT_CODE) with no individual test" \
+                       "failures reported - likely a build or setup error. See the raw test output" \
+                       "for this job."
+                fi
 
                 # Extract failure details
                 echo ""
@@ -210,14 +229,11 @@ runs:
       run: |
         set -uo pipefail
         source .github/scripts/parse-test-label.sh
+        # Shared to_int (arithmetic-eval injection guard) + effective_failures (process-level
+        # failures count as 1), kept in one place so this summary step and the validation
+        # step above can't drift.
+        source .github/scripts/test-result-helpers.sh
 
-        # Coerce artifact-derived counts to integers (arithmetic-eval injection guard) and
-        # strip backticks from artifact-derived text before it is written into the job
-        # summary (prevents markdown code-span / fenced-block breakout & content spoofing).
-        to_int() {
-          local v="${1//[[:space:]]/}"
-          if [[ "$v" =~ ^[0-9]+$ ]]; then printf '%s' "$v"; else printf '0'; fi
-        }
         # Strip backticks AND control chars (except tab/newline) from artifact-derived text:
         # prevents code-span/fenced-block breakout and control-character (ANSI/NUL) spoofing.
         strip_bt() { printf '%s' "$1" | LC_ALL=C tr -d '\000-\010\013-\037\140\177'; }
@@ -235,7 +251,6 @@ runs:
           s=${s//>/&gt;}
           printf '%s' "$s"
         }
-
         echo "## 🔍 Test Validation Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
 
@@ -249,21 +264,33 @@ runs:
         TOTAL_SKIPPED=0
         TOTAL_UNIQUE=0
         TOTAL_TESTS=0
+        # Real "type":"failure" entries across all files. Tracked separately from
+        # TOTAL_FAILED because a process-level failure counts toward TOTAL_FAILED
+        # but produces no expandable failure entry — this gates the details section.
+        TOTAL_FAILURE_ENTRIES=0
 
         while IFS= read -r -d '' jsonl_file; do
           SUMMARY=$(grep '"type":"summary"' "$jsonl_file" 2>/dev/null | head -1 || echo "")
           if [[ -n "$SUMMARY" ]]; then
+            STATUS=$(echo "$SUMMARY" | jq -r '.summary.status // "unknown"')
             PASSED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.passed // 0')")
             FAILED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.failed // 0')")
             SKIPPED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.skipped // 0')")
             UNIQUE=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.unique_total // 0')")
             TOTAL=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.total // 0')")
+            EXIT_CODE=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.exit_code // 0')")
             TOTAL_PASSED=$((TOTAL_PASSED + PASSED))
-            TOTAL_FAILED=$((TOTAL_FAILED + FAILED))
+            # Count process-level failures (build/setup errors with failed=0), not
+            # just individual test failures, so this total matches the validation
+            # step and never shows 0 for a job that failed.
+            TOTAL_FAILED=$((TOTAL_FAILED + $(effective_failures "$STATUS" "$FAILED" "$EXIT_CODE")))
             TOTAL_SKIPPED=$((TOTAL_SKIPPED + SKIPPED))
             TOTAL_UNIQUE=$((TOTAL_UNIQUE + UNIQUE))
             TOTAL_TESTS=$((TOTAL_TESTS + TOTAL))
           fi
+          # grep -c exits 1 on zero matches; ignore its status (it still prints 0).
+          FAILURE_ENTRIES=$(to_int "$(grep -c '"type":"failure"' "$jsonl_file" 2>/dev/null || true)")
+          TOTAL_FAILURE_ENTRIES=$((TOTAL_FAILURE_ENTRIES + FAILURE_ENTRIES))
         done < <(find ci-results/ -name "*.jsonl" -print0 2>/dev/null)
 
         echo "- **Unique Tests**: $TOTAL_UNIQUE" >> $GITHUB_STEP_SUMMARY
@@ -301,9 +328,15 @@ runs:
               STATUS=$(echo "$SUMMARY" | jq -r '.summary.status // "unknown"')
               PASSED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.passed // 0')")
               FAILED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.failed // 0')")
+              EXIT_CODE=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.exit_code // 0')")
 
-              if [[ "$STATUS" == "passed" ]]; then
+              if [[ "$STATUS" == "passed" && "$EXIT_CODE" -eq 0 ]]; then
                 echo "- ✅ **$TEST_LABEL**: $PASSED tests passed" >> $GITHUB_STEP_SUMMARY
+              elif [[ "$FAILED" -eq 0 ]]; then
+                # status isn't "passed" (or a non-zero exit_code disagrees with it)
+                # but no individual test failure was reported - a build or process
+                # error, not a test failure. "0 failures" alone would be misleading.
+                echo "- ❌ **$TEST_LABEL**: build/process failure (exit code $EXIT_CODE)" >> $GITHUB_STEP_SUMMARY
               else
                 echo "- ❌ **$TEST_LABEL**: $FAILED failures" >> $GITHUB_STEP_SUMMARY
               fi
@@ -311,8 +344,10 @@ runs:
           done < <(find ci-results/ -name "*.jsonl" -print0 2>/dev/null)
         fi
 
-        # Add detailed failure section if there are failures
-        if [[ $TOTAL_FAILED -gt 0 ]]; then
+        # Add detailed failure section only when there are real failure entries to
+        # expand. Gated on TOTAL_FAILURE_ENTRIES (not TOTAL_FAILED) so a detail-less
+        # process/build failure doesn't render an empty "Failure Details" section.
+        if [[ $TOTAL_FAILURE_ENTRIES -gt 0 ]]; then
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🚨 Failure Details" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

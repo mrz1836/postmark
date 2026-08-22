@@ -15,8 +15,20 @@
 #    - uses: ./.github/actions/setup-benchstat
 #      with:
 #        benchstat-version: ${{ env.MAGE_X_BENCHSTAT_VERSION }}
+#        benchstat-version-latest: ${{ env.MAGE_X_BENCHSTAT_VERSION_LATEST }}
+#        benchstat-latest-min-go: ${{ env.MAGE_X_BENCHSTAT_VERSION_LATEST_MIN_GO }}
 #        runner-os: ${{ runner.os }}
 #        go-version: ${{ matrix.go-version }}
+#
+#  Version selection (golang.org/x/perf raises its go.mod 'go' directive over time, so the
+#  newest build will not `go install` on an older toolchain). The choice keys off the
+#  runner's Go version so this works unchanged across the many projects that sync these
+#  env files, each of which may run a different Go version:
+#    - Go < 1.25                     -> skipped (benchstat requires Go 1.25+)
+#    - Go 1.25.x .. below min-go      -> benchstat-version         (newest build for Go 1.25)
+#    - Go >= benchstat-latest-min-go  -> benchstat-version-latest  (newest build overall)
+#  benchstat-latest-min-go tracks the Go version the latest build needs and is kept current
+#  by `magex updateToolVersions`, so no threshold is hard-coded here.
 #
 #  Maintainer: @mrz1836
 #
@@ -27,13 +39,21 @@ description: "Install and cache benchstat binary for benchmark comparison"
 
 inputs:
   benchstat-version:
-    description: "Benchstat version to install (e.g., v0.6.0)"
+    description: "Benchstat build for runners below latest-min-go (newest build that still supports Go 1.25, e.g., v0.0.0-...)"
     required: true
+  benchstat-version-latest:
+    description: "Newest benchstat build overall. Used on runners whose Go >= latest-min-go. Defaults to benchstat-version when unset."
+    required: false
+    default: ""
+  benchstat-latest-min-go:
+    description: "Minimum Go version required by benchstat-version-latest (e.g., 1.26). Runners at or above this use the latest build; older ones use benchstat-version."
+    required: false
+    default: "1.26"
   runner-os:
     description: "Runner OS for cache key (e.g., ubuntu-latest, mac-latest)"
     required: true
   go-version:
-    description: "Go version being used (e.g., 1.25.x, 1.24). Benchstat requires Go 1.25+"
+    description: "Go version being used (e.g., 1.25.x, 1.26.x). Benchstat requires Go 1.25+"
     required: true
 
 outputs:
@@ -46,39 +66,87 @@ outputs:
   skipped:
     description: "Whether benchstat installation was skipped due to Go version < 1.25"
     value: ${{ steps.version-check.outputs.skip }}
+  resolved-version:
+    description: "The benchstat version selected for the runner's Go version. Empty when skipped."
+    value: ${{ steps.version-check.outputs.resolved-version }}
 
 runs:
   using: "composite"
   steps:
     # --------------------------------------------------------------------
-    # Check Go version compatibility (benchstat requires Go 1.25+)
+    # Check Go version compatibility and select the benchstat build
+    #
+    # benchstat (golang.org/x/perf) requires Go 1.25+ and raises its go.mod
+    # 'go' directive over time, so the newest build will not `go install` on
+    # an older toolchain. Pick the build that matches the runner's Go version:
+    #   Go < 1.25                     -> skip
+    #   Go >= benchstat-latest-min-go -> benchstat-version-latest  (newest overall)
+    #   otherwise (Go 1.25.x)         -> benchstat-version         (newest for Go 1.25)
+    # The min-go threshold is passed in (not hard-coded) so this stays correct across
+    # projects and future benchstat 'go' directive bumps.
     # --------------------------------------------------------------------
     - name: 🔍 Check Go version compatibility
       id: version-check
       shell: bash
+      env:
+        # Route versions through env: so they can never break out of the shell
+        # via ${{ }} interpolation (they are config, but keep the safe pattern).
+        BENCHSTAT_VERSION: ${{ inputs.benchstat-version }}
+        # Fall back to the Go 1.25 build when no dedicated latest build is provided.
+        BENCHSTAT_VERSION_LATEST: ${{ inputs.benchstat-version-latest || inputs.benchstat-version }}
+        # Minimum Go version the latest build needs; defaults to 1.26 when unset.
+        BENCHSTAT_LATEST_MIN_GO: ${{ inputs.benchstat-latest-min-go || '1.26' }}
+        # go-version is matrix/caller-controlled, so route it through env: too (not
+        # directly interpolated into the script) to preserve the shell-safety invariant.
+        GO_VERSION: ${{ inputs.go-version }}
       run: |
-        GO_VERSION="${{ inputs.go-version }}"
         # Extract major and minor version:
         #   "1.24.x"  -> MAJOR=1, MINOR=24
         #   "1.22"    -> MAJOR=1, MINOR=22
         #   "1.23.5"  -> MAJOR=1, MINOR=23
         #   "2.0.0"   -> MAJOR=2, MINOR=0
-        MAJOR=$(echo "$GO_VERSION" | sed -E 's/^([0-9]+)\..*/\1/')
-        MINOR=$(echo "$GO_VERSION" | sed -E 's/^[0-9]+\.([0-9]+).*/\1/')
+        # Anchored match so malformed inputs (e.g. "1.25junk", "127", "1.2z") are rejected
+        # by the validation below instead of being silently coerced — the old sed-based
+        # extraction accepted "1.25junk" as 1.25. Mirrors the BENCHSTAT_LATEST_MIN_GO check.
+        if [[ "$GO_VERSION" =~ ^([0-9]+)\.([0-9]+)(\.(x|[0-9]+))?$ ]]; then
+          MAJOR="${BASH_REMATCH[1]}"
+          MINOR="${BASH_REMATCH[2]}"
+        else
+          MAJOR=""
+          MINOR=""
+        fi
+
+        # Parse and validate the latest-build minimum Go threshold. Empty input already
+        # defaults to 1.26 above, so a non-empty value that fails to parse is a real config
+        # error (typo). Fail fast with a clear message rather than silently falling back to a
+        # possibly-stale hard-coded 1.26, which could select an incompatible build once the
+        # latest benchstat requires Go 1.27+. Anchored match also rejects inputs the old
+        # sed-based check missed (e.g. "127", "1.2z"). Mirrors the GO_VERSION check below.
+        if [[ "$BENCHSTAT_LATEST_MIN_GO" =~ ^([0-9]+)\.([0-9]+)(\.(x|[0-9]+))?$ ]]; then
+          MIN_MAJOR="${BASH_REMATCH[1]}"
+          MIN_MINOR="${BASH_REMATCH[2]}"
+        else
+          echo "❌ Could not parse benchstat latest minimum Go version '$BENCHSTAT_LATEST_MIN_GO'. Please provide a valid Go version (e.g., '1.26', '1.27.x')." >&2
+          exit 1
+        fi
 
         if [ -z "$MAJOR" ] || [ -z "$MINOR" ] || ! [[ "$MAJOR" =~ ^[0-9]+$ ]] || ! [[ "$MINOR" =~ ^[0-9]+$ ]]; then
           echo "❌ Could not parse Go version '$GO_VERSION'. Please provide a valid Go version (e.g., '1.25', '1.26.x')." >&2
           exit 1
-        elif [ "$MAJOR" -gt 1 ]; then
-          # Any Go major version > 1 is considered compatible with the 1.25+ requirement
-          echo "✅ Go $GO_VERSION >= 1.25: proceeding with benchstat installation"
-          echo "skip=false" >> $GITHUB_OUTPUT
         elif [ "$MAJOR" -eq 1 ] && [ "$MINOR" -lt 25 ]; then
           echo "⚠️ Go $GO_VERSION < 1.25: skipping benchstat installation (requires Go 1.25+)"
-          echo "skip=true" >> $GITHUB_OUTPUT
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          echo "resolved-version=" >> "$GITHUB_OUTPUT"
+        elif [ "$MAJOR" -gt "$MIN_MAJOR" ] || { [ "$MAJOR" -eq "$MIN_MAJOR" ] && [ "$MINOR" -ge "$MIN_MINOR" ]; }; then
+          # Runner Go is new enough for the latest build.
+          echo "✅ Go $GO_VERSION >= $BENCHSTAT_LATEST_MIN_GO: using latest benchstat ($BENCHSTAT_VERSION_LATEST)"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "resolved-version=$BENCHSTAT_VERSION_LATEST" >> "$GITHUB_OUTPUT"
         else
-          echo "✅ Go $GO_VERSION >= 1.25: proceeding with benchstat installation"
-          echo "skip=false" >> $GITHUB_OUTPUT
+          # Go 1.25.x (below the latest build's requirement): use the Go 1.25 build.
+          echo "✅ Go $GO_VERSION is below $BENCHSTAT_LATEST_MIN_GO: using Go 1.25-compatible benchstat ($BENCHSTAT_VERSION)"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "resolved-version=$BENCHSTAT_VERSION" >> "$GITHUB_OUTPUT"
         fi
 
     # --------------------------------------------------------------------
@@ -90,7 +158,7 @@ runs:
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/benchstat-bin
-        key: ${{ inputs.runner-os }}-benchstat-${{ inputs.benchstat-version }}
+        key: ${{ inputs.runner-os }}-benchstat-${{ steps.version-check.outputs.resolved-version }}
 
     # --------------------------------------------------------------------
     # Install cached binary to PATH when cache hits
@@ -118,7 +186,8 @@ runs:
       env:
         # Route the version through env: so it can never break out of the go install
         # command via ${{ }} interpolation (completes the safe pattern; version is config).
-        BENCHSTAT_VERSION: ${{ inputs.benchstat-version }}
+        # resolved-version is the Go-version-appropriate build chosen by version-check.
+        BENCHSTAT_VERSION: ${{ steps.version-check.outputs.resolved-version }}
       run: |
         echo "⬇️ Cache miss – installing benchstat via go install..."
         echo "📋 Installing benchstat version: $BENCHSTAT_VERSION"
