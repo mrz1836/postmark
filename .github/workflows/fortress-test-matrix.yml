@@ -150,6 +150,36 @@ jobs:
             exit 1
           fi
 
+          # Being an object isn't enough: validate the element types too, not just that
+          # "os"/"include" are arrays. Otherwise the jq extraction below can fail in a way that
+          # goes unnoticed: it runs inside a command substitution assignment (UNSUPPORTED=$(jq ...)),
+          # and set -e does not abort on a command that fails only inside such an assignment — so a
+          # jq error leaves UNSUPPORTED empty and lets a malformed matrix slip through to a confusing
+          # fromJSON() failure in test-go. This rejects shapes the
+          # array-only check missed (e.g. os: [123], include: ["bad"], include: [{"os":123}])
+          # whose non-string OS values would bypass the non-Linux guard or miscount runners.
+          #   - "os", when present, must be an array of strings.
+          #   - "include", when present, must be an array of objects; each entry's "os"
+          #     (if set) must be a string or an array of strings.
+          if ! jq -e '
+            ((has("os") | not) or (.os | type == "array" and all(.[]; type == "string")))
+            and ((has("include") | not) or (.include | type == "array" and all(.[];
+              type == "object"
+              and ((has("os") | not) or (.os | type == "string" or (type == "array" and all(.[]; type == "string")))))))
+          ' <<< "$TEST_MATRIX" >/dev/null; then
+            echo "::error title=Invalid test matrix::The test-matrix input must be a JSON object; when present, \"os\" must be an array of strings and \"include\" must be an array of objects (each include entry's \"os\", if set, must be a string or array of strings)."
+            exit 1
+          fi
+
+          # Every test-go leg sets runs-on to matrix.os, so the matrix must yield at least
+          # one runner OS. A matrix with none (e.g. {}, {"os":[]}, or an include with no "os")
+          # would produce jobs with an empty runs-on that fail at runner assignment — catch it
+          # here with a clear annotation instead.
+          if [[ "$(jq -r '[ (.include // [] | map(.os // empty)), (.os // []) ] | flatten | length' <<< "$TEST_MATRIX")" -eq 0 ]]; then
+            echo "::error title=Invalid test matrix::The test-matrix input must define at least one runner via an \"os\" array and/or \"include\" entries containing \"os\"."
+            exit 1
+          fi
+
           # Collect every runner OS from both include-based and classic matrix shapes,
           # then reject any non-Linux runner. This workflow is bash-only AND the
           # test-go job unconditionally declares a service container (redis, or a
@@ -165,9 +195,11 @@ jobs:
 
           if [[ -n "$UNSUPPORTED" ]]; then
             # Percent-encode before embedding untrusted matrix values in output, so a
-            # value containing %, CR or LF can't inject its own ::workflow-commands
-            # (workflow-command injection). % must be encoded first to avoid double-decode.
-            esc() { local s=$1; s=${s//'%'/%25}; s=${s//$'\r'/%0D}; s=${s//$'\n'/%0A}; printf '%s' "$s"; }
+            # value containing %, CR, LF, ':' or ',' can't inject its own ::workflow-commands
+            # or break out of a command property list (workflow-command injection). % must be
+            # encoded first to avoid double-decode; ':' and ',' are the property delimiters
+            # GitHub recommends encoding for values placed in command properties (e.g. title=).
+            esc() { local s=$1; s=${s//'%'/%25}; s=${s//$'\r'/%0D}; s=${s//$'\n'/%0A}; s=${s//:/%3A}; s=${s//,/%2C}; printf '%s' "$s"; }
             SAFE_UNSUPPORTED=$(esc "$UNSUPPORTED")
             echo "::error title=Unsupported runner::Test matrix contains non-Linux runner(s): ${SAFE_UNSUPPORTED}. This workflow is bash-only and uses a Linux service container, so only Linux runners are supported (ubuntu-* by default). Set PRIMARY_RUNNER/SECONDARY_RUNNER to a Linux runner."
             echo "❌ Non-Linux runners in matrix: ${SAFE_UNSUPPORTED}"
@@ -321,6 +353,15 @@ jobs:
           RACE="${RACE_DETECTION_ENABLED:-false}"
           COVER="${CODE_COVERAGE_ENABLED:-false}"
 
+          # These caller-controlled flags are echoed below; strip CR/LF and normalize to a
+          # strict true/false whitelist so a crafted value can't inject its own
+          # ::workflow-command onto a new line (output-injection). Anything not exactly "true"
+          # becomes "false", which also matches how the test-type branches interpret them.
+          RACE="${RACE//$'\r'/}"; RACE="${RACE//$'\n'/}"
+          COVER="${COVER//$'\r'/}"; COVER="${COVER//$'\n'/}"
+          [[ "$RACE" == "true" ]] || RACE="false"
+          [[ "$COVER" == "true" ]] || COVER="false"
+
           echo "🔍 Race Detection Enabled: $RACE"
           echo "🔍 Code Coverage Enabled: $COVER"
 
@@ -374,9 +415,11 @@ jobs:
           # Emit GitHub annotation for test failures (surfaces at top of Actions UI)
           if [[ "$TEST_EXIT_CODE" != "0" ]]; then
             # Percent-encode untrusted matrix values before embedding in the workflow
-            # command so they can't inject their own ::commands (workflow-command
-            # injection). % must be encoded first to avoid double-decode.
-            esc() { local s=$1; s=${s//'%'/%25}; s=${s//$'\r'/%0D}; s=${s//$'\n'/%0A}; printf '%s' "$s"; }
+            # command so they can't inject their own ::commands or break out of a command
+            # property list (workflow-command injection). % must be encoded first to avoid
+            # double-decode; ':' and ',' are encoded because these values sit in the title=
+            # property, where an unescaped ',' would start a new (attacker-controlled) property.
+            esc() { local s=$1; s=${s//'%'/%25}; s=${s//$'\r'/%0D}; s=${s//$'\n'/%0A}; s=${s//:/%3A}; s=${s//,/%2C}; printf '%s' "$s"; }
             echo "::error title=Test Suite Failed ($(esc "$MATRIX_NAME"))::Tests failed on $(esc "$MATRIX_OS") with Go $(esc "$MATRIX_GO_VERSION") - see job summary for details"
           fi
 
@@ -480,6 +523,16 @@ jobs:
           REDIS_CACHE_OP_TIME: ${{ steps.setup-redis.outputs.cache-operation-time }}
           REDIS_CONNECTION_TIME: ${{ steps.setup-redis.outputs.connection-time }}
         run: |
+          # Strip CR/LF from caller-controlled inputs and step outputs before logging so a
+          # crafted value (e.g. a redis-version with an embedded newline) can't start a new
+          # line beginning with '::' and inject a GitHub workflow command (workflow-command
+          # injection). These are plain log lines — not ::commands — so removing newlines is
+          # sufficient and keeps values readable (percent-encoding is only decoded inside a
+          # ::command, and would visibly mangle legitimate values here).
+          for _v in REDIS_ENABLED REDIS_VERSION REDIS_CACHE_HIT REDIS_IMAGE_SIZE REDIS_CACHE_OP_TIME REDIS_CONNECTION_TIME; do
+            _tmp="${!_v}"; _tmp="${_tmp//$'\r'/}"; _tmp="${_tmp//$'\n'/}"; printf -v "$_v" '%s' "$_tmp"
+          done
+
           echo "📊 Redis Cache Performance Report"
           echo "================================="
           echo "• Redis Enabled: ${REDIS_ENABLED}"
@@ -585,9 +638,12 @@ jobs:
           CODE="$TEST_EXIT_CODE"
           if [[ "$CODE" != "0" ]]; then
             # Percent-encode untrusted matrix values before embedding in the workflow
-            # command so they can't inject their own ::commands (workflow-command
-            # injection). CODE is our own numeric exit code, so it needs no encoding.
-            esc() { local s=$1; s=${s//'%'/%25}; s=${s//$'\r'/%0D}; s=${s//$'\n'/%0A}; printf '%s' "$s"; }
+            # command so they can't inject their own ::commands or break out of a command
+            # property list (workflow-command injection). % is encoded first to avoid
+            # double-decode; ':' and ',' are encoded because these values sit in the title=
+            # property, where an unescaped ',' would start a new (attacker-controlled) property.
+            # CODE is our own numeric exit code, so it needs no encoding.
+            esc() { local s=$1; s=${s//'%'/%25}; s=${s//$'\r'/%0D}; s=${s//$'\n'/%0A}; s=${s//:/%3A}; s=${s//,/%2C}; printf '%s' "$s"; }
             echo "::error title=Test Suite Failed ($(esc "$MATRIX_NAME"))::go test exited with code '${CODE:-<unset>}' on $(esc "$MATRIX_OS") / Go $(esc "$MATRIX_GO_VERSION") — see the '🧪 Run tests' step and job summary"
             echo "❌ Failing job: test process exited '${CODE:-<unset>}' (expected 0)."
             exit 1

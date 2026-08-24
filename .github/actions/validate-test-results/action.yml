@@ -96,7 +96,15 @@ runs:
             # Extract summary line (type: summary)
             SUMMARY=$(grep '"type":"summary"' "$jsonl_file" 2>/dev/null | head -1 || echo "")
 
-            if [[ -n "$SUMMARY" ]]; then
+            # A non-empty summary that isn't valid JSON means the JSONL was truncated/
+            # corrupted. If we let jq run on it, every field coerces to 0 and the job is
+            # silently counted as passing (this step is the one that exits 1). Treat an
+            # unparseable summary as a hard failure and skip extraction.
+            if summary_is_corrupt "$SUMMARY"; then
+              echo "  🚨 Invalid JSON summary in $jsonl_file - truncated/corrupted JSONL; counting as a failure"
+              VALIDATION_FAILED=true
+              TOTAL_FAILURES=$((TOTAL_FAILURES + 1))
+            elif [[ -n "$SUMMARY" ]]; then
               STATUS=$(echo "$SUMMARY" | jq -r '.summary.status // "unknown"')
               PASSED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.passed // 0')")
               FAILED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.failed // 0')")
@@ -271,6 +279,14 @@ runs:
 
         while IFS= read -r -d '' jsonl_file; do
           SUMMARY=$(grep '"type":"summary"' "$jsonl_file" 2>/dev/null | head -1 || echo "")
+          # A summary line that isn't valid JSON means the JSONL was truncated/corrupted.
+          # Don't let jq fail silently (fields would coerce to 0 and undercount failures) —
+          # treat an unparseable summary as a hard failure signal and skip extraction.
+          if summary_is_corrupt "$SUMMARY"; then
+            echo "⚠️ Invalid JSON summary in $jsonl_file — counting as a failure" >&2
+            TOTAL_FAILED=$((TOTAL_FAILED + 1))
+            SUMMARY=""
+          fi
           if [[ -n "$SUMMARY" ]]; then
             STATUS=$(echo "$SUMMARY" | jq -r '.summary.status // "unknown"')
             PASSED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.passed // 0')")
@@ -324,7 +340,12 @@ runs:
 
             SUMMARY=$(grep '"type":"summary"' "$jsonl_file" 2>/dev/null | head -1 || echo "")
 
-            if [[ -n "$SUMMARY" ]]; then
+            # Mirror the aggregation loop: a corrupt (non-empty, unparseable) summary is a
+            # failure, not a "build/process failure (exit code 0)". Without this guard jq
+            # coerces every field to 0 and this row renders a misleading exit-code-0 line.
+            if summary_is_corrupt "$SUMMARY"; then
+              echo "- ❌ **$TEST_LABEL**: invalid/corrupted summary (unparseable JSON)" >> $GITHUB_STEP_SUMMARY
+            elif [[ -n "$SUMMARY" ]]; then
               STATUS=$(echo "$SUMMARY" | jq -r '.summary.status // "unknown"')
               PASSED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.passed // 0')")
               FAILED=$(to_int "$(echo "$SUMMARY" | jq -r '.summary.failed // 0')")

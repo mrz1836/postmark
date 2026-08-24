@@ -100,6 +100,17 @@ runs:
         # directly interpolated into the script) to preserve the shell-safety invariant.
         GO_VERSION: ${{ inputs.go-version }}
       run: |
+        # Strip CR/LF from caller-supplied version strings before they reach any sink. These
+        # are later written to $GITHUB_OUTPUT (resolved-version); an embedded newline would let
+        # a crafted input append its own key=value lines to the output file (output-injection).
+        BENCHSTAT_VERSION="${BENCHSTAT_VERSION//$'\r'/}"; BENCHSTAT_VERSION="${BENCHSTAT_VERSION//$'\n'/}"
+        BENCHSTAT_VERSION_LATEST="${BENCHSTAT_VERSION_LATEST//$'\r'/}"; BENCHSTAT_VERSION_LATEST="${BENCHSTAT_VERSION_LATEST//$'\n'/}"
+        # GO_VERSION and BENCHSTAT_LATEST_MIN_GO are caller-controlled and echoed into log/error
+        # messages below; strip CR/LF from them too so a crafted value can't inject its own
+        # ::workflow-command onto a new line (output-injection). Keeps the hardening consistent.
+        BENCHSTAT_LATEST_MIN_GO="${BENCHSTAT_LATEST_MIN_GO//$'\r'/}"; BENCHSTAT_LATEST_MIN_GO="${BENCHSTAT_LATEST_MIN_GO//$'\n'/}"
+        GO_VERSION="${GO_VERSION//$'\r'/}"; GO_VERSION="${GO_VERSION//$'\n'/}"
+
         # Extract major and minor version:
         #   "1.24.x"  -> MAJOR=1, MINOR=24
         #   "1.22"    -> MAJOR=1, MINOR=22
@@ -130,7 +141,20 @@ runs:
           exit 1
         fi
 
-        if [ -z "$MAJOR" ] || [ -z "$MINOR" ] || ! [[ "$MAJOR" =~ ^[0-9]+$ ]] || ! [[ "$MINOR" =~ ^[0-9]+$ ]]; then
+        # A valid Go version has MAJOR >= 1 (Go started at 1.0; there is no 0.x). The regex
+        # above accepts e.g. "0.99", which would leave MIN_MAJOR=0 and make the MAJOR > MIN_MAJOR
+        # comparison below wrongly select the latest benchstat build for every Go 1.x runner.
+        # Reject it here as a config typo. MIN_MAJOR is a validated integer from the regex.
+        if [ "$MIN_MAJOR" -lt 1 ]; then
+          echo "❌ benchstat latest minimum Go version must be >= 1.0 (got '$BENCHSTAT_LATEST_MIN_GO')." >&2
+          exit 1
+        fi
+
+        # A valid Go version has MAJOR >= 1 (Go started at 1.0; there is no 0.x). Reject anything
+        # below that as malformed input rather than letting it fall through the floor check below
+        # and silently proceed with a benchstat install. The MAJOR/MINOR regex guards run first
+        # (|| short-circuits), so "$MAJOR" is a validated non-negative integer before "-lt 1".
+        if [ -z "$MAJOR" ] || [ -z "$MINOR" ] || ! [[ "$MAJOR" =~ ^[0-9]+$ ]] || ! [[ "$MINOR" =~ ^[0-9]+$ ]] || [ "$MAJOR" -lt 1 ]; then
           echo "❌ Could not parse Go version '$GO_VERSION'. Please provide a valid Go version (e.g., '1.25', '1.26.x')." >&2
           exit 1
         elif [ "$MAJOR" -eq 1 ] && [ "$MINOR" -lt 25 ]; then
