@@ -867,6 +867,7 @@ jobs:
             core.setOutput('auto_merge_enabled', String(autoMergeEnabled));
 
       - name: 🚀 Auto-merge approved updates
+        id: auto-merge
         if: |
           startsWith(steps.determine-action.outputs.action, 'auto-merge-')
         env:
@@ -905,7 +906,21 @@ jobs:
           if [[ "$TOKEN_TYPE" == "PAT" ]]; then
             echo "🔑 Using Personal Access Token for enhanced permissions"
           else
-            echo "⚠️ Using default GITHUB_TOKEN - auto-merge may fail for Dependabot PRs"
+            # No GH_PAT_TOKEN configured (e.g. the PAT was revoked). Approving a PR and arming
+            # auto-merge cannot work with the default GITHUB_TOKEN, so attempting it here would
+            # only hard-fail this optional workflow and surface a red check on every Dependabot
+            # PR. Skip gracefully instead: this job is advisory automation, and dependency PRs
+            # are still handled manually or via `go-broadcast review-pr`.
+            echo "⏭️ No GH_PAT_TOKEN available — skipping approve + auto-merge (optional workflow)."
+            echo "   Dependency PRs will be handled manually or via 'go-broadcast review-pr'."
+            echo "════════════════════════════════════════════════════════════════"
+            echo "✅ AUTO-MERGE SKIPPED (no PAT)"
+            echo "════════════════════════════════════════════════════════════════"
+            # Signal downstream summary/status steps that the run was intentionally
+            # skipped, so they don't report the determine-action 'auto-merge-*' value
+            # as if the PR was actually merged.
+            echo "action-taken=skipped-no-pat" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           # Determine approval message based on action type
@@ -1097,11 +1112,18 @@ jobs:
           UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
           DEPENDENCY_TYPE: ${{ steps.metadata.outputs.dependency-type }}
           ACTION: ${{ steps.determine-action.outputs.action }}
+          # Actual outcome of the auto-merge step (e.g. 'skipped-no-pat',
+          # 'approved-ready-for-merge'). When set, it overrides the planned
+          # determine-action value so the report reflects what really happened.
+          ACTION_TAKEN: ${{ steps.auto-merge.outputs.action-taken }}
         run: |
           echo "📊 Generating workflow summary..."
 
+          # Prefer the auto-merge step's actual outcome over the planned action.
+          EFFECTIVE_ACTION="${ACTION_TAKEN:-$ACTION}"
+
           # Determine action taken
-          case "$ACTION" in
+          case "$EFFECTIVE_ACTION" in
             "auto-merge-patch")           ACTION_DESC="✅ Auto-merged (patch update)" ;;
             "auto-merge-patch-indirect")  ACTION_DESC="✅ Auto-merged (patch update - indirect dependency)" ;;
             "auto-merge-minor-dev")       ACTION_DESC="✅ Auto-merged (minor dev dependency)" ;;
@@ -1109,6 +1131,7 @@ jobs:
             "auto-merge-minor-indirect")  ACTION_DESC="✅ Auto-merged (minor update - indirect dependency)" ;;
             "auto-merge-security")        ACTION_DESC="🔒 Auto-merged (security update)" ;;
             "approved-ready-for-merge")   ACTION_DESC="✅ Approved and ready for manual merge (auto-merge failed)" ;;
+            "skipped-no-pat")             ACTION_DESC="⏭️ Skipped (no GH_PAT_TOKEN — handle manually or via 'go-broadcast review-pr')" ;;
             "alert-major")                ACTION_DESC="⚠️ Manual review required (major update)" ;;
             "alert-security-major")       ACTION_DESC="🚨 Manual review required (major security update)" ;;
             "alert-minor-prod")           ACTION_DESC="🔍 Manual review suggested (minor prod update)" ;;
@@ -1160,15 +1183,21 @@ jobs:
           UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
           DEPENDENCY_TYPE: ${{ steps.metadata.outputs.dependency-type }}
           ACTION: ${{ steps.determine-action.outputs.action }}
+          # Actual outcome of the auto-merge step; overrides the planned action when set.
+          ACTION_TAKEN: ${{ steps.auto-merge.outputs.action-taken }}
         run: |
           echo "=== 🤖 Dependabot Auto-merge Summary ==="
           echo "📦 Dependency: $DEPENDENCY_NAMES"
           echo "🔄 Update type: $UPDATE_TYPE"
           echo "📁 Dependency type: $DEPENDENCY_TYPE"
 
-          case "$ACTION" in
+          # Prefer the auto-merge step's actual outcome over the planned action.
+          EFFECTIVE_ACTION="${ACTION_TAKEN:-$ACTION}"
+
+          case "$EFFECTIVE_ACTION" in
             auto-merge-*)              echo "✅ Action: Auto-merge enabled" ;;
             approved-ready-for-merge)  echo "✅ Action: Approved and ready for manual merge" ;;
+            skipped-no-pat)            echo "⏭️ Action: Skipped (no GH_PAT_TOKEN — handle manually or via 'go-broadcast review-pr')" ;;
             alert-*)                   echo "⚠️ Action: Alert sent, manual review required" ;;
             manual-review)             echo "👀 Action: Manual review required" ;;
             *)                         echo "❓ Action: $ACTION" ;;
