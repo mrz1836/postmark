@@ -1200,7 +1200,7 @@ jobs:
             skipped-no-pat)            echo "⏭️ Action: Skipped (no GH_PAT_TOKEN — handle manually or via 'go-broadcast review-pr')" ;;
             alert-*)                   echo "⚠️ Action: Alert sent, manual review required" ;;
             manual-review)             echo "👀 Action: Manual review required" ;;
-            *)                         echo "❓ Action: $ACTION" ;;
+            *)                         echo "❓ Action: $EFFECTIVE_ACTION" ;;
           esac
 
           echo "🕐 Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
