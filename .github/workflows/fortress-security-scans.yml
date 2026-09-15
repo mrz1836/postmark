@@ -613,35 +613,121 @@ jobs:
         with:
           path: |
             ~/.cache/osv-scanner-bin
-          key: ${{ inputs.primary-runner }}-osv-scanner-${{ env.OSV_SCANNER_VERSION }}-go${{ env.GOVULNCHECK_GO_VERSION }}
+          # The pinned digests are part of the key so a pin correction (same version,
+          # new digest) invalidates stale entries and re-saves the verified binary
+          # under a fresh key (cache entries are immutable per key). The restored
+          # binary is ALSO re-verified below — the key is an optimization, not the
+          # trust boundary.
+          key: ${{ inputs.primary-runner }}-osv-scanner-${{ env.OSV_SCANNER_VERSION }}-${{ env.OSV_SCANNER_SHA256_LINUX_AMD64 }}-${{ env.OSV_SCANNER_SHA256_LINUX_ARM64 }}-go${{ env.GOVULNCHECK_GO_VERSION }}
 
-      - name: 🛠️ Make cached OSV-Scanner usable
+      - name: 📥 Install / verify OSV-Scanner
         if: ${{ inputs.enable-osv }}
-        run: |
-          set -euo pipefail
-          BIN_DIR="$HOME/.cache/osv-scanner-bin"
-          OSV_BIN="$BIN_DIR/osv-scanner"
-          if [[ -f "$OSV_BIN" ]]; then
-            echo "✅ Using cached OSV-Scanner binary"
-            mkdir -p "$(go env GOPATH)/bin"
-            cp "$OSV_BIN" "$(go env GOPATH)/bin/"
-          fi
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-
-      - name: 📥 Install OSV-Scanner (cache miss)
-        if: ${{ inputs.enable-osv && steps.osv-cache.outputs.cache-hit != 'true' }}
         env:
-          # Config value (from committed env files) routed through env rather than
+          # Config values (from committed env files) routed through env rather than
           # interpolated into the shell body — script-injection-safe by convention.
           OSV_SCANNER_VERSION: ${{ env.OSV_SCANNER_VERSION }}
+          OSV_SCANNER_SHA256_LINUX_AMD64: ${{ env.OSV_SCANNER_SHA256_LINUX_AMD64 }}
+          OSV_SCANNER_SHA256_LINUX_ARM64: ${{ env.OSV_SCANNER_SHA256_LINUX_ARM64 }}
         run: |
           set -euo pipefail
-          echo "⬇️ Cache miss – installing OSV-Scanner ${OSV_SCANNER_VERSION}..."
-          # Pinned module path (v2 semantic-import versioning); go install verifies the
-          # download against the Go checksum database for supply-chain integrity.
-          go install "github.com/google/osv-scanner/v2/cmd/osv-scanner@${OSV_SCANNER_VERSION}"
-          mkdir -p ~/.cache/osv-scanner-bin
-          cp "$(go env GOPATH)/bin/osv-scanner" ~/.cache/osv-scanner-bin/
+
+          # ----------------------------------------------------------------
+          # Supply-chain-hardened install of the OFFICIAL prebuilt release
+          # binary (github.com/google/osv-scanner), replacing `go install`.
+          #
+          # Why not `go install`: it resolves and verifies OSV-Scanner's ENTIRE
+          # transitive module graph against sum.golang.org on every cache miss,
+          # coupling this security gate's availability to Google's checksum DB
+          # and turning dozens of transitive deps into flake surfaces (observed:
+          # HTTP/2 INTERNAL_ERROR stream resets on unrelated transitive modules).
+          #
+          # Trust model: the version is pinned (OSV_SCANNER_VERSION) and the exact
+          # SHA-256 of the release binary is pinned in a COMMITTED env file (the
+          # trust anchor lives in version control, reviewed via PR). EVERY binary
+          # placed on PATH — whether restored from cache or freshly downloaded —
+          # must match the committed pin first. A cached binary that fails the
+          # check (a legacy `go install` build, or a poisoned cache entry) is
+          # discarded and the single pinned binary is re-downloaded over HTTPS and
+          # re-verified — a stronger guarantee than a runtime-fetched checksum,
+          # with a far smaller network surface. The digest pins are kept in
+          # lockstep with the version by the updater
+          # (magefiles/version_checker.go: ChecksumPins).
+          # ----------------------------------------------------------------
+
+          # Defense-in-depth: the pinned version is interpolated into a download
+          # URL, so require a strict vMAJOR.MINOR.PATCH tag before use. Values are
+          # trusted (committed), so this simply fails loud on a malformed pin.
+          if [[ ! "${OSV_SCANNER_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::OSV_SCANNER_VERSION '${OSV_SCANNER_VERSION}' is not a strict vMAJOR.MINOR.PATCH tag"
+            exit 1
+          fi
+
+          # Resolve the runner platform to the release asset name + its pinned digest.
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          case "$(uname -m)" in
+            x86_64 | amd64)  arch="amd64" ;;
+            aarch64 | arm64) arch="arm64" ;;
+            *) echo "::error::Unsupported CPU architecture '$(uname -m)'"; exit 1 ;;
+          esac
+
+          case "${os}_${arch}" in
+            linux_amd64) expected_sha="${OSV_SCANNER_SHA256_LINUX_AMD64}" ;;
+            linux_arm64) expected_sha="${OSV_SCANNER_SHA256_LINUX_ARM64}" ;;
+            *) echo "::error::No pinned OSV-Scanner digest for ${os}/${arch}; add one to .github/env/10-security.env"; exit 1 ;;
+          esac
+          if [[ ! "${expected_sha}" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::Pinned OSV-Scanner digest for ${os}/${arch} is missing or malformed (expected 64 lowercase hex chars)"
+            exit 1
+          fi
+
+          gobin="$(go env GOPATH)/bin"
+          cache_bin="$HOME/.cache/osv-scanner-bin/osv-scanner"
+          mkdir -p "${gobin}" "$HOME/.cache/osv-scanner-bin"
+          echo "${gobin}" >> "$GITHUB_PATH"
+
+          # Fast path: trust the cached binary ONLY when its digest matches the
+          # committed pin. This closes the cache-hit bypass — a restored binary is
+          # never placed on PATH unverified, so a stale legacy build or a poisoned
+          # cache entry cannot slip past the pin.
+          if [[ -f "${cache_bin}" ]] \
+            && [[ "$(sha256sum "${cache_bin}" | awk '{print $1}')" == "${expected_sha}" ]]; then
+            echo "✅ Using cached OSV-Scanner ${OSV_SCANNER_VERSION} (digest verified against the committed pin)"
+            install -m 0755 "${cache_bin}" "${gobin}/osv-scanner"
+            exit 0
+          fi
+          if [[ -f "${cache_bin}" ]]; then
+            echo "♻️ Cached OSV-Scanner binary failed the pin check — re-downloading the verified release binary"
+            rm -f "${cache_bin}"
+          fi
+
+          asset="osv-scanner_${os}_${arch}"
+          url="https://github.com/google/osv-scanner/releases/download/${OSV_SCANNER_VERSION}/${asset}"
+          echo "⬇️ Downloading OSV-Scanner ${OSV_SCANNER_VERSION} (${os}/${arch}) from the official release..."
+
+          tmp_bin="$(mktemp)"
+          trap 'rm -f "${tmp_bin}"' EXIT
+
+          # HTTPS-only, TLS 1.2+, fail on HTTP errors, exponential-backoff retries
+          # so a transient CDN blip doesn't fail the job.
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            --retry 5 --retry-all-errors --retry-max-time 120 \
+            --connect-timeout 30 --max-time 300 \
+            -o "${tmp_bin}" "${url}"
+
+          # Verify BEFORE the binary is ever made executable, cached, or run.
+          actual_sha="$(sha256sum "${tmp_bin}" | awk '{print $1}')"
+          if [[ "${actual_sha}" != "${expected_sha}" ]]; then
+            echo "::error::OSV-Scanner checksum mismatch for ${asset} — refusing to install"
+            echo "::error::expected ${expected_sha}"
+            echo "::error::actual   ${actual_sha}"
+            exit 1
+          fi
+          echo "✅ Verified OSV-Scanner ${asset} SHA-256 against the committed pin"
+
+          # Only the VERIFIED binary is ever written to PATH or the cache path
+          # (GOPATH/bin was placed on PATH above; the cache is keyed by version+digest).
+          install -m 0755 "${tmp_bin}" "${gobin}/osv-scanner"
+          install -m 0755 "${tmp_bin}" "${cache_bin}"
           echo "✅ OSV-Scanner installed and stored in cache"
 
       - name: 🛰️ OSV-Scanner — Run scan
@@ -768,7 +854,7 @@ jobs:
         # Scanning hiccup must not fail the security job.
         if: always() && inputs.enable-osv && hashFiles('osv-results.sarif') != ''
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
           sarif_file: osv-results.sarif
           category: osv-scanner
