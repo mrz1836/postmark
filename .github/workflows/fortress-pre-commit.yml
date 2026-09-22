@@ -150,7 +150,7 @@ jobs:
         with:
           path: |
             ~/.cache/go-pre-commit-tools
-          key: ${{ inputs.primary-runner }}-go-pre-commit-tools-golangci-${{ env.GO_PRE_COMMIT_GOLANGCI_LINT_VERSION }}-fumpt-${{ env.GO_PRE_COMMIT_FUMPT_VERSION }}-gitleaks-${{ env.GO_PRE_COMMIT_GITLEAKS_VERSION }}-goimports-${{ env.GO_PRE_COMMIT_GOIMPORTS_VERSION }}
+          key: ${{ inputs.primary-runner }}-go-pre-commit-tools-golangci-${{ env.GO_PRE_COMMIT_GOLANGCI_LINT_VERSION }}-fumpt-${{ env.GO_PRE_COMMIT_FUMPT_VERSION }}-fumptlatest-${{ env.GO_PRE_COMMIT_FUMPT_VERSION_LATEST }}-fumptmingo-${{ env.GO_PRE_COMMIT_FUMPT_VERSION_LATEST_MIN_GO }}-gitleaks-${{ env.GO_PRE_COMMIT_GITLEAKS_VERSION }}-goimports-${{ env.GO_PRE_COMMIT_GOIMPORTS_VERSION }}
 
       - name: 🛠️ Make cached go-pre-commit and tools usable
         if: env.GO_PRE_COMMIT_USE_LOCAL != 'true'
