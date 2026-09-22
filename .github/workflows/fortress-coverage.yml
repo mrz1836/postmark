@@ -2569,7 +2569,7 @@ jobs:
       # This will trigger a "Node.js 20 actions are deprecated" warning until Codecov
       # releases a new version with Node.js 24 support. Expected and harmless for now.
       - name: 📈 Upload coverage to Codecov
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           #file: ./coverage.txt # This is the old format
           files: ./coverage-artifacts/coverage-data/coverage.txt
