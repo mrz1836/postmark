@@ -69,7 +69,7 @@ concurrency:
 
 jobs:
   [job-name]:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       [specific-permissions]: [read|write]
     steps:
@@ -165,7 +165,7 @@ permissions: write-all
 ```yaml
 strategy:
   matrix:
-    os: [ubuntu-latest, macos-latest, windows-latest]
+    os: [ubuntu-26.04, macos-latest, windows-latest]
     go-version: ['1.21', '1.22']
 runs-on: ${{ matrix.os }}
 steps:
@@ -185,13 +185,13 @@ steps:
 ```yaml
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # ... test steps
 
   deploy:
     needs: test
     if: success()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # ... deploy steps
 ```
 

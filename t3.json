@@ -1,0 +1,60 @@
+{
+    "$schema": "https://t3.codes/schema/t3.json",
+    "scripts": [
+        {
+            "name": "Fix All",
+            "command": "magex format:fix && magex lint && magex test:race",
+            "icon": "play"
+        },
+        {
+            "name": "Test",
+            "command": "magex test",
+            "icon": "test"
+        },
+        {
+            "name": "Test (race)",
+            "command": "magex test:race",
+            "icon": "test"
+        },
+        {
+            "name": "Lint (fix)",
+            "command": "magex lint:fix",
+            "icon": "lint"
+        },
+        {
+            "name": "Build (dev)",
+            "command": "magex build:dev",
+            "icon": "build"
+        },
+        {
+            "name": "Pre-commit: install",
+            "command": "go-pre-commit install",
+            "icon": "configure"
+        },
+        {
+            "name": "Pre-commit: run",
+            "command": "go-pre-commit run --all-files",
+            "icon": "lint"
+        },
+        {
+            "name": "Deps: tidy",
+            "command": "magex deps:tidy",
+            "icon": "configure"
+        },
+        {
+            "name": "Deps: update all",
+            "command": "magex deps:update all-modules",
+            "icon": "configure"
+        },
+        {
+            "name": "Version: bump patch",
+            "command": "b=$(git symbolic-ref --short refs/remotes/origin/HEAD) && magex version:bump bump=patch push branch=${b#origin/}",
+            "icon": "configure"
+        },
+        {
+            "name": "Version: bump minor",
+            "command": "b=$(git symbolic-ref --short refs/remotes/origin/HEAD) && magex version:bump bump=minor push branch=${b#origin/}",
+            "icon": "configure"
+        }
+    ]
+}

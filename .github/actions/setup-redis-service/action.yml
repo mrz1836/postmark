@@ -55,9 +55,9 @@ inputs:
     required: false
     default: "true"
   matrix-os:
-    description: "Matrix OS for consistent cache key generation (e.g., ubuntu-24.04)"
+    description: "Matrix OS for consistent cache key generation (e.g., ubuntu-26.04)"
     required: false
-    default: "ubuntu-24.04"
+    default: "ubuntu-26.04"
   trust-service-health:
     description: "Trust GitHub Actions service container health checks (skip redis-cli verification)"
     required: false

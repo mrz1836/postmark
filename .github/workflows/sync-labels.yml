@@ -55,7 +55,7 @@ jobs:
   # ----------------------------------------------------------------------------------
   load-env:
     name: 🌍 Load Environment Variables
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read # Required: Read repository content for sparse checkout
@@ -108,7 +108,7 @@ jobs:
   sync-labels:
     name: 🏷️ Sync Labels
     needs: [load-env]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read

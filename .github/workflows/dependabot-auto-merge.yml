@@ -75,7 +75,7 @@ jobs:
   # ----------------------------------------------------------------------------------
   dependabot:
     name: 🤖 Dependabot Auto-merge
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     # Only run on Dependabot PRs
     if: github.event.pull_request.user.login == 'dependabot[bot]'

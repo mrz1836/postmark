@@ -126,7 +126,7 @@ jobs:
   pr-management-same-repo:
     name: 🔧 PR Management (Same Repo)
     if: github.event.pull_request.head.repo && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       actions: write # Required: Delete GitHub Actions caches for closed PRs
@@ -730,7 +730,7 @@ jobs:
   pr-management-fork:
     name: 🔧 PR Management (Fork)
     if: github.event.pull_request.head.repo && github.event.pull_request.head.repo.full_name != github.repository
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       actions: write # Required: Delete GitHub Actions caches for closed PRs

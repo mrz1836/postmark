@@ -190,7 +190,7 @@ jobs:
     name: 🔧 Setup CI Config
     # Hard-coded runner: this job loads env from .github/env/ to discover the
     # eventual `primary-runner` value, so it can't run on it.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -387,7 +387,7 @@ jobs:
         uses: ./.github/actions/setup-magex
         with:
           magex-version: ${{ env.MAGE_X_VERSION }}
-          runner-os: ubuntu-24.04
+          runner-os: ubuntu-26.04
           use-local: ${{ env.MAGE_X_USE_LOCAL }}
 
       - name: 🔍 Validate MAGE-X Version

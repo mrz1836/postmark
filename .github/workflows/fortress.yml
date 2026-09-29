@@ -92,7 +92,7 @@ jobs:
   # ----------------------------------------------------------------------------------
   paths-check:
     name: 📁 Paths Check
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -332,9 +332,9 @@ jobs:
     needs: [paths-check, setup, warm-cache, security, code-quality, pre-commit, test-suite, benchmarks]
     permissions:
       contents: read # Read repository content for status checking
-    # Fallback to ubuntu-latest when setup was skipped (e.g. docs-only PR via paths-check)
+    # Fallback to ubuntu-26.04 when setup was skipped (e.g. docs-only PR via paths-check)
     # so this required check can still report a green result for branch protection.
-    runs-on: ${{ needs.setup.outputs.primary-runner || 'ubuntu-24.04' }}
+    runs-on: ${{ needs.setup.outputs.primary-runner || 'ubuntu-26.04' }}
     steps:
       # --------------------------------------------------------------------
       # Build results summary showing job statuses
