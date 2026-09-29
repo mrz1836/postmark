@@ -152,6 +152,30 @@ jobs:
           persist-credentials: false
 
       # --------------------------------------------------------------------
+      # Redirect Go's build/link temp off the tmpfs /tmp
+      #
+      # The benchmark job links a separate *.test binary for every package in
+      # the module (each a large cgo/sqlite static binary), giving it the
+      # highest peak temp-dir usage of any job. On ubuntu-26.04 runners /tmp is
+      # a small RAM-backed tmpfs, so linking the biggest binaries
+      # (cmd/functions/*, app/testfactory — each pulls in nearly the whole app)
+      # overflows it and the Go linker fails with "No space left on device" /
+      # "disk quota exceeded", surfacing as spurious "[build failed]" results.
+      # The root disk has tens of GB free (the Go build cache already lives
+      # there), so point GOTMPDIR/TMPDIR at it. Instant, and keeps every
+      # package in the benchmark run.
+      # --------------------------------------------------------------------
+      - name: 📁 Redirect Go build temp to root disk
+        if: runner.os == 'Linux'
+        run: |
+          GOTMP="${RUNNER_TEMP}/gotmp"
+          mkdir -p "$GOTMP"
+          echo "GOTMPDIR=$GOTMP" >> "$GITHUB_ENV"
+          echo "TMPDIR=$GOTMP" >> "$GITHUB_ENV"
+          echo "📁 Go temp dir -> $GOTMP (on the root disk)"
+          df -h / /tmp
+
+      # --------------------------------------------------------------------
       # Setup Go with caching and version management
       # --------------------------------------------------------------------
       - name: 🏗️ Setup Go with Cache

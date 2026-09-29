@@ -79,7 +79,7 @@ jobs:
     if: |
       github.event_name != 'pull_request_review' ||
       contains(fromJSON('["approved", "changes_requested"]'), github.event.review.state)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # Required: Sparse checkout for env files
       pull-requests: write # Required: Update PR status and enable auto-merge
