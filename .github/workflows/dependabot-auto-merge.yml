@@ -11,9 +11,11 @@
 #  Triggers: Pull request events for immediate response to Dependabot PRs
 #
 #  Auto-merge Rules (configurable via .github/env/):
-#  - Patch updates: Auto-merge by default
+#  - Patch updates (dev/indirect): Auto-merge by default
+#  - Patch updates (direct production): Manual review, unless every dependency
+#    is owned by this repo's GitHub owner (DEPENDABOT_AUTO_MERGE_PATCH_SAME_OWNER)
 #  - Minor dev dependencies: Auto-merge by default
-#  - Minor prod dependencies: Manual review by default
+#  - Minor prod dependencies: Configurable (DEPENDABOT_AUTO_MERGE_MINOR_PROD)
 #  - Major updates: Always require manual review with alert
 #  - Security updates: Auto-merge non-major by default
 #
@@ -66,6 +68,7 @@ jobs:
   #   📊 Fetch metadata         → official Dependabot metadata
   #   📋 Log dependency details → trace logging
   #   🔒 Check for security     → classify security vs non-security
+  #   🏢 Check same owner       → are all deps owned by this repo's owner?
   #   🎯 Determine action       → decision tree over config + metadata
   #   ⚠️ Alert (major/security) → comment + manual-review label
   #   🔍 Alert (minor prod)     → comment for review
@@ -130,6 +133,7 @@ jobs:
           {
             echo "MAINTAINER=$MAINTAINER"
             echo "AUTO_MERGE_PATCH=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH')"
+            echo "AUTO_MERGE_PATCH_SAME_OWNER=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH_SAME_OWNER // "false"')"
             echo "AUTO_MERGE_MINOR_DEV=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_DEV')"
             echo "AUTO_MERGE_MINOR_PROD=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_PROD')"
             echo "AUTO_MERGE_PATCH_INDIRECT=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH_INDIRECT')"
@@ -147,6 +151,7 @@ jobs:
           echo "🔍 Configuration loaded:"
           echo "  👤 Maintainer: @$MAINTAINER"
           echo "  🔧 Auto-merge patch: $(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH')"
+          echo "  🔧 Auto-merge patch same-owner prod: $(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH_SAME_OWNER // "false"')"
           echo "  🔧 Auto-merge minor dev: $(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_DEV')"
           echo "  🔧 Auto-merge minor prod: $(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_MINOR_PROD')"
           echo "  🔧 Auto-merge patch indirect: $(echo "$ENV_JSON" | jq -r '.DEPENDABOT_AUTO_MERGE_PATCH_INDIRECT')"
@@ -315,6 +320,108 @@ jobs:
           echo "════════════════════════════════════════════════════════════════"
 
       # --------------------------------------------------------------------
+      # Check whether every updated dependency is owned by this repo's owner
+      #
+      # Used to let production PATCH updates of first-party modules auto-merge
+      # while third-party production patches still require manual review.
+      # The owner comes from github.repository_owner (never hardcoded), so this
+      # works unchanged in any org or user account the workflow is synced to.
+      #
+      # Fails closed: anything unparseable, unsupported, or unverifiable → false.
+      #   - Only ecosystems whose package name encodes the GitHub owner are
+      #     supported (go_modules: github.com/<owner>/<repo>[/...],
+      #     github_actions: <owner>/<repo>[/...]). Vanity Go import paths and
+      #     registry scopes (e.g. npm @scope) are NOT proof of ownership.
+      #   - EVERY name in a grouped PR must match; one outside dep → false.
+      #   - The repo is resolved via the GitHub API so a repo transferred out of
+      #     the owner (old path redirects to a new owner) does not match.
+      # --------------------------------------------------------------------
+      - name: 🏢 Check for same-owner dependency
+        id: check-owner
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+          # Metadata via env: (never string-spliced into the shell)
+          DEPENDENCY: ${{ steps.metadata.outputs.dependency-names }}
+          PKG_ECOSYSTEM: ${{ steps.metadata.outputs.package-ecosystem }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "════════════════════════════════════════════════════════════════"
+          echo "🏢 SAME-OWNER DEPENDENCY DETECTION"
+          echo "════════════════════════════════════════════════════════════════"
+          echo "  Repository owner: $REPO_OWNER"
+          echo "  Ecosystem: $PKG_ECOSYSTEM"
+          echo "  Dependencies: $DEPENDENCY"
+
+          result() {
+            echo "  $2"
+            echo "same_owner=$1" >> "$GITHUB_OUTPUT"
+            echo "════════════════════════════════════════════════════════════════"
+            echo "🎯 RESULT: same_owner=$1"
+            echo "════════════════════════════════════════════════════════════════"
+            exit 0
+          }
+
+          # GitHub owner logins are alphanumeric + hyphen only
+          if [[ ! "$REPO_OWNER" =~ ^[A-Za-z0-9-]+$ ]]; then
+            result false "❌ Unexpected repository owner format"
+          fi
+          OWNER_LC="${REPO_OWNER,,}"
+
+          case "$PKG_ECOSYSTEM" in
+            go_modules|gomod) PREFIX="github.com/" ;;
+            github_actions)   PREFIX="" ;;
+            *) result false "⏭️ Ecosystem '$PKG_ECOSYSTEM' does not encode a GitHub owner — not eligible" ;;
+          esac
+
+          if [[ -z "$DEPENDENCY" || "$DEPENDENCY" == "null" ]]; then
+            result false "❌ No dependency names"
+          fi
+
+          declare -A VERIFIED=()
+          COUNT=0
+          IFS=',' read -ra NAMES <<< "$DEPENDENCY"
+          for raw in "${NAMES[@]}"; do
+            # Trim surrounding whitespace only; embedded whitespace fails the charset check
+            name="${raw#"${raw%%[![:space:]]*}"}"
+            name="${name%"${name##*[![:space:]]}"}"
+            [[ -z "$name" ]] && continue
+            COUNT=$((COUNT + 1))
+
+            if [[ ! "$name" =~ ^[A-Za-z0-9._~/+-]+$ || "$name" == *..* || "$name" == *//* ]]; then
+              result false "❌ '$name': unexpected characters in dependency name"
+            fi
+
+            name_lc="${name,,}"
+            if [[ "$name_lc" != "$PREFIX"* ]]; then
+              result false "❌ '$name': not hosted under ${PREFIX:-<owner>/}"
+            fi
+            IFS='/' read -r dep_owner dep_repo _ <<< "${name_lc#"$PREFIX"}"
+
+            if [[ "$dep_owner" != "$OWNER_LC" ]]; then
+              result false "❌ '$name': owner '$dep_owner' != '$OWNER_LC'"
+            fi
+            if [[ -z "$dep_repo" ]]; then
+              result false "❌ '$name': no repository segment"
+            fi
+
+            # Confirm the repo currently lives under the owner (follows transfer redirects).
+            # Fails closed if the token cannot see it (e.g. private repo in the same org).
+            if [[ -z "${VERIFIED[$dep_repo]:-}" ]]; then
+              actual_owner=$(gh api "repos/$dep_owner/$dep_repo" --jq '.owner.login' 2>/dev/null || echo "")
+              if [[ "${actual_owner,,}" != "$OWNER_LC" ]]; then
+                result false "❌ '$name': repo resolves to owner '${actual_owner:-<unavailable>}'"
+              fi
+              VERIFIED[$dep_repo]=1
+            fi
+            echo "  ✅ '$name' is owned by '$REPO_OWNER'"
+          done
+
+          if [[ "$COUNT" -eq 0 ]]; then
+            result false "❌ No dependency names"
+          fi
+          result true "✅ All $COUNT dependencies are owned by '$REPO_OWNER'"
+
+      # --------------------------------------------------------------------
       # Determine action based on configuration and update type
       # --------------------------------------------------------------------
       - name: 🎯 Determine action
@@ -324,6 +431,7 @@ jobs:
           UPDATE_TYPE_IN: ${{ steps.metadata.outputs.update-type }}
           DEP_TYPE_IN: ${{ steps.metadata.outputs.dependency-type }}
           IS_SECURITY_IN: ${{ steps.check-security.outputs.is_security }}
+          SAME_OWNER_IN: ${{ steps.check-owner.outputs.same_owner }}
         run: |
           echo "════════════════════════════════════════════════════════════════"
           echo "🎯 ACTION DETERMINATION LOGIC"
@@ -332,16 +440,19 @@ jobs:
           UPDATE_TYPE="$UPDATE_TYPE_IN"
           DEP_TYPE="$DEP_TYPE_IN"
           IS_SECURITY="$IS_SECURITY_IN"
+          SAME_OWNER="$SAME_OWNER_IN"
           ACTION="none"
 
           echo "📊 Input Variables:"
           echo "  Update Type: $UPDATE_TYPE"
           echo "  Dependency Type: $DEP_TYPE"
           echo "  Is Security: $IS_SECURITY"
+          echo "  Same Owner: $SAME_OWNER"
           echo ""
           echo "📋 Active Configuration:"
           echo "  AUTO_MERGE_SECURITY: ${{ env.AUTO_MERGE_SECURITY }}"
           echo "  AUTO_MERGE_PATCH: ${{ env.AUTO_MERGE_PATCH }}"
+          echo "  AUTO_MERGE_PATCH_SAME_OWNER: ${{ env.AUTO_MERGE_PATCH_SAME_OWNER }}"
           echo "  AUTO_MERGE_PATCH_INDIRECT: ${{ env.AUTO_MERGE_PATCH_INDIRECT }}"
           echo "  AUTO_MERGE_MINOR_DEV: ${{ env.AUTO_MERGE_MINOR_DEV }}"
           echo "  AUTO_MERGE_MINOR_PROD: ${{ env.AUTO_MERGE_MINOR_PROD }}"
@@ -370,8 +481,12 @@ jobs:
                 echo "  📝 Reason: Major security update requires manual review"
               fi
             else
+              # Security updates must never fall through to the regular patch/minor rules
+              # when security auto-merge is disabled, or they could auto-merge anyway.
               echo "  ❌ AUTO_MERGE_SECURITY == false"
-              echo "  ⏭️ Skipping security auto-merge (disabled)"
+              ACTION="manual-review"
+              echo "  🎯 MATCH! Action: $ACTION"
+              echo "  📝 Reason: Security auto-merge is disabled in configuration"
             fi
           else
             echo "  ❌ IS_SECURITY == false"
@@ -385,13 +500,30 @@ jobs:
             if [[ "$UPDATE_TYPE" == "version-update:semver-patch" ]]; then
               echo "  ✅ UPDATE_TYPE == patch"
               if [[ "$DEP_TYPE" == "direct:production" ]]; then
-                # SECURITY: never auto-merge NON-security production patches. A malicious or
-                # broken patch release of a production dependency ships straight to users, so
-                # require a human. Genuine security patches are handled earlier by Rule 1.
-                echo "  🔒 DEP_TYPE == direct:production — excluded from patch auto-merge"
-                ACTION="manual-review"
-                echo "  🎯 MATCH! Action: $ACTION"
-                echo "  📝 Reason: Production patch requires manual review (supply-chain safety)"
+                # SECURITY: never auto-merge NON-security THIRD-PARTY production patches. A
+                # malicious or broken patch release of a production dependency ships straight
+                # to users, so require a human. Genuine security patches are handled earlier by
+                # Rule 1. Exception: dependencies verified to live under this repo's own owner
+                # (see the same-owner check step) are first-party code, so they may auto-merge
+                # when AUTO_MERGE_PATCH_SAME_OWNER is enabled. Security updates are excluded as
+                # defense in depth (Rule 1 already routes them to manual review when disabled).
+                echo "  🔒 DEP_TYPE == direct:production"
+                if [[ "$IS_SECURITY" != "true" && "$SAME_OWNER" == "true" && "${{ env.AUTO_MERGE_PATCH_SAME_OWNER }}" == "true" && "${{ env.AUTO_MERGE_PATCH }}" == "true" ]]; then
+                  echo "  ✅ SAME_OWNER == true (all dependencies owned by this repo's owner)"
+                  echo "  ✅ AUTO_MERGE_PATCH_SAME_OWNER == true"
+                  ACTION="auto-merge-patch-same-owner"
+                  echo "  🎯 MATCH! Action: $ACTION"
+                  echo "  📝 Reason: Production patch of a same-owner (first-party) dependency"
+                else
+                  echo "  ❌ Not eligible for same-owner auto-merge (SAME_OWNER=$SAME_OWNER, AUTO_MERGE_PATCH_SAME_OWNER=${{ env.AUTO_MERGE_PATCH_SAME_OWNER }}, AUTO_MERGE_PATCH=${{ env.AUTO_MERGE_PATCH }})"
+                  ACTION="manual-review"
+                  echo "  🎯 MATCH! Action: $ACTION"
+                  if [[ "$SAME_OWNER" == "true" ]]; then
+                    echo "  📝 Reason: Same-owner production patch, but same-owner/patch auto-merge is disabled in configuration"
+                  else
+                    echo "  📝 Reason: Third-party production patch requires manual review (supply-chain safety)"
+                  fi
+                fi
               elif [[ "$DEP_TYPE" != "indirect" ]]; then
                 echo "  ✅ DEP_TYPE is direct:development"
                 if [[ "${{ env.AUTO_MERGE_PATCH }}" == "true" ]]; then
@@ -931,6 +1063,9 @@ jobs:
             "auto-merge-patch-indirect")
               APPROVAL_MSG="✅ Auto-approving patch update (indirect dependency)"
               ;;
+            "auto-merge-patch-same-owner")
+              APPROVAL_MSG="✅ Auto-approving patch update (same-owner production dependency)"
+              ;;
             "auto-merge-minor-dev")
               APPROVAL_MSG="✅ Auto-approving minor development dependency update"
               ;;
@@ -1126,6 +1261,7 @@ jobs:
           case "$EFFECTIVE_ACTION" in
             "auto-merge-patch")           ACTION_DESC="✅ Auto-merged (patch update)" ;;
             "auto-merge-patch-indirect")  ACTION_DESC="✅ Auto-merged (patch update - indirect dependency)" ;;
+            "auto-merge-patch-same-owner") ACTION_DESC="✅ Auto-merged (patch update - same-owner production dependency)" ;;
             "auto-merge-minor-dev")       ACTION_DESC="✅ Auto-merged (minor dev dependency)" ;;
             "auto-merge-minor-prod")      ACTION_DESC="✅ Auto-merged (minor prod dependency)" ;;
             "auto-merge-minor-indirect")  ACTION_DESC="✅ Auto-merged (minor update - indirect dependency)" ;;
@@ -1162,6 +1298,7 @@ jobs:
             echo "| Setting | Value |"
             echo "|---------|-------|"
             echo "| Auto-merge patch | ${AUTO_MERGE_PATCH} |"
+            echo "| Auto-merge patch same-owner prod | ${AUTO_MERGE_PATCH_SAME_OWNER} |"
             echo "| Auto-merge minor dev | ${AUTO_MERGE_MINOR_DEV} |"
             echo "| Auto-merge minor prod | ${AUTO_MERGE_MINOR_PROD} |"
             echo "| Auto-merge patch indirect | ${AUTO_MERGE_PATCH_INDIRECT} |"
