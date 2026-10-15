@@ -10,7 +10,7 @@ Context should flow through your entire call stack—no exceptions.
 
 * **Always pass `context.Context` as the first parameter** for any operation that could be canceled, timeout, or carry request-scoped values
 * **Never store context in structs**—pass it explicitly through function calls
-* **Use `context.Background()` only at the top level** (main, tests, or service initialization)
+* **Use `context.Background()` only at the top level** (main or service initialization); tests use `t.Context()`
 * **Derive child contexts** using `context.WithTimeout()`, `context.WithCancel()`, or `context.WithValue()`
 * **Respect context cancellation** by checking `ctx.Done()` in long-running operations
 
@@ -197,13 +197,13 @@ func CreateUser(ctx context.Context, user User) error {
 // ✅ Explicit initialization
 type Cache struct {
     mu    sync.RWMutex
-    data  map[string]interface{}
+    data  map[string]any
     once  sync.Once
 }
 
 func NewCache() *Cache {
     return &Cache{
-        data: make(map[string]interface{}),
+        data: make(map[string]any),
     }
 }
 
@@ -215,10 +215,10 @@ func (c *Cache) ensureInitialized() {
 }
 
 // 🚫 Hidden initialization
-var globalCache map[string]interface{}
+var globalCache map[string]any
 
 func init() {
-    globalCache = make(map[string]interface{})
+    globalCache = make(map[string]any)
     // This runs at import time - unpredictable order
     // Hard to test, hard to control
 }
@@ -344,8 +344,7 @@ Write code that performs well by default, and measure when optimization is neede
 func BenchmarkUserProcessing(b *testing.B) {
     users := generateTestUsers(1000)
 
-    b.ResetTimer()
-    for i := 0; i < b.N; i++ {
+    for b.Loop() { // times only the loop, not the setup above
         processUsers(users)
     }
 }
