@@ -24,18 +24,17 @@ We use the `testify` suite for unit tests. All tests must follow these conventio
 * Mock external dependencies — tests should be fast and deterministic
 * Use descriptive test names that explain the scenario being tested
 * Test error cases — ensure your error handling actually works
+* Use the test's own helpers: `t.Context()` instead of `context.Background()`, `t.Setenv()` instead of `os.Setenv()`, `t.Chdir()` instead of `os.Chdir()`, and `t.TempDir()` instead of `os.MkdirTemp()`. `t.Setenv()` and `t.Chdir()` restore process state when the test ends; neither can be used in parallel tests or tests with parallel ancestors
 * Handle all errors in tests properly:
-	* `os.Setenv()` returns an error - use `require.NoError(t, err)`
 	* `os.Unsetenv()` returns an error - use `require.NoError(t, err)`
 	* `db.Close()` in defer statements - wrap in anonymous function: `defer func() { _ = db.Close() }()`
-	* Deferred `os.Setenv()` for cleanup - wrap in anonymous function to ignore error
 
 <br><br>
 
 ## 📝 Test Structure Example
 
 ```go
-func TestUserService_CreateUser(t *testing.T) {
+func TestUserServiceCreateUser(t *testing.T) {
     tests := []struct {
         name        string
         input       User
@@ -78,7 +77,7 @@ func TestUserService_CreateUser(t *testing.T) {
             service := NewUserService(mockDB)
 
             // Execute
-            err := service.CreateUser(context.Background(), tt.input)
+            err := service.CreateUser(t.Context(), tt.input)
 
             // Assert
             if tt.wantErr {
@@ -207,7 +206,7 @@ func requireUserEqual(t *testing.T, expected, actual User) {
 }
 
 // Bad: Overly generic helper
-func assertStuff(t *testing.T, a, b interface{}) {
+func assertStuff(t *testing.T, a, b any) {
     // Too vague, hard to understand intent
 }
 ```
