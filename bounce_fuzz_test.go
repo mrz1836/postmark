@@ -64,6 +64,29 @@ func createBounceTestServer(t *testing.T, paramName, paramValue string) *httptes
 	}))
 }
 
+// validateBounceQueryParams checks that GetBounces query parameters are encoded and complete
+func validateBounceQueryParams(t *testing.T, query string) {
+	// Check for potential injection attempts
+	if strings.Contains(query, "<script") || strings.Contains(query, "javascript:") {
+		t.Errorf("Potential XSS in query parameters: %s", query)
+	}
+
+	// Verify URL parameters are properly escaped
+	parsedURL, err := url.ParseQuery(query)
+	if err != nil {
+		t.Errorf("Query parameters are not properly encoded: %v", err)
+		return
+	}
+
+	// Verify count and offset are present and numeric
+	countParam := parsedURL.Get("count")
+	offsetParam := parsedURL.Get("offset")
+
+	if countParam == "" || offsetParam == "" {
+		t.Errorf("Missing required parameters: count=%s, offset=%s", countParam, offsetParam)
+	}
+}
+
 // validateErrorResponse checks if error responses contain sensitive information
 func validateErrorResponse(t *testing.T, err error, paramValue string) {
 	if err == nil {
@@ -169,28 +192,7 @@ func FuzzBounceQueryParams(f *testing.F) {
 		}
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Validate query parameters are properly encoded
-			query := r.URL.RawQuery
-
-			// Check for potential injection attempts
-			if strings.Contains(query, "<script") || strings.Contains(query, "javascript:") {
-				t.Errorf("Potential XSS in query parameters: %s", query)
-			}
-
-			// Verify URL parameters are properly escaped
-			parsedURL, err := url.ParseQuery(query)
-			if err != nil {
-				t.Errorf("Query parameters are not properly encoded: %v", err)
-				return
-			}
-
-			// Verify count and offset are present and numeric
-			countParam := parsedURL.Get("count")
-			offsetParam := parsedURL.Get("offset")
-
-			if countParam == "" || offsetParam == "" {
-				t.Errorf("Missing required parameters: count=%s, offset=%s", countParam, offsetParam)
-			}
+			validateBounceQueryParams(t, r.URL.RawQuery)
 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
