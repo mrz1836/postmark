@@ -1,10 +1,15 @@
 name: Bug report
 description: Report incorrect behavior, test failure, or unexpected output in this Go library
 title: "[Bug] <brief description of the issue>"
-labels: ["bug-p3"]
+labels: ["bug-P3"]
 assignees:
   - mrz1836
 body:
+  - type: markdown
+    attributes:
+      value: |
+        **⚠️ Do not include secrets.** Redact API keys, tokens, passwords, and personal data from logs, queries, request/response bodies, and configuration before submitting.
+
   - type: textarea
     id: bug_description
     attributes:
@@ -40,7 +45,7 @@ body:
       label: Environment details
       description: Provide version information and your Go setup to help debug.
       placeholder: |
-        - Go version: go1.24.3
+        - Go version: output of `go version`
         - OS: macOS 14.5 (arm64)
         - Library version/commit: v1.3.4 or commit 88aef9c
     validations:

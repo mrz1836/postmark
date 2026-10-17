@@ -11,7 +11,7 @@
                     "source.organizeImports": "explicit"
                 },
                 "editor.formatOnSave": true,
-                "go.lintTool": "golangci-lint",
+                "go.lintTool": "golangci-lint-v2",
                 "go.toolsEnvVars": {
                     "GOFLAGS": "-buildvcs=false"
                 },
@@ -23,14 +23,10 @@
         "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
         "ghcr.io/devcontainers/features/github-cli:1": {}
     },
-    "image": "mcr.microsoft.com/devcontainers/go:0-1.26-bullseye",
-    "mounts": [
-        "type=cache,target=/home/vscode/.cache/go-build",
-        "type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock"
-    ],
+    "image": "mcr.microsoft.com/devcontainers/go:2-1-trixie",
     "name": "postmark dev container",
+    "onCreateCommand": "go install github.com/mrz1836/mage-x/cmd/magex@latest",
     "postCreateCommand": "magex lint && magex vet && magex test",
-    "postStartCommand": "go install github.com/mrz1836/mage-x/cmd/magex@latest",
     "remoteUser": "vscode",
     "runArgs": [
         "--cap-drop=ALL",

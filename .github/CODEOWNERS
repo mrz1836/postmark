@@ -6,7 +6,7 @@
 * @mrz1836
 
 # GitHub Actions workflows
-.github/actions/* @mrz1836
+.github/actions/ @mrz1836
 .github/scripts/* @mrz1836
 .github/workflows/* @mrz1836
 .github/env/* @mrz1836
@@ -49,9 +49,6 @@ codecov.yml @mrz1836
 
 # Tech Conventions
 .github/tech-conventions/* @mrz1836
-
-# Cursor Rules
-.cursorrules @mrz1836
 
 # Devcontainer configuration
 .devcontainer/* @mrz1836

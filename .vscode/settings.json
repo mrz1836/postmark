@@ -57,11 +57,11 @@
     "go.inlayHints.parameterNames": true,
     "go.inlayHints.rangeVariableTypes": true,
     "go.lintFlags": [
-        "--fast",
+        "--fast-only",
         "--timeout=5m"
     ],
     "go.lintOnSave": "package",
-    "go.lintTool": "golangci-lint",
+    "go.lintTool": "golangci-lint-v2",
     "go.testExplorerPackages": ".*",
     "go.testFlags": [
         "-v",

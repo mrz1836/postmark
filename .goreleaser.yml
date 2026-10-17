@@ -55,7 +55,7 @@ checksum:
 # Github Release
 # ---------------------------
 release:
-  prerelease: "false"
+  prerelease: auto
   name_template: "Release v{{.Version}}"
 
 # ---------------------------

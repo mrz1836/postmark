@@ -223,42 +223,10 @@
             "type": "shell"
         },
         {
-            "command": "magex testQuick",
+            "command": "magex test:short",
             "detail": "Run fast unit tests with -short flag (excludes slow tests)",
             "group": "test",
-            "label": "magex: test:quick",
-            "presentation": {
-                "clear": true,
-                "focus": false,
-                "panel": "dedicated",
-                "reveal": "always"
-            },
-            "problemMatcher": [
-                "$go"
-            ],
-            "type": "shell"
-        },
-        {
-            "command": "magex testPerf",
-            "detail": "Run performance regression tests (may take 30+ minutes)",
-            "group": "test",
-            "label": "magex: test:perf",
-            "presentation": {
-                "clear": true,
-                "focus": false,
-                "panel": "dedicated",
-                "reveal": "always"
-            },
-            "problemMatcher": [
-                "$go"
-            ],
-            "type": "shell"
-        },
-        {
-            "command": "magex testAll",
-            "detail": "Run all tests including performance tests (comprehensive)",
-            "group": "test",
-            "label": "magex: test:all",
+            "label": "magex: test:short",
             "presentation": {
                 "clear": true,
                 "focus": false,
@@ -383,54 +351,6 @@
             "type": "shell"
         },
         {
-            "command": "magex benchQuick",
-            "detail": "Run only quick benchmarks (~5-10 minutes)",
-            "group": "test",
-            "label": "magex: bench:quick",
-            "presentation": {
-                "clear": true,
-                "focus": false,
-                "panel": "dedicated",
-                "reveal": "always"
-            },
-            "problemMatcher": [
-                "$go"
-            ],
-            "type": "shell"
-        },
-        {
-            "command": "magex benchHeavy",
-            "detail": "Run intensive benchmarks (10-30 minutes: stress tests, large datasets)",
-            "group": "test",
-            "label": "magex: bench:heavy",
-            "presentation": {
-                "clear": true,
-                "focus": false,
-                "panel": "dedicated",
-                "reveal": "always"
-            },
-            "problemMatcher": [
-                "$go"
-            ],
-            "type": "shell"
-        },
-        {
-            "command": "magex benchAll",
-            "detail": "Run all benchmarks including heavy ones (30-60 minutes total)",
-            "group": "test",
-            "label": "magex: bench:all",
-            "presentation": {
-                "clear": true,
-                "focus": false,
-                "panel": "dedicated",
-                "reveal": "always"
-            },
-            "problemMatcher": [
-                "$go"
-            ],
-            "type": "shell"
-        },
-        {
             "command": "magex bench:cpu",
             "detail": "Run benchmarks with CPU profiling",
             "group": "test",
@@ -480,7 +400,7 @@
         },
         {
             "command": "magex format",
-            "detail": "Check code formatting (reports issues without fixing)",
+            "detail": "Format Go code (modifies files; use format:check to only report)",
             "group": "none",
             "label": "magex: format",
             "presentation": {
@@ -729,10 +649,10 @@
             "dependsOn": [
                 "magex: format:fix",
                 "magex: lint:fast",
-                "magex: test:quick"
+                "magex: test:short"
             ],
             "dependsOrder": "sequence",
-            "detail": "Quick pre-commit check: format → lint:fast → test:quick",
+            "detail": "Quick pre-commit check: format → lint:fast → test:short",
             "group": "none",
             "label": "workflow: quick-check",
             "presentation": {
@@ -790,10 +710,10 @@
             "dependsOn": [
                 "workflow: full-check",
                 "magex: deps:audit",
-                "magex: bench:quick"
+                "magex: bench"
             ],
             "dependsOrder": "sequence",
-            "detail": "Pre-release validation: full-check → deps:audit → bench:quick",
+            "detail": "Pre-release validation: full-check → deps:audit → bench",
             "group": "none",
             "label": "workflow: pre-release",
             "presentation": {
