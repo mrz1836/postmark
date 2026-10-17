@@ -5,6 +5,11 @@ labels: ["question"]
 assignees:
   - mrz1836
 body:
+  - type: markdown
+    attributes:
+      value: |
+        **⚠️ Do not include secrets.** Redact API keys, tokens, passwords, and personal data from logs, queries, request/response bodies, and configuration before submitting.
+
   - type: textarea
     id: question
     attributes:

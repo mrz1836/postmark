@@ -57,7 +57,7 @@ Every PR must include the following **four** sections in the description:
 * Keep PRs focused and minimal. Prefer multiple small PRs over large ones when possible.
 * Use draft PRs early for feedback on in progress work.
 * Releases are deployed using **goreleaser**.
-* Rules for the release build are located in `.goreleaser.yml` and executed via `.github/workflows/release.yml`.
+* Rules for the release build are located in `.goreleaser.yml` and executed via `.github/workflows/fortress-release.yml`.
 
 <br><br>
 

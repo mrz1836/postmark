@@ -15,13 +15,13 @@ A comprehensive list of built-in features that ship with this repository.
 * **Uniform Code Style** via [gofumpt](https://github.com/mvdan/gofumpt) plus zero‑noise linting with [golangci‑lint](https://github.com/golangci/golangci-lint).
 * **Confidence‑Boosting Tests** with [testify](https://github.com/stretchr/testify), the Go [race detector](https://blog.golang.org/race-detector), crystal‑clear [HTML coverage](https://blog.golang.org/cover) snapshots, and automatic reporting via internal coverage system.
 * **Hands‑Free Releases** delivered by [GoReleaser](https://github.com/goreleaser/goreleaser) whenever you create a [new Tag](https://git-scm.com/book/en/v2/Git-Basics-Tagging).
-* **Relentless Dependency & Vulnerability Scans** via [Dependabot](https://dependabot.com) (runs daily at 8am to ensure broadcast dependencies are always current), [Nancy](https://github.com/sonatype-nexus-community/nancy), [OSV-Scanner](https://github.com/google/osv-scanner), and [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck).
+* **Relentless Dependency & Vulnerability Scans** via [Dependabot](https://dependabot.com) (runs daily at 8am to ensure dependencies are always current), [OSV-Scanner](https://github.com/google/osv-scanner), and [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck).
 * **Security Posture by Default** with [CodeQL](https://docs.github.com/en/github/finding-security-vulnerabilities-and-errors-in-your-code/about-code-scanning), [OpenSSF Scorecard](https://openssf.org), and secret‑leak detection via [gitleaks](https://github.com/gitleaks/gitleaks).
 * **Automatic Syndication** to [pkg.go.dev](https://pkg.go.dev/) on every release for instant godoc visibility.
 * **Polished Community Experience** using rich templates for Issues & PRs.
 * **All the Right Meta Files** (`LICENSE`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SUPPORT.md`, `SECURITY.md`) pre‑filled and ready.
 * **Code Ownership** clarified through a [CODEOWNERS](../CODEOWNERS) file, keeping reviews fast and focused.
-* **Zero‑Noise Dev Environments** with tuned editor settings ([`.editorconfig`](../../.editorconfig)) plus curated *ignore* files for [VS Code](../../.editorconfig), [Docker](../../.dockerignore), and [Git](../../.gitignore).
+* **Zero‑Noise Dev Environments** with tuned editor settings ([`.editorconfig`](../../.editorconfig)) plus curated *ignore* files for [Docker](../../.dockerignore) and [Git](../../.gitignore).
 * **Label Sync Magic**: your repo labels stay in lock‑step with [.github/labels.yml](../labels.yml).
 * **Friendly First PR Workflow** – newcomers get a warm welcome thanks to a dedicated [workflow](../workflows/pull-request-management.yml).
 * **Standards‑Compliant Docs** adhering to the [standard‑readme](https://github.com/RichardLitt/standard-readme/blob/master/spec.md) spec.
