@@ -9,15 +9,32 @@
 #  centralized management across all workflows.
 #
 #  Triggers:
-#  - Pull request reviews (submitted)
-#  - Pull request state changes (ready_for_review, review_request_removed)
+#  - Completion of "Auto-merge Trigger" (auto-merge-trigger.yml), which runs on
+#    pull request reviews (submitted) and pull request state changes
+#    (ready_for_review, review_request_removed)
+#
+#  Why two workflows: review events always run the PR's own copy of a workflow,
+#  so they can never be trusted with the GitHub App key. `workflow_run` always
+#  runs this file from the DEFAULT branch; it re-reads the PR from the API and
+#  trusts nothing produced by the PR's run.
+#
+#  Authentication (no personal access tokens):
+#  - The `evaluate` job uses only the built-in GITHUB_TOKEN (read-only).
+#  - The `apply` job enables/disables auto-merge with a short-lived GitHub App
+#    installation token. It runs only when the repository variable
+#    AUTO_MERGE_APP_CLIENT_ID is set, and reads the App private key from the
+#    `auto-merge` environment secret AUTO_MERGE_APP_PRIVATE_KEY. That environment
+#    must only allow protected long-lived branches (e.g. the default branch).
+#  - Using an App (not GITHUB_TOKEN) also means the eventual merge triggers the
+#    push workflows on the base branch.
 #
 #  Auto-merge Rules (configurable via .github/env/):
 #  - Minimum number of approvals
 #  - No requested reviewers remaining (if configured)
-#  - No "Changes Requested" reviews
+#  - No "Changes Requested" reviews (an armed auto-merge is disabled)
 #  - PR ready for review (not draft, no WIP indicators)
 #  - Bot PRs handled separately (if configured)
+#  - The base branch must require status checks (always enforced)
 #
 #  Maintainer: @mrz1836
 #
@@ -29,10 +46,9 @@ name: Auto-merge on Approval
 # Trigger Configuration
 # --------------------------------------------------------------------
 on:
-  pull_request_review:
-    types: [submitted]
-  pull_request:
-    types: [ready_for_review, review_request_removed]
+  workflow_run:
+    workflows: ["Auto-merge Trigger"]
+    types: [completed]
 
 # Security: Restrict default permissions (jobs must explicitly request what they need)
 permissions: {}
@@ -41,7 +57,7 @@ permissions: {}
 # Concurrency Control
 # --------------------------------------------------------------------
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: true
 
 # --------------------------------------------------------------------
@@ -51,56 +67,54 @@ concurrency:
 
 jobs:
   # ----------------------------------------------------------------------------------
-  # Auto-merge processing (single consolidated job)
+  # Evaluate the PR (GITHUB_TOKEN only, read-only — never sees the App key)
   #
   # Workflow phases (each preserved as a step):
   #   🌍 Load environment        → reads .github/env/*
   #   🔧 Extract configuration   → exports AUTO_MERGE_* vars to env
-  #   🤖 Process auto-merge      → applies conditions and enables/disables auto-merge
+  #   🔍 Evaluate conditions     → decides enable / disable / skip
   #   📊 Generate summary        → always
+  #
+  # Enabling/disabling auto-merge, comments and labels happen in `apply`.
   # ----------------------------------------------------------------------------------
-  auto-merge:
+  evaluate:
     name: 🤖 Auto-merge on Approval
-    # ----------------------------------------------------------------
-    # Event gate: skip review events that can't meaningfully
-    # change the auto-merge decision.
-    #
-    # `pull_request_review:submitted` fires for ALL review states —
-    # "approved", "changes_requested", "commented", and "dismissed".
-    # Only the first two affect auto-merge state. A pure "commented"
-    # review (very common — "lgtm but one question") would otherwise
-    # trigger a full workflow run that just exits at conditions-not-met.
-    # Same for "dismissed" reviews.
-    #
-    # The first clause keeps the non-review triggers
-    # (ready_for_review, review_request_removed) running normally —
-    # both are real state changes that must re-evaluate the PR.
-    # ----------------------------------------------------------------
+    # Only completed (not skipped) trigger runs from PRs in this repository. Fork
+    # PRs are never auto-merged (also enforced in the script), so skip them early.
     if: |
-      github.event_name != 'pull_request_review' ||
-      contains(fromJSON('["approved", "changes_requested"]'), github.event.review.state)
+      github.event.workflow_run.conclusion == 'success' &&
+      contains(fromJSON('["pull_request_review", "pull_request"]'), github.event.workflow_run.event) &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-26.04
+    timeout-minutes: 5
     permissions:
-      contents: read # Required: Sparse checkout for env files
-      pull-requests: write # Required: Update PR status and enable auto-merge
-      issues: write # Required: Add labels and create comments
+      contents: read # Required: Sparse checkout for env files + read branch rules
+      pull-requests: read # Required: Read PR state and reviews
+    outputs:
+      action: ${{ steps.process.outputs.action }}
+      pr-number: ${{ steps.process.outputs.pr-number }}
+      head-sha: ${{ steps.process.outputs.head-sha }}
+      approvals: ${{ steps.process.outputs.approvals }}
+      changes-requested: ${{ steps.process.outputs.changes-requested }}
+      pending-reviews: ${{ steps.process.outputs.pending-reviews }}
+      merge-type: ${{ steps.process.outputs.merge-type }}
+      delete-branch: ${{ steps.process.outputs.delete-branch }}
+      min-approvals: ${{ steps.process.outputs.min-approvals }}
+      comment-on-enable: ${{ steps.process.outputs.comment-on-enable }}
+      comment-on-disable: ${{ steps.process.outputs.comment-on-disable }}
+      labels-to-add: ${{ steps.process.outputs.labels-to-add }}
 
     steps:
       # --------------------------------------------------------------------
       # Check out code to access env file
       # --------------------------------------------------------------------
       - name: 📥 Checkout code (sparse)
-        # SECURITY: pin the checkout to the trusted base ref so the local
-        # ./.github/actions/load-env action (run below with pull-requests/issues write)
-        # can never be a PR-controlled version. Default checkout on pull_request /
-        # pull_request_review events resolves to the PR merge ref, which is attacker-influenced.
-        # `github.base_ref` is ONLY populated for pull_request / pull_request_target — it is
-        # empty on pull_request_review, where `github.ref` is refs/pull/<n>/merge (PR-controlled).
-        # Read the base branch directly from the event payload so it is the trusted base ref for
-        # BOTH triggers. Env files and the action are not modified there, so base-ref loading is safe.
+        # SECURITY: on workflow_run, github.sha is the latest commit on the DEFAULT
+        # branch — the same commit this workflow file came from — so the local
+        # ./.github/actions/load-env action is never a PR-controlled version.
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.ref }}
+          ref: ${{ github.sha }}
           persist-credentials: false
           sparse-checkout: |
             .github/env
@@ -119,6 +133,7 @@ jobs:
       - name: 🔧 Extract configuration
         env:
           ENV_JSON: ${{ steps.load-env.outputs.env-json }}
+          APP_CLIENT_ID: ${{ vars.AUTO_MERGE_APP_CLIENT_ID }}
         run: |
           echo "📋 Extracting auto-merge configuration from environment..."
 
@@ -159,25 +174,56 @@ jobs:
           echo "  🤖 Skip bot PRs: $(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_BOT_PRS')"
           echo "  🍴 Skip fork PRs: $(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_SKIP_FORK_PRS')"
           echo "  🏷️ Require automerge label: $(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_REQUIRE_LABEL')"
-          echo "  🔑 Token: Selected via github-script action"
+          if [[ -n "$APP_CLIENT_ID" ]]; then
+            echo "  🔑 Enable/disable: GitHub App ($APP_CLIENT_ID) via the 'auto-merge' environment"
+          else
+            echo "  🔑 Enable/disable: not configured (AUTO_MERGE_APP_CLIENT_ID unset) — evaluation only"
+          fi
 
       # --------------------------------------------------------------------
-      # Process the PR for auto-merge
+      # Evaluate the PR from fresh API data
       # --------------------------------------------------------------------
-      - name: 🔍 Check conditions and enable auto-merge
+      - name: 🔍 Check conditions
         id: process
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          # actions/github-script only wires the token into the injected `github`
-          # Octokit client — it never sets process.env.GITHUB_TOKEN. The script
-          # below shells out to `gh pr merge` via execSync and reads
-          # process.env.GITHUB_TOKEN directly, so it must be set explicitly here.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const { owner, repo } = context.repo;
-            const prNumber = context.payload.pull_request.number;
+            const run = context.payload.workflow_run;
+
+            // Configuration the `apply` job needs (it has no checkout or env files)
+            core.setOutput('merge-type', process.env.DEFAULT_MERGE_TYPE);
+            core.setOutput('delete-branch', process.env.DELETE_BRANCH);
+            core.setOutput('min-approvals', process.env.MIN_APPROVALS);
+            core.setOutput('comment-on-enable', process.env.COMMENT_ON_ENABLE);
+            core.setOutput('comment-on-disable', process.env.COMMENT_ON_DISABLE);
+            core.setOutput('labels-to-add', process.env.LABELS_TO_ADD);
+
+            // ————————————————————————————————————————————————————————————————
+            // Resolve the PR. Nothing from the trigger run is trusted: only its
+            // head branch/SHA are used to find the PR, then everything is
+            // re-read from the API.
+            // ————————————————————————————————————————————————————————————————
+            let prNumber = (run.pull_requests || [])
+              .find(p => p.head && p.head.sha === run.head_sha)?.number;
+            if (!prNumber) {
+              const { data: associated } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner,
+                repo,
+                commit_sha: run.head_sha,
+              });
+              prNumber = associated.find(p =>
+                p.state === 'open' &&
+                p.head?.ref === run.head_branch &&
+                p.head?.repo?.full_name === `${owner}/${repo}`
+              )?.number;
+            }
+            if (!prNumber) {
+              console.log(`ℹ️  No open pull request found for ${run.head_branch} @ ${run.head_sha}`);
+              core.setOutput('action', 'skip-no-pr');
+              return;
+            }
 
             console.log(`🔍 Checking auto-merge conditions for PR #${prNumber}`);
             console.log('════════════════════════════════════════════════════════════════');
@@ -189,8 +235,17 @@ jobs:
               pull_number: prNumber,
             });
 
+            core.setOutput('pr-number', String(prNumber));
+            core.setOutput('head-sha', pr.head.sha);
+
             console.log(`📋 PR #${prNumber}: "${pr.title}"`);
             console.log(`👤 Author: ${pr.user.login} (${pr.user.type})`);
+
+            if (pr.state !== 'open') {
+              console.log(`⏭️ PR is ${pr.state} - nothing to do`);
+              core.setOutput('action', 'skip-not-open');
+              return;
+            }
 
             // ————————————————————————————————————————————————————————————————
             // Check if we should skip bot PRs
@@ -217,7 +272,7 @@ jobs:
 
             // Hard guard: fork PRs are NEVER auto-merged, independent of the
             // AUTO_MERGE_SKIP_FORK_PRS toggle. Auto-approving/merging fork-authored code is
-            // unsafe, and the GITHUB_TOKEN is read-only on fork PRs anyway.
+            // unsafe.
             {
               const headRepoFullName = pr.head.repo.full_name;
               const baseRepoFullName = `${owner}/${repo}`;
@@ -279,10 +334,11 @@ jobs:
             // ————————————————————————————————————————————————————————————————
             // Check review conditions
             // ————————————————————————————————————————————————————————————————
-            const { data: reviews } = await github.rest.pulls.listReviews({
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
               owner,
               repo,
               pull_number: prNumber,
+              per_page: 100,
             });
 
             // Get latest review per user
@@ -306,53 +362,25 @@ jobs:
             const requestedReviewers = (pr.requested_reviewers || []).length;
             const minApprovals = parseInt(process.env.MIN_APPROVALS);
 
+            core.setOutput('approvals', String(approvals));
+            core.setOutput('changes-requested', String(changesRequested));
+            core.setOutput('pending-reviews', String(requestedReviewers));
+
             console.log(`👥 Reviews: ${approvals} approvals, ${changesRequested} changes requested, ${requestedReviewers} pending`);
             console.log(`✅ Required approvals: ${minApprovals}`);
 
             // ————————————————————————————————————————————————————————————————
-            // Check if this is a disable event (a CHANGES_REQUESTED review). This MUST run
-            // before the approval-threshold check below — otherwise the "conditions-not-met"
-            // early return makes this block unreachable (dead code) exactly when a
-            // changes-requested review needs to disable an already-armed auto-merge.
+            // Outstanding "Changes Requested" reviews disable an armed auto-merge.
+            // This is state-based (not event-based), so it MUST run before the
+            // approval-threshold check below, which would otherwise return first.
             // ————————————————————————————————————————————————————————————————
-            if (context.eventName === 'pull_request_review' &&
-                context.payload.review &&
-                context.payload.review.state === 'CHANGES_REQUESTED') {
-
-              // Try to disable auto-merge
-              try {
-                const { execSync } = require('child_process');
-                execSync(`gh pr merge --disable-auto "${pr.html_url}"`, {
-                  env: {
-                    ...process.env,
-                    GH_TOKEN: process.env.GITHUB_TOKEN
-                  },
-                  stdio: 'inherit'
-                });
-
-                console.log('🛑 Auto-merge disabled due to "Changes Requested" review');
-
-                if (process.env.COMMENT_ON_DISABLE === 'true') {
-                  await github.rest.issues.createComment({
-                    owner,
-                    repo,
-                    issue_number: prNumber,
-                    body: `🛑 **Auto-merge disabled**\n\nChanges were requested in a review. Auto-merge will be re-enabled when conditions are met again.`
-                  });
-                }
-
-                core.setOutput('action', 'disabled-changes-requested');
-              } catch (disableError) {
-                // Differentiate between "not enabled" and actual failures
-                if (disableError.message && (
-                  disableError.message.includes('not enabled') ||
-                  disableError.message.includes('auto-merge is not enabled')
-                )) {
-                  console.log('ℹ️  Auto-merge was not enabled, no action needed');
-                } else {
-                  console.error(`❌ Failed to disable auto-merge: ${disableError.message}`);
-                  // Don't fail workflow, but log the error properly
-                }
+            if (changesRequested > 0) {
+              if (pr.auto_merge) {
+                console.log('🛑 "Changes Requested" review outstanding - auto-merge will be disabled');
+                core.setOutput('action', 'disable');
+              } else {
+                console.log('🚫 Has "Changes Requested" reviews');
+                core.setOutput('action', 'conditions-not-met');
               }
               return;
             }
@@ -360,7 +388,7 @@ jobs:
             // ————————————————————————————————————————————————————————————————
             // Determine if we should enable auto-merge
             // ————————————————————————————————————————————————————————————————
-            let shouldEnableAutoMerge = approvals >= minApprovals && changesRequested === 0;
+            let shouldEnableAutoMerge = approvals >= minApprovals;
 
             if (process.env.REQUIRE_ALL_REVIEWS === 'true' && requestedReviewers > 0) {
               shouldEnableAutoMerge = false;
@@ -370,9 +398,6 @@ jobs:
               if (approvals < minApprovals) {
                 console.log(`⏳ Needs ${minApprovals - approvals} more approval(s)`);
               }
-              if (changesRequested > 0) {
-                console.log('🚫 Has "Changes Requested" reviews');
-              }
               if (process.env.REQUIRE_ALL_REVIEWS === 'true' && requestedReviewers > 0) {
                 console.log(`⏳ Has ${requestedReviewers} pending reviewer request(s)`);
               }
@@ -380,115 +405,46 @@ jobs:
               return;
             }
 
+            // Check if auto-merge is already enabled
+            if (pr.auto_merge) {
+              console.log('✅ Auto-merge already enabled');
+              core.setOutput('action', 'already-enabled');
+              return;
+            }
+
             // ————————————————————————————————————————————————————————————————
-            // Enable auto-merge
+            // Merge guard (always enforced): the base branch must require status
+            // checks, via a ruleset or classic branch protection. Otherwise
+            // "auto-merge" would merge immediately, before CI. Fails closed.
             // ————————————————————————————————————————————————————————————————
             try {
-              // Check if auto-merge is already enabled
-              if (pr.auto_merge) {
-                console.log('✅ Auto-merge already enabled');
-                core.setOutput('action', 'already-enabled');
+              const { data: rules } = await github.request('GET /repos/{owner}/{repo}/rules/branches/{branch}', {
+                owner,
+                repo,
+                branch: pr.base.ref,
+              });
+              const rulesetChecks = rules
+                .filter(r => r.type === 'required_status_checks')
+                .flatMap(r => r.parameters?.required_status_checks || []).length;
+
+              const { data: branch } = await github.rest.repos.getBranch({ owner, repo, branch: pr.base.ref });
+              const classic = branch.protection?.required_status_checks;
+              const classicChecks = classic && classic.enforcement_level !== 'off' ? (classic.contexts || []).length : 0;
+
+              console.log(`🛡️ Required checks on '${pr.base.ref}': rulesets=${rulesetChecks} classic=${classicChecks}`);
+              if (rulesetChecks === 0 && classicChecks === 0) {
+                console.log(`🚫 '${pr.base.ref}' requires no status checks — auto-merge would merge before CI`);
+                core.setOutput('action', 'skip-no-required-checks');
                 return;
               }
-
-              // Enable auto-merge with the configured merge type
-              const { execSync } = require('child_process');
-              const mergeType = process.env.DEFAULT_MERGE_TYPE;
-
-              let mergeCommand = `gh pr merge --auto`;
-              if (mergeType === 'squash') {
-                mergeCommand += ' --squash';
-              } else if (mergeType === 'merge') {
-                mergeCommand += ' --merge';
-              } else if (mergeType === 'rebase') {
-                mergeCommand += ' --rebase';
-              }
-
-              if (process.env.DELETE_BRANCH === 'true') {
-                mergeCommand += ' --delete-branch';
-              }
-
-              mergeCommand += ` "${pr.html_url}"`;
-
-              console.log(`🚀 Enabling auto-merge with command: ${mergeCommand}`);
-
-              try {
-                execSync(mergeCommand, {
-                  env: {
-                    ...process.env,
-                    GH_TOKEN: process.env.GITHUB_TOKEN
-                  },
-                  stdio: 'inherit'
-                });
-
-                console.log('✅ Auto-merge enabled! PR will merge when all status checks pass.');
-              } catch (enableError) {
-                // Handle race condition: another workflow run may have enabled auto-merge
-                if (enableError.message && (
-                  enableError.message.includes('already enabled') ||
-                  enableError.message.includes('auto-merge is already enabled')
-                )) {
-                  console.log('ℹ️  Auto-merge already enabled by another workflow run');
-                  core.setOutput('action', 'already-enabled');
-                  return;
-                }
-                // Re-throw other errors to be caught by outer catch block
-                throw enableError;
-              }
-
-              // Add comment if configured
-              if (process.env.COMMENT_ON_ENABLE === 'true') {
-                const mergeTypeText = mergeType === 'squash' ? 'squash and merge' :
-                                     mergeType === 'merge' ? 'create a merge commit' :
-                                     'rebase and merge';
-
-                await github.rest.issues.createComment({
-                  owner,
-                  repo,
-                  issue_number: prNumber,
-                  body: `🤖 **Auto-merge enabled**\n\nThis PR will automatically ${mergeTypeText} when all required status checks pass.\n\n` +
-                        `✅ Approvals: ${approvals}/${minApprovals}\n` +
-                        `🔍 Changes requested: ${changesRequested}\n` +
-                        `⏳ Pending reviews: ${requestedReviewers}`
-                });
-              }
-
-              // Add labels if configured
-              if (process.env.LABELS_TO_ADD) {
-                const labelsToAdd = process.env.LABELS_TO_ADD.split(',').map(l => l.trim()).filter(l => l);
-                if (labelsToAdd.length > 0) {
-                  await github.rest.issues.addLabels({
-                    owner,
-                    repo,
-                    issue_number: prNumber,
-                    labels: labelsToAdd
-                  });
-                  console.log(`🏷️ Added labels: ${labelsToAdd.join(', ')}`);
-                }
-              }
-
-              core.setOutput('action', 'enabled');
-
             } catch (error) {
-              console.error('❌ Failed to enable auto-merge:', error.message);
-
-              // Comment on failure if configured
-              if (process.env.COMMENT_ON_ENABLE === 'true') {
-                await github.rest.issues.createComment({
-                  owner,
-                  repo,
-                  issue_number: prNumber,
-                  body: `⚠️ **Auto-merge failed**\n\nCould not enable auto-merge: ${error.message}\n\n` +
-                        `This might be due to:\n` +
-                        `- Branch protection rules\n` +
-                        `- Missing permissions\n` +
-                        `- Repository settings`
-                });
-              }
-
-              core.setOutput('action', 'failed');
-              throw error;
+              console.log(`❌ Could not read rules for '${pr.base.ref}' (${error.message}) — failing closed`);
+              core.setOutput('action', 'skip-no-required-checks');
+              return;
             }
+
+            console.log('🚀 All conditions met - auto-merge will be enabled');
+            core.setOutput('action', 'enable');
 
       # --------------------------------------------------------------------
       # Generate a workflow summary report
@@ -496,36 +452,51 @@ jobs:
       - name: 📊 Generate workflow summary
         if: always()
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ steps.process.outputs.pr-number }}
           ACTION: ${{ steps.process.outputs.action }}
+          APP_CLIENT_ID: ${{ vars.AUTO_MERGE_APP_CLIENT_ID }}
         run: |
           echo "📊 Generating workflow summary..."
 
           # Determine action taken
           case "$ACTION" in
-            "enabled")                       ACTION_DESC="✅ Auto-merge enabled" ;;
+            "enable")                        ACTION_DESC="🚀 Enable auto-merge" ;;
+            "disable")                       ACTION_DESC="🛑 Disable auto-merge (changes requested)" ;;
             "already-enabled")               ACTION_DESC="✅ Auto-merge already enabled" ;;
-            "disabled-changes-requested")    ACTION_DESC="🛑 Auto-merge disabled (changes requested)" ;;
             "skip-bot")                      ACTION_DESC="🤖 Skipped (bot PR)" ;;
             "skip-fork")                     ACTION_DESC="🍴 Skipped (fork PR - security policy)" ;;
             "skip-deleted-fork")             ACTION_DESC="🍴 Skipped (deleted fork PR)" ;;
             "skip-draft")                    ACTION_DESC="📝 Skipped (draft PR)" ;;
             "skip-wip")                      ACTION_DESC="🚧 Skipped (work in progress)" ;;
             "skip-missing-automerge-label")  ACTION_DESC="🏷️ Skipped (missing automerge label)" ;;
+            "skip-no-required-checks")       ACTION_DESC="🚫 Skipped (base branch requires no status checks)" ;;
+            "skip-no-pr")                    ACTION_DESC="ℹ️ Skipped (no open PR for this run)" ;;
+            "skip-not-open")                 ACTION_DESC="ℹ️ Skipped (PR not open)" ;;
             "conditions-not-met")            ACTION_DESC="⏳ Conditions not met" ;;
-            "failed")                        ACTION_DESC="❌ Failed to enable auto-merge" ;;
             *)                               ACTION_DESC="❓ Unknown action: $ACTION" ;;
           esac
+
+          if [[ "$ACTION" == "enable" || "$ACTION" == "disable" ]]; then
+            if [[ -n "$APP_CLIENT_ID" ]]; then
+              APPLY_DESC="Handled by the **apply** job (GitHub App) — see its summary below."
+            else
+              APPLY_DESC="⏭️ Not applied: the GitHub App is not configured (\`AUTO_MERGE_APP_CLIENT_ID\` is unset)."
+            fi
+          else
+            APPLY_DESC="Nothing to apply."
+          fi
 
           {
             echo "# 🤖 Auto-merge on Approval Summary"
             echo ""
             echo "**⏰ Processed:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-            echo "**📋 PR:** #$PR_NUMBER"
+            echo "**📋 PR:** #${PR_NUMBER:-unknown}"
             echo ""
-            echo "## 🎯 Action Taken"
+            echo "## 🎯 Decision"
             echo ""
             echo "$ACTION_DESC"
+            echo ""
+            echo "$APPLY_DESC"
             echo ""
             echo "### 🔧 Current Configuration"
             echo ""
@@ -543,29 +514,213 @@ jobs:
             echo "🤖 _Automated by GitHub Actions_"
           } >> $GITHUB_STEP_SUMMARY
 
+  # ----------------------------------------------------------------------------------
+  # Apply: enable or disable auto-merge with a GitHub App token
+  #
+  # SECURITY: this is the only job that can read the App private key. Every step in
+  # a job can read every secret the job uses (they sit in the runner's memory), so
+  # this job runs nothing but GitHub's own token action (pinned by SHA) and the
+  # preinstalled gh CLI: no checkout, no local actions, no third-party actions.
+  #
+  # The `auto-merge` environment holds the key and must only allow protected
+  # long-lived branches. workflow_run always runs on the default branch.
+  # `deployment: false` uses its secrets without creating a deployment record.
+  # ----------------------------------------------------------------------------------
+  apply:
+    name: 🚀 Apply auto-merge decision
+    needs: evaluate
+    if: |
+      vars.AUTO_MERGE_APP_CLIENT_ID != '' &&
+      contains(fromJSON('["enable", "disable"]'), needs.evaluate.outputs.action)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    environment:
+      name: auto-merge
+      deployment: false
+    permissions: {} # Everything here uses the App token, never GITHUB_TOKEN
+
+    steps:
       # --------------------------------------------------------------------
-      # Report final workflow status (stdout)
+      # Mint a short-lived installation token (this repository only)
       # --------------------------------------------------------------------
-      - name: 📢 Report workflow status
+      - name: 🔑 Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUTO_MERGE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUTO_MERGE_APP_PRIVATE_KEY }}
+          # Least privilege: no owner/repositories inputs = this repository only, and
+          # only the two permissions merging needs. Revoked at job end.
+          permission-contents: write
+          permission-pull-requests: write
+
+      # --------------------------------------------------------------------
+      # Enable auto-merge, pinned to the evaluated head commit
+      # --------------------------------------------------------------------
+      - name: 🚀 Enable auto-merge
+        id: enable
+        if: needs.evaluate.outputs.action == 'enable'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.evaluate.outputs.pr-number }}
+          HEAD_SHA: ${{ needs.evaluate.outputs.head-sha }}
+          MERGE_TYPE: ${{ needs.evaluate.outputs.merge-type }}
+          DELETE_BRANCH: ${{ needs.evaluate.outputs.delete-branch }}
+          COMMENT_ON_ENABLE: ${{ needs.evaluate.outputs.comment-on-enable }}
+          LABELS_TO_ADD: ${{ needs.evaluate.outputs.labels-to-add }}
+          APPROVALS: ${{ needs.evaluate.outputs.approvals }}
+          MIN_APPROVALS: ${{ needs.evaluate.outputs.min-approvals }}
+          CHANGES_REQUESTED: ${{ needs.evaluate.outputs.changes-requested }}
+          PENDING_REVIEWS: ${{ needs.evaluate.outputs.pending-reviews }}
+        run: |
+          outcome() { echo "outcome=$1" >> "$GITHUB_OUTPUT"; }
+
+          # Re-read the PR right before acting
+          read -r STATE CURRENT_SHA ARMED < <(gh api "repos/$REPO/pulls/$PR_NUMBER" \
+            --jq '[.state, .head.sha, (.auto_merge != null)] | @tsv')
+          if [[ "$STATE" != "open" ]]; then
+            echo "⏭️ PR #$PR_NUMBER is $STATE — nothing to do"
+            outcome skipped-not-open
+            exit 0
+          fi
+          if [[ "$CURRENT_SHA" != "$HEAD_SHA" ]]; then
+            echo "⏭️ Head moved from $HEAD_SHA to $CURRENT_SHA since evaluation — not enabling"
+            outcome skipped-head-moved
+            exit 0
+          fi
+          if [[ "$ARMED" == "true" ]]; then
+            echo "✅ Auto-merge already enabled"
+            outcome already-enabled
+            exit 0
+          fi
+
+          ARGS=(pr merge "$PR_NUMBER" --repo "$REPO" --auto --match-head-commit "$HEAD_SHA")
+          case "$MERGE_TYPE" in
+            merge)  ARGS+=(--merge);  MERGE_TYPE_TEXT="create a merge commit" ;;
+            rebase) ARGS+=(--rebase); MERGE_TYPE_TEXT="rebase and merge" ;;
+            *)      ARGS+=(--squash); MERGE_TYPE_TEXT="squash and merge" ;;
+          esac
+          if [[ "$DELETE_BRANCH" == "true" ]]; then
+            ARGS+=(--delete-branch)
+          fi
+
+          echo "🚀 Enabling auto-merge: gh ${ARGS[*]}"
+          if MERGE_OUTPUT=$(gh "${ARGS[@]}" 2>&1); then
+            echo "$MERGE_OUTPUT"
+            echo "✅ Auto-merge enabled! PR will merge when all status checks pass."
+          elif grep -qi "already enabled" <<< "$MERGE_OUTPUT"; then
+            # Race: another run enabled it first
+            echo "ℹ️  Auto-merge already enabled by another workflow run"
+            outcome already-enabled
+            exit 0
+          else
+            echo "❌ Failed to enable auto-merge: $MERGE_OUTPUT"
+            if [[ "$COMMENT_ON_ENABLE" == "true" ]]; then
+              gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" --silent -f body="⚠️ **Auto-merge failed**
+
+          Could not enable auto-merge: $MERGE_OUTPUT
+
+          This might be due to:
+          - Branch protection rules
+          - Missing permissions
+          - Repository settings"
+            fi
+            outcome failed
+            exit 1
+          fi
+
+          # Add comment if configured
+          if [[ "$COMMENT_ON_ENABLE" == "true" ]]; then
+            gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" --silent -f body="🤖 **Auto-merge enabled**
+
+          This PR will automatically $MERGE_TYPE_TEXT when all required status checks pass.
+
+          ✅ Approvals: $APPROVALS/$MIN_APPROVALS
+          🔍 Changes requested: $CHANGES_REQUESTED
+          ⏳ Pending reviews: $PENDING_REVIEWS"
+          fi
+
+          # Add labels if configured
+          LABEL_ARGS=()
+          IFS=',' read -ra LABELS <<< "$LABELS_TO_ADD"
+          for label in "${LABELS[@]}"; do
+            # Trim surrounding whitespace
+            label="${label#"${label%%[![:space:]]*}"}"
+            label="${label%"${label##*[![:space:]]}"}"
+            if [[ -n "$label" ]]; then
+              LABEL_ARGS+=(-f "labels[]=$label")
+            fi
+          done
+          if [[ ${#LABEL_ARGS[@]} -gt 0 ]]; then
+            gh api -X POST "repos/$REPO/issues/$PR_NUMBER/labels" --silent "${LABEL_ARGS[@]}"
+            echo "🏷️ Added labels: $LABELS_TO_ADD"
+          fi
+
+          outcome enabled
+
+      # --------------------------------------------------------------------
+      # Disable auto-merge (changes requested)
+      # --------------------------------------------------------------------
+      - name: 🛑 Disable auto-merge
+        id: disable
+        if: needs.evaluate.outputs.action == 'disable'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.evaluate.outputs.pr-number }}
+          COMMENT_ON_DISABLE: ${{ needs.evaluate.outputs.comment-on-disable }}
+        run: |
+          if DISABLE_OUTPUT=$(gh pr merge "$PR_NUMBER" --repo "$REPO" --disable-auto 2>&1); then
+            echo "🛑 Auto-merge disabled due to \"Changes Requested\" review"
+            if [[ "$COMMENT_ON_DISABLE" == "true" ]]; then
+              gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" --silent -f body="🛑 **Auto-merge disabled**
+
+          Changes were requested in a review. Auto-merge will be re-enabled when conditions are met again."
+            fi
+            echo "outcome=disabled" >> "$GITHUB_OUTPUT"
+          elif grep -qi "not enabled" <<< "$DISABLE_OUTPUT"; then
+            echo "ℹ️  Auto-merge was not enabled, no action needed"
+            echo "outcome=not-enabled" >> "$GITHUB_OUTPUT"
+          else
+            # Don't fail the workflow, but log the error properly
+            echo "❌ Failed to disable auto-merge: $DISABLE_OUTPUT"
+            echo "outcome=failed-disable" >> "$GITHUB_OUTPUT"
+          fi
+
+      # --------------------------------------------------------------------
+      # Outcome summary
+      # --------------------------------------------------------------------
+      - name: 📊 Generate apply summary
         if: always()
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          ACTION: ${{ steps.process.outputs.action }}
+          ENABLE_OUTCOME: ${{ steps.enable.outputs.outcome }}
+          DISABLE_OUTCOME: ${{ steps.disable.outputs.outcome }}
+          TOKEN_OUTCOME: ${{ steps.app-token.outcome }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          PR_NUMBER: ${{ needs.evaluate.outputs.pr-number }}
         run: |
-          echo "=== 🤖 Auto-merge on Approval Summary ==="
-          echo "📋 PR: #$PR_NUMBER"
-
-          case "$ACTION" in
-            enabled)                       echo "✅ Action: Auto-merge enabled successfully" ;;
-            already-enabled)               echo "✅ Action: Auto-merge was already enabled" ;;
-            disabled-changes-requested)    echo "🛑 Action: Auto-merge disabled due to changes requested" ;;
-            skip-fork)                     echo "🍴 Action: Skipped - Fork PR (security policy)" ;;
-            skip-missing-automerge-label)  echo "🏷️ Action: Skipped - Missing automerge label" ;;
-            skip-*)                        echo "⏭️ Action: Skipped - $ACTION" ;;
-            conditions-not-met)            echo "⏳ Action: Waiting for conditions to be met" ;;
-            failed)                        echo "❌ Action: Failed to enable auto-merge" ;;
-            *)                             echo "❓ Action: $ACTION" ;;
+          OUTCOME="${ENABLE_OUTCOME:-${DISABLE_OUTCOME:-}}"
+          if [[ "$TOKEN_OUTCOME" != "success" ]]; then
+            OUTCOME="token-failed"
+          fi
+          case "$OUTCOME" in
+            enabled)            DESC="✅ Auto-merge enabled" ;;
+            already-enabled)    DESC="✅ Auto-merge was already enabled" ;;
+            disabled)           DESC="🛑 Auto-merge disabled (changes requested)" ;;
+            not-enabled)        DESC="ℹ️ Auto-merge was not enabled" ;;
+            skipped-not-open)   DESC="⏭️ Skipped (PR no longer open)" ;;
+            skipped-head-moved) DESC="⏭️ Skipped (head moved since evaluation)" ;;
+            failed)             DESC="❌ Failed to enable auto-merge" ;;
+            failed-disable)     DESC="❌ Failed to disable auto-merge" ;;
+            token-failed)       DESC="❌ Could not create the GitHub App token (App installed? key set in the 'auto-merge' environment?)" ;;
+            *)                  DESC="❓ Unknown outcome: ${OUTCOME:-none}" ;;
           esac
-
-          echo "🕐 Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          echo "✅ Workflow completed!"
+          {
+            echo "## 🚀 Apply Outcome — PR #$PR_NUMBER"
+            echo ""
+            echo "$DESC"
+            echo ""
+            echo "**Acting as:** \`${APP_SLUG:-unknown}[bot]\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Apply outcome: $DESC"
