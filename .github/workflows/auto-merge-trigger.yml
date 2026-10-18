@@ -1,0 +1,63 @@
+# ------------------------------------------------------------------------------------
+#  Auto-merge Trigger Workflow
+#
+#  Purpose: Wake up "Auto-merge on Approval" (auto-merge-on-approval.yml) when a
+#           review or PR state change might change the auto-merge decision.
+#
+#  Why this exists: review events always run the PR's OWN copy of a workflow, so a
+#  PR could change what runs. This workflow therefore does nothing and holds no
+#  permissions or secrets. "Auto-merge on Approval" listens for its completion via
+#  `workflow_run`, which always runs the copy on the DEFAULT branch, re-reads the
+#  PR from the API, and is the only workflow that can use the GitHub App key.
+#
+#  Triggers:
+#  - Pull request reviews (submitted)
+#  - Pull request state changes (ready_for_review, review_request_removed)
+#
+#  Maintainer: @mrz1836
+#
+# ------------------------------------------------------------------------------------
+
+name: Auto-merge Trigger
+
+# --------------------------------------------------------------------
+# Trigger Configuration
+# --------------------------------------------------------------------
+on:
+  pull_request_review:
+    types: [submitted]
+  pull_request:
+    types: [ready_for_review, review_request_removed]
+
+# Security: this workflow needs no permissions at all
+permissions: {}
+
+jobs:
+  # ----------------------------------------------------------------------------------
+  # Hand off to the privileged evaluator
+  # ----------------------------------------------------------------------------------
+  trigger:
+    name: 📨 Queue auto-merge evaluation
+    # ----------------------------------------------------------------
+    # Event gate: skip review events that can't meaningfully
+    # change the auto-merge decision.
+    #
+    # `pull_request_review:submitted` fires for ALL review states —
+    # "approved", "changes_requested", "commented", and "dismissed".
+    # Only the first two affect auto-merge state. A skipped run
+    # finishes as "skipped", which the evaluator ignores, so a pure
+    # "commented" review costs no evaluation at all.
+    # ----------------------------------------------------------------
+    if: |
+      github.event_name != 'pull_request_review' ||
+      contains(fromJSON('["approved", "changes_requested"]'), github.event.review.state)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 2
+    steps:
+      - name: 📨 Hand off to "Auto-merge on Approval"
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          echo "📨 PR #$PR_NUMBER ($EVENT_NAME)"
+          echo "\"Auto-merge on Approval\" evaluates this PR from the default branch next."
