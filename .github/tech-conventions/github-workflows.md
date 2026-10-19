@@ -217,21 +217,55 @@ env:
 * Consider forking critical third-party actions
 
 ### Pull Request Safety
+
+Don't use `pull_request_target`. GitHub disables it by default on public repositories without an Actions event policy allowing it ([workflow execution protections](https://github.blog/changelog/2026-09-17-workflow-execution-protections-in-github-actions-generally-available/)), and it is the classic "pwn request" foot-gun. Split privileged PR work into an unprivileged `pull_request` workflow and a `workflow_run` consumer, as `auto-merge-trigger.yml` and its consumers do:
+
 ```yaml
-# Limit permissions for PR workflows
+# 1) Unprivileged half: runs the PR's own copy, so it gets no permissions and does nothing that matters
+name: PR Trigger
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize]
-
-permissions:
-  contents: read
-  pull-requests: write
-
-# Validate PR source
-- name: Check PR safety
-  if: github.event.pull_request.head.repo.fork == true
-  run: echo "::warning::PR from fork - limited permissions applied"
+permissions: {}
+jobs:
+  queue:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 2
+    steps:
+      - run: echo "queued"
 ```
+
+```yaml
+# 2) Privileged half: always runs the DEFAULT branch's copy, with its own token and secrets
+name: PR Follow-up
+on:
+  workflow_run:
+    workflows: ["PR Trigger"]
+    types: [completed]
+permissions: {}
+jobs:
+  act:
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      # Trust only GitHub's payload + fresh API reads: never artifacts, outputs or
+      # logs from the triggering run, and never check out or run the PR's code.
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            // Only this repository's PRs, and never guess between several
+            const prs = run.pull_requests.filter(p =>
+              p.head.sha === run.head_sha && p.base.repo.id === context.payload.repository.id);
+            if (prs.length !== 1) return; // fork PRs aren't listed: look them up via the API
+            const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: prs[0].number });
+            if (pr.state !== 'open' || pr.head.sha !== run.head_sha) return; // re-verify everything
+```
+
+Pin whatever the privileged half does to the commit it verified (for example `commit_id` on an approval, `--match-head-commit` on `gh pr merge`), and re-read the PR right before acting.
 
 <br><br>
 
