@@ -1,18 +1,36 @@
 # ------------------------------------------------------------------------------------
 #  Auto-merge Trigger Workflow
 #
-#  Purpose: Wake up "Auto-merge on Approval" (auto-merge-on-approval.yml) when a
-#           review or PR state change might change the auto-merge decision.
+#  Purpose: The single unprivileged entry point for pull request automation. It
+#           holds no permissions or secrets, checks nothing out, and only queues
+#           the privileged workflows that listen for its completion:
+#           - "Auto-merge on Approval" (auto-merge-on-approval.yml): reviews and
+#             PR changes that can flip the approval-based auto-merge decision
+#           - "Dependabot Auto-merge" (dependabot-auto-merge.yml): Dependabot PRs
+#             opened, updated or reopened
+#           - "PR Management" (pull-request-management.yml): fork PRs opened,
+#             reopened, marked ready or closed (same-repo PRs run it directly)
 #
-#  Why this exists: review events always run the PR's OWN copy of a workflow, so a
-#  PR could change what runs. This workflow therefore does nothing and holds no
-#  permissions or secrets. "Auto-merge on Approval" listens for its completion via
-#  `workflow_run`, which always runs the copy on the DEFAULT branch, re-reads the
-#  PR from the API, and is the only workflow that can use the GitHub App key.
+#  Why this exists: `pull_request` and review events run the PR's OWN copy of a
+#  workflow, and Dependabot and fork runs get a read-only token and no secrets.
+#  So this workflow does nothing that matters. The consumers listen via
+#  `workflow_run`, which always runs the copy on the DEFAULT branch with its own
+#  token. They re-read the PR from the API and trust nothing this run produces.
+#  This replaces `pull_request_target`, which GitHub disables by default on
+#  public repositories without an Actions event policy allowing it (workflow
+#  execution protections, enforced from 2026-11-02).
+#
+#  Each job below is a wake-up filter for one consumer. The consumer checks that
+#  its own job ran (by job name, so keep the names in sync) before doing
+#  anything. That check only saves runs: a PR can change this file, so no
+#  consumer trusts it to allow anything. (Revoking after a push does need it to
+#  run, which is why Dependabot Auto-merge only approves when the base branch's
+#  rulesets dismiss stale approvals on push.)
 #
 #  Triggers:
-#  - Pull request reviews (submitted)
-#  - Pull request state changes (ready_for_review, review_request_removed)
+#  - Pull request reviews (submitted, dismissed)
+#  - Pull request changes: opened, head, title/base, labels, draft state, review
+#    requests, reopening, manual arming, closing
 #
 #  Maintainer: @mrz1836
 #
@@ -25,32 +43,82 @@ name: Auto-merge Trigger
 # --------------------------------------------------------------------
 on:
   pull_request_review:
-    types: [submitted]
+    # `dismissed`: dismissing a "Changes Requested" review can allow arming, and
+    # dismissing an approval can require revoking an armed auto-merge.
+    types: [submitted, dismissed]
   pull_request:
-    types: [ready_for_review, review_request_removed]
+    # Every PR change one of the consumers acts on:
+    # - opened: a new Dependabot PR (Dependabot Auto-merge) or fork PR (PR Management)
+    # - synchronize: new head (apply skips a moved head, so it needs a fresh run);
+    #   on a Dependabot PR it also catches a push by anyone else (revocation)
+    # - edited: title (WIP) or base branch (required checks), gated below
+    # - labeled/unlabeled: the opt-in label and WIP labels
+    # - ready_for_review/converted_to_draft: draft state
+    # - review_requested/review_request_removed: pending reviews
+    # - reopened: a reopened PR may need arming (or labeling) again
+    # - auto_merge_enabled: a manual arming with "Changes Requested" outstanding
+    #   (the App's own arming fires it too; that evaluation finds it already
+    #   enabled, and never cancels the apply job that armed it)
+    # - closed: fork PR cache cleanup (PR Management)
+    # `auto_merge_disabled` is deliberately absent: re-evaluating it would re-arm a
+    # PR a maintainer just disarmed. Use a WIP label to hold a PR instead.
+    types:
+      - opened
+      - synchronize
+      - edited
+      - labeled
+      - unlabeled
+      - ready_for_review
+      - converted_to_draft
+      - review_requested
+      - review_request_removed
+      - reopened
+      - auto_merge_enabled
+      - closed
 
 # Security: this workflow needs no permissions at all
 permissions: {}
 
 jobs:
   # ----------------------------------------------------------------------------------
-  # Hand off to the privileged evaluator
+  # Hand off to "Auto-merge on Approval"
   # ----------------------------------------------------------------------------------
   trigger:
+    # Consumers match this exact name: keep it in sync with auto-merge-on-approval.yml
     name: 📨 Queue auto-merge evaluation
     # ----------------------------------------------------------------
-    # Event gate: skip review events that can't meaningfully
-    # change the auto-merge decision.
+    # Event gate: skip events that can't change the auto-merge
+    # decision.
     #
-    # `pull_request_review:submitted` fires for ALL review states —
-    # "approved", "changes_requested", "commented", and "dismissed".
-    # Only the first two affect auto-merge state. A skipped run
-    # finishes as "skipped", which the evaluator ignores, so a pure
-    # "commented" review costs no evaluation at all.
+    # Same-repo PRs only: the evaluator never auto-merges fork PRs.
+    #
+    # `pull_request_review:submitted` fires for every review state:
+    # "approved", "changes_requested" and "commented". Only the first
+    # two affect auto-merge state. A run whose jobs are all skipped
+    # concludes "skipped", which the evaluator ignores (it also
+    # confirms this job ran), so a pure "commented" review costs no
+    # evaluation at all.
+    #
+    # `pull_request_review:dismissed` always passes: the payload only
+    # carries state "dismissed" (not what was dismissed), and removing
+    # an approval or a "Changes Requested" review can flip the decision.
+    #
+    # `pull_request:edited` passes only for title or base changes; a
+    # body edit can't change the decision. `opened` and `closed` are
+    # for the other consumers: an approval can't exist yet on a new PR,
+    # and a closed PR has nothing to arm.
     # ----------------------------------------------------------------
     if: |
-      github.event_name != 'pull_request_review' ||
-      contains(fromJSON('["approved", "changes_requested"]'), github.event.review.state)
+      github.event.pull_request.head.repo.full_name == github.repository && (
+        (github.event_name == 'pull_request' &&
+          github.event.action != 'opened' &&
+          github.event.action != 'closed' && (
+            github.event.action != 'edited' ||
+            github.event.changes.title ||
+            github.event.changes.base)) ||
+        (github.event_name == 'pull_request_review' && (
+          github.event.action == 'dismissed' ||
+          contains(fromJSON('["approved", "changes_requested"]'), github.event.review.state))))
     runs-on: ubuntu-26.04
     timeout-minutes: 2
     steps:
@@ -61,3 +129,55 @@ jobs:
         run: |
           echo "📨 PR #$PR_NUMBER ($EVENT_NAME)"
           echo "\"Auto-merge on Approval\" evaluates this PR from the default branch next."
+
+  # ----------------------------------------------------------------------------------
+  # Hand off to "Dependabot Auto-merge"
+  #
+  # opened/reopened: evaluate a Dependabot PR. synchronize: Dependabot rebased
+  # it (re-evaluate) or someone else pushed to it (revoke). The consumer
+  # re-checks all of this from the API: the PR's author, branch and commits.
+  # ----------------------------------------------------------------------------------
+  dependabot:
+    # Consumers match this exact name: keep it in sync with dependabot-auto-merge.yml
+    name: 📨 Queue Dependabot auto-merge
+    if: |
+      github.event_name == 'pull_request' &&
+      contains(fromJSON('["opened", "synchronize", "reopened"]'), github.event.action) &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-26.04
+    timeout-minutes: 2
+    steps:
+      - name: 📨 Hand off to "Dependabot Auto-merge"
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_ACTION: ${{ github.event.action }}
+        run: |
+          echo "📨 Dependabot PR #$PR_NUMBER ($EVENT_ACTION)"
+          echo "\"Dependabot Auto-merge\" verifies and evaluates this PR from the default branch next."
+
+  # ----------------------------------------------------------------------------------
+  # Hand off to "PR Management" (fork PRs only)
+  #
+  # A fork PR's own runs only ever get a read-only token, so its labels,
+  # assignee, welcome comment and cache cleanup run in PR Management's
+  # `workflow_run` job. Same-repo PRs run PR Management directly.
+  # ----------------------------------------------------------------------------------
+  pr-management:
+    # Consumers match this exact name: keep it in sync with pull-request-management.yml
+    name: 📨 Queue fork PR management
+    if: |
+      github.event_name == 'pull_request' &&
+      contains(fromJSON('["opened", "reopened", "ready_for_review", "closed"]'), github.event.action) &&
+      github.event.pull_request.head.repo &&
+      github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-26.04
+    timeout-minutes: 2
+    steps:
+      - name: 📨 Hand off to "PR Management"
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_ACTION: ${{ github.event.action }}
+        run: |
+          echo "📨 Fork PR #$PR_NUMBER ($EVENT_ACTION)"
+          echo "\"PR Management\" handles this PR from the default branch next."
