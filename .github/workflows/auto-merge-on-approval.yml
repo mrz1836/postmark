@@ -32,13 +32,17 @@
 #    push workflows on the base branch.
 #
 #  Auto-merge Rules (configurable via .github/env/):
-#  - Minimum number of approvals
+#  - Minimum number of approvals of the PR's current head commit (an approval of
+#    an earlier commit doesn't cover what was pushed since)
 #  - No requested reviewers or teams remaining (if configured)
 #  - No "Changes Requested" reviews
 #  - PR ready for review (not draft, no WIP indicators)
 #  - Required opt-in label present (if configured)
 #  - Bot PRs handled separately (if configured)
 #  - The base branch must require status checks (always enforced)
+#  - The base branch's rulesets must require an approval and drop it on a new
+#    push: dismiss stale approvals, or require approval of the most recent push
+#    (always enforced; see .github/docs/auto-merge-github-app.md)
 #
 #  Revocation: auto-merge armed by the App is disabled as soon as any rule above
 #  stops holding. "Changes Requested" disables auto-merge whoever armed it; an
@@ -400,37 +404,61 @@ jobs:
             // Only count approvals from users with write-ish access (OWNER/MEMBER/COLLABORATOR).
             // Prevents a drive-by APPROVED review from an external account from satisfying the
             // approval threshold. Defense-in-depth on top of branch protection + CODEOWNERS.
+            // Only approvals of the current head commit count: the base branch may keep
+            // approvals after a push, and an approval of commit A says nothing about B.
+            // "Changes Requested" blocks whichever commit it was left on.
             const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
-            const approvals = currentReviews.filter(r => r.state === 'APPROVED' && TRUSTED_ASSOCIATIONS.has(r.author_association)).length;
+            const trustedApprovals = currentReviews.filter(r => r.state === 'APPROVED' && TRUSTED_ASSOCIATIONS.has(r.author_association));
+            const approvals = trustedApprovals.filter(r => r.commit_id === pr.head.sha).length;
+            const staleApprovals = trustedApprovals.length - approvals;
             const changesRequested = currentReviews.filter(r => r.state === 'CHANGES_REQUESTED').length;
             // Users AND teams still asked to review
             const pendingReviews = (pr.requested_reviewers || []).length + (pr.requested_teams || []).length;
             const minApprovals = parseInt(process.env.MIN_APPROVALS, 10); // validated in "Extract configuration"
 
-            console.log(`👥 Reviews: ${approvals} approvals, ${changesRequested} changes requested, ${pendingReviews} pending`);
+            console.log(`👥 Reviews: ${approvals} approvals of ${pr.head.sha.slice(0, 7)}, ${changesRequested} changes requested, ${pendingReviews} pending`);
+            if (staleApprovals > 0) {
+              console.log(`ℹ️  ${staleApprovals} approval(s) of earlier commits not counted`);
+            }
             console.log(`✅ Required approvals: ${minApprovals}`);
 
             // The base branch must require status checks (ruleset or classic branch
-            // protection), or "auto-merge" would merge immediately, before CI. A PR
-            // can be retargeted at any time, so this is re-checked like the rest.
-            // null = couldn't read the rules, which fails closed below.
+            // protection), or "auto-merge" would merge immediately, before CI.
+            // Its rulesets must also require an approval AND drop it on a new push
+            // (dismiss stale approvals, or require approval of the most recent
+            // push). Revoking after a push needs the PR-side trigger to run, and the
+            // pusher controls that file, so GitHub itself must make an approval of
+            // older code worthless to an armed auto-merge. Classic branch
+            // protection's review settings aren't readable with this token, so only
+            // rulesets count. A PR can be retargeted at any time, so this is
+            // re-checked like the rest. null = couldn't read the rules, which fails
+            // closed below.
             let requiredChecks = null;
+            let approvalsVoidedOnPush = null;
             try {
-              const { data: rules } = await github.request('GET /repos/{owner}/{repo}/rules/branches/{branch}', {
+              // Paginated (30 rules per page by default): a rule on a later page
+              // would otherwise be missed, and every check below would fail closed
+              const rules = await github.paginate('GET /repos/{owner}/{repo}/rules/branches/{branch}', {
                 owner,
                 repo,
                 branch: pr.base.ref,
+                per_page: 100,
               });
               const rulesetChecks = rules
                 .filter(r => r.type === 'required_status_checks')
                 .flatMap(r => r.parameters?.required_status_checks || []).length;
+              const reviewRules = rules.filter(r => r.type === 'pull_request').map(r => r.parameters || {});
+              const voided = reviewRules.some(p => (p.required_approving_review_count || 0) > 0) &&
+                reviewRules.some(p => p.dismiss_stale_reviews_on_push === true || p.require_last_push_approval === true);
 
               const { data: branch } = await github.rest.repos.getBranch({ owner, repo, branch: pr.base.ref });
               const classic = branch.protection?.required_status_checks;
               const classicChecks = classic && classic.enforcement_level !== 'off' ? (classic.contexts || []).length : 0;
 
               console.log(`🛡️ Required checks on '${pr.base.ref}': rulesets=${rulesetChecks} classic=${classicChecks}`);
+              console.log(`🛡️ Rulesets on '${pr.base.ref}' require an approval that a new push voids: ${voided}`);
               requiredChecks = rulesetChecks + classicChecks;
+              approvalsVoidedOnPush = voided;
             } catch (error) {
               console.log(`❌ Could not read rules for '${pr.base.ref}' (${error.message}) — failing closed`);
             }
@@ -460,15 +488,21 @@ jobs:
               blockers.push({ action: 'conditions-not-met', reason: 'changes requested' });
             }
             if (approvals < minApprovals) {
-              blockers.push({ action: 'conditions-not-met', reason: `approvals ${approvals}/${minApprovals}` });
+              blockers.push({ action: 'conditions-not-met', reason: `approvals of the latest commit ${approvals}/${minApprovals}` });
             }
             if (process.env.REQUIRE_ALL_REVIEWS === 'true' && pendingReviews > 0) {
               blockers.push({ action: 'conditions-not-met', reason: `${pendingReviews} review request(s) pending` });
             }
             if (requiredChecks === null) {
-              blockers.push({ action: 'skip-no-required-checks', reason: 'could not read the base branch required checks' });
-            } else if (requiredChecks === 0) {
-              blockers.push({ action: 'skip-no-required-checks', reason: 'base branch requires no status checks' });
+              blockers.push({ action: 'skip-no-required-checks', reason: 'could not read the base branch rules' });
+            } else {
+              if (requiredChecks === 0) {
+                blockers.push({ action: 'skip-no-required-checks', reason: 'base branch requires no status checks' });
+              }
+              if (!approvalsVoidedOnPush) {
+                blockers.push({ action: 'skip-stale-approvals-kept', reason: 'base branch keeps approvals after new pushes (or requires none)' });
+                core.warning(`Auto-merge on approval is off until a ruleset on ${pr.base.ref} requires at least one approval and turns on "Dismiss stale pull request approvals when new commits are pushed" (or "Require approval of the most recent reviewable push"). Otherwise someone who pushes to an armed PR and edits the PR-side trigger could merge unreviewed code. See .github/docs/auto-merge-github-app.md`, { title: `Approvals survive new pushes on ${pr.base.ref}` });
+              }
             }
             const reasons = blockers.map(b => b.reason).join(', ');
 
@@ -476,8 +510,8 @@ jobs:
             // Revocation — state-based, so it runs before any guard can return:
             // - "Changes Requested" disables auto-merge whoever armed it.
             // - An arming by a bot (this workflow's App) lasts only while every
-            //   condition above still holds (an approval dismissed, the label
-            //   removed, a WIP label added...). The base branch may require fewer
+            //   condition above still holds (a new commit pushed, an approval
+            //   dismissed, the label removed, a WIP label added...). The base branch may require fewer
             //   approvals than this workflow, so GitHub alone would still merge.
             // - A maintainer who armed it by hand is otherwise left alone.
             // Any bot arming counts here (this job can't know the App's name); the
@@ -545,6 +579,7 @@ jobs:
             "skip-wip")                      ACTION_DESC="🚧 Skipped (work in progress)" ;;
             "skip-missing-automerge-label")  ACTION_DESC="🏷️ Skipped (missing automerge label)" ;;
             "skip-no-required-checks")       ACTION_DESC="🚫 Skipped (base branch requires no status checks)" ;;
+            "skip-stale-approvals-kept")     ACTION_DESC="🚫 Skipped (base branch keeps approvals after new pushes, or requires none)" ;;
             "skip-no-pr")                    ACTION_DESC="ℹ️ Skipped (no open PR for this run)" ;;
             "skip-ambiguous-pr")             ACTION_DESC="ℹ️ Skipped (several PRs share this head commit)" ;;
             "skip-trigger-gated")            ACTION_DESC="ℹ️ Skipped (trigger event can't change the decision)" ;;
@@ -673,27 +708,34 @@ jobs:
             | @tsv' <<< "$PR_JSON")
 
           # Same counting rules as the evaluate job: latest verdict per reviewer,
-          # approvals only from OWNER/MEMBER/COLLABORATOR
-          REVIEW_COUNTS=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/reviews?per_page=100" | jq -rs '
+          # approvals only of the current head commit and from OWNER/MEMBER/COLLABORATOR
+          REVIEW_COUNTS=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/reviews?per_page=100" | jq -rs --arg head "$CURRENT_SHA" '
             add // []
             | map(select(.state | IN("APPROVED", "CHANGES_REQUESTED", "DISMISSED")))
             | group_by(.user.id // "deleted-user:\(.id)")
             | map(max_by(.submitted_at))
-            | [ (map(select(.state == "APPROVED" and (.author_association | IN("OWNER", "MEMBER", "COLLABORATOR")))) | length),
+            | [ (map(select(.state == "APPROVED" and .commit_id == $head and (.author_association | IN("OWNER", "MEMBER", "COLLABORATOR")))) | length),
                 (map(select(.state == "CHANGES_REQUESTED")) | length) ]
             | @tsv')
           read -r APPROVALS CHANGES_REQUESTED <<< "$REVIEW_COUNTS"
 
           # Required status checks on the CURRENT base (ruleset or classic branch
-          # protection). Empty = couldn't read them, which fails closed below.
+          # protection), and whether its rulesets require an approval that a new
+          # push voids. Empty = couldn't read them, which fails closed below.
+          # The rules are paginated; pipefail makes a failed page fail the read.
           BASE=$(jq -r '.base.ref | @uri' <<< "$PR_JSON")
           REQUIRED_CHECKS=""
-          if RULES=$(gh api "repos/$REPO/rules/branches/$BASE" 2>/dev/null) &&
+          APPROVALS_VOIDED_ON_PUSH=""
+          if RULES=$(gh api --paginate "repos/$REPO/rules/branches/$BASE?per_page=100" 2>/dev/null | jq -s 'add // []') &&
              BRANCH=$(gh api "repos/$REPO/branches/$BASE" 2>/dev/null); then
             REQUIRED_CHECKS=$(jq -n --argjson rules "$RULES" --argjson branch "$BRANCH" '
               ([$rules[] | select(.type == "required_status_checks") | .parameters.required_status_checks // [] | length] | add // 0)
               + ($branch.protection.required_status_checks // null
                  | if . != null and .enforcement_level != "off" then (.contexts // [] | length) else 0 end)')
+            APPROVALS_VOIDED_ON_PUSH=$(jq '
+              [.[] | select(.type == "pull_request") | .parameters // {}] as $rules
+              | any($rules[]; (.required_approving_review_count // 0) > 0)
+                and any($rules[]; .dismiss_stale_reviews_on_push == true or .require_last_push_approval == true)' <<< "$RULES")
           fi
 
           # Same conditions, in the same order, as the evaluate job's blockers
@@ -711,15 +753,20 @@ jobs:
             BLOCKERS+=("changes requested")
           fi
           if [[ "$APPROVALS" -lt "$MIN_APPROVALS" ]]; then
-            BLOCKERS+=("approvals $APPROVALS/$MIN_APPROVALS")
+            BLOCKERS+=("approvals of the latest commit $APPROVALS/$MIN_APPROVALS")
           fi
           if [[ "$REQUIRE_ALL_REVIEWS" == "true" && "$PENDING_REVIEWS" -gt 0 ]]; then
             BLOCKERS+=("$PENDING_REVIEWS review request(s) pending")
           fi
           if [[ -z "$REQUIRED_CHECKS" ]]; then
-            BLOCKERS+=("could not read the base branch required checks")
-          elif [[ "$REQUIRED_CHECKS" -eq 0 ]]; then
-            BLOCKERS+=("base branch requires no status checks")
+            BLOCKERS+=("could not read the base branch rules")
+          else
+            if [[ "$REQUIRED_CHECKS" -eq 0 ]]; then
+              BLOCKERS+=("base branch requires no status checks")
+            fi
+            if [[ "$APPROVALS_VOIDED_ON_PUSH" != "true" ]]; then
+              BLOCKERS+=("base branch keeps approvals after new pushes (or requires none)")
+            fi
           fi
           REASONS=""
           if [[ ${#BLOCKERS[@]} -gt 0 ]]; then
@@ -749,7 +796,7 @@ jobs:
 
           echo "📋 PR #$PR_NUMBER: state=$STATE head=$CURRENT_SHA armed=$ARMED (by this App: $ARMED_BY_APP)"
           echo "👥 Reviews: $APPROVALS approvals, $CHANGES_REQUESTED changes requested, $PENDING_REVIEWS pending"
-          echo "🛡️ Required checks on base: ${REQUIRED_CHECKS:-unknown}"
+          echo "🛡️ Required checks on base: ${REQUIRED_CHECKS:-unknown}; approvals voided on push: ${APPROVALS_VOIDED_ON_PUSH:-unknown}"
           echo "🎯 Decision: $DECISION ($WHY)"
           {
             echo "decision=$DECISION"

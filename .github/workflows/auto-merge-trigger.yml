@@ -24,7 +24,7 @@
 #  its own job ran (by job name, so keep the names in sync) before doing
 #  anything. That check only saves runs: a PR can change this file, so no
 #  consumer trusts it to allow anything. (Revoking after a push does need it to
-#  run, which is why Dependabot Auto-merge only approves when the base branch's
+#  run, which is why both auto-merge workflows only arm when the base branch's
 #  rulesets dismiss stale approvals on push.)
 #
 #  Triggers:
@@ -49,8 +49,9 @@ on:
   pull_request:
     # Every PR change one of the consumers acts on:
     # - opened: a new Dependabot PR (Dependabot Auto-merge) or fork PR (PR Management)
-    # - synchronize: new head (apply skips a moved head, so it needs a fresh run);
-    #   on a Dependabot PR it also catches a push by anyone else (revocation)
+    # - synchronize: new head. Approvals only count for the commit they reviewed,
+    #   so this revokes the App's arming until the new head is approved; on a
+    #   Dependabot PR it also catches a push by anyone else (revocation)
     # - edited: title (WIP) or base branch (required checks), gated below
     # - labeled/unlabeled: the opt-in label and WIP labels
     # - ready_for_review/converted_to_draft: draft state

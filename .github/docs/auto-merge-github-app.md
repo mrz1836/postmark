@@ -40,20 +40,20 @@ For a Dependabot PR, the `verify` job checks that the PR is open, was opened by 
 | The private key lives in an **environment secret** (`auto-merge`) that only protected long-lived branches can use. | A workflow pushed to any other branch can't read it. Repository and organization secrets don't give you this. |
 | Both workflows that use the key run on `workflow_run`, whose ref is the default branch. | They always run the default branch's workflow file, never the copy inside the PR. Neither checks out PR code. |
 | The job that holds the key runs only `actions/create-github-app-token` (pinned by SHA) and the `gh` CLI. | Any step in a job can read every secret that job uses. Keeping third-party code out of that job keeps it away from the key. |
-| Approvals and auto-merge are pinned to the verified head commit. Dependabot approvals also require that Dependabot triggered the run (`workflow_run.actor`) and authored every commit, signed by GitHub. Every Dependabot evaluation that doesn't approve revokes the bot approval and the App's auto-merge. | Code pushed after the analysis can't ride an earlier approval: a commit by anyone else, a push someone else triggered, or a Dependabot update that now needs review dismisses the bot approval and disarms auto-merge. |
+| Approvals and auto-merge are pinned to the verified head commit. Auto-merge on Approval only counts approvals of the PR's current head commit, and revokes its own arming when a push leaves the new head unapproved. Dependabot approvals also require that Dependabot triggered the run (`workflow_run.actor`) and authored every commit, signed by GitHub. Every Dependabot evaluation that doesn't approve revokes the bot approval and the App's auto-merge. | Code pushed after the analysis can't ride an earlier approval: a commit by anyone else, a push someone else triggered, or a Dependabot update that now needs review dismisses the bot approval and disarms auto-merge. |
 | The base branch must require status checks. | Auto-merge never merges before CI. |
-| Dependabot approvals also require the base branch's rulesets to require an approval and void it on a new push. | A push that also edits the PR-side trigger can't ride an earlier bot approval (see below). |
+| Both workflows also require the base branch's rulesets to require an approval and void it on a new push. | A push that also edits the PR-side trigger can't ride an earlier approval, the bot's or a reviewer's (see below). |
 
-### Required for Dependabot auto-merge: dismiss stale approvals on push
+### Required for auto-merge: dismiss stale approvals on push
 
-The revocation after someone else pushes to a Dependabot PR runs when the trigger runs for that push. The trigger is the PR's own copy, so anyone who can push to the PR and edit workflow files can stop it in the same push. The earlier bot approval would then still count, and the armed auto-merge would merge the new code once checks pass. That includes pushers who couldn't approve or merge on their own, such as a deploy key with write access.
+The revocation after a push runs when the trigger runs for that push. The trigger is the PR's own copy, so anyone who can push to the PR and edit workflow files can stop it in the same push. The earlier approval (the bot's on a Dependabot PR, a reviewer's otherwise) would then still count, and the armed auto-merge would merge the new code once checks pass. That includes pushers who couldn't approve or merge on their own, such as a deploy key with write access.
 
-So the Dependabot workflow only approves when a ruleset on the base branch:
+So both workflows only approve or arm when a ruleset on the base branch:
 
 - requires at least one approving review, **and**
 - turns on **Dismiss stale pull request approvals when new commits are pushed**, or **Require approval of the most recent reviewable push**.
 
-GitHub then drops the bot approval on any push, whatever the workflows do. The Dependabot workflow re-approves after Dependabot's own rebases. Without such a ruleset it leaves the PR for manual review (`skip-stale-approvals-kept`). The workflow can't read classic branch protection's review settings with its token, so the setting must come from a ruleset.
+GitHub then voids the earlier approval on any push, whatever the workflows do. The Dependabot workflow re-approves after Dependabot's own rebases, and Auto-merge on Approval re-arms once a reviewer approves the new head. Without such a ruleset, both end in `skip-stale-approvals-kept`: Dependabot PRs are left for manual review, and Auto-merge on Approval doesn't arm (and disarms its own earlier arming). The workflows can't read classic branch protection's review settings with their tokens, so the setting must come from a ruleset.
 
 <br>
 
@@ -85,7 +85,7 @@ Also make sure that:
 
 - **Allow auto-merge** is enabled in the repository's general settings.
 - The base branch has a ruleset or branch protection that **requires status checks**. Without one, the workflows refuse to auto-merge.
-- The base branch's ruleset **requires an approval and dismisses stale approvals on push** (or requires approval of the most recent push). Without it, Dependabot PRs are left for manual review. See above.
+- The base branch's ruleset **requires an approval and dismisses stale approvals on push** (or requires approval of the most recent push). Without it, neither workflow auto-merges. See above.
 - The three workflow files are on the **default branch**, and the trigger is on every branch that Dependabot PRs target. A `workflow_run` workflow only runs from the default branch, while the trigger runs from the PR's merge commit.
 - If the repository has **Actions policies** (*Settings → Actions → Policies*), they allow these runs. Event rules must allow `pull_request`, `pull_request_review` and `workflow_run`. For actor rules: a Dependabot PR's runs, `workflow_run` included, are credited to `dependabot[bot]`. Runs caused by the App approving or arming are credited to the App.
 
@@ -105,7 +105,7 @@ Delete the `.pem` file from your machine afterwards. To rotate the key, generate
 | **Verify Dependabot PR** ends in `manual-no-metadata` | The head commit's message has no readable `updated-dependencies` block. It's left for manual review, and the apply job revokes any earlier bot approval. |
 | **Verify Dependabot PR** ends in `revoke-unverified` | A GitHub API read failed (after retries) while verifying the PR, so the apply job revoked any earlier bot approval rather than leave it standing. Re-run the workflow to evaluate the PR again. |
 | The analysis ends in `skip-no-required-checks` | The base branch doesn't require any status checks. |
-| The analysis ends in `skip-stale-approvals-kept` | No ruleset on the base branch both requires an approval and dismisses stale approvals on push (or requires approval of the most recent push). See [above](#required-for-dependabot-auto-merge-dismiss-stale-approvals-on-push). |
+| The analysis or evaluation ends in `skip-stale-approvals-kept` | No ruleset on the base branch both requires an approval and dismisses stale approvals on push (or requires approval of the most recent push). See [above](#required-for-auto-merge-dismiss-stale-approvals-on-push). |
 | The run ends in `revoke-foreign-push` or `skip-foreign-commits` | Someone other than Dependabot pushed to the PR, so it needs a human review. The apply job revokes the bot approval and disarms auto-merge. |
 | An **Auto-merge revoked** comment after Dependabot updated its own PR | The update changed what the PR does (for example, a grouped update now includes a major version), so the new decision doesn't auto-merge and the earlier bot approval was dismissed. |
 | The apply job fails with **Revocation incomplete**, and the PR has an **Auto-merge revocation incomplete** comment | A GitHub API call failed while revoking. The job still disables auto-merge first and tries every dismissal, then lists what it couldn't undo. Remove any bot approval or auto-merge still on the PR by hand, or re-run the job. |

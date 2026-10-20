@@ -156,7 +156,10 @@ jobs:
       contents: read # Required: Read commits (author, signature, message)
       pull-requests: read # Required: Re-read the PR and list its commits
     outputs:
-      result: ${{ steps.verify.outputs.result }}
+      # The step's `decision`, not its `result`: actions/github-script sets its
+      # own `result` output (the script's return value) after the script runs,
+      # which would overwrite one the script set.
+      result: ${{ steps.verify.outputs.decision }}
       reason: ${{ steps.verify.outputs.reason }}
       pr-number: ${{ steps.verify.outputs.pr-number }}
       head-sha: ${{ steps.verify.outputs.head-sha }}
@@ -192,13 +195,15 @@ jobs:
             const run = context.payload.workflow_run;
             const DEPENDABOT = 'dependabot[bot]';
 
-            // Every exit goes through finish(), so `result` is set exactly once.
+            // Every exit goes through finish(), so `decision` is set exactly once.
+            // Not `result`: github-script overwrites that output with the
+            // script's return value (empty here) once the script returns.
             const finish = (result, reason, outputs = {}) => {
               for (const [key, value] of Object.entries(outputs)) {
                 core.setOutput(key, value ?? '');
               }
               core.setOutput('reason', reason);
-              core.setOutput('result', result);
+              core.setOutput('decision', result);
               console.log('════════════════════════════════════════════════════════════════');
               console.log(`🎯 RESULT: ${result}`);
               console.log(`📝 Reason: ${reason}`);
@@ -522,7 +527,7 @@ jobs:
       - name: 📊 Generate verification summary
         if: always()
         env:
-          RESULT: ${{ steps.verify.outputs.result }}
+          RESULT: ${{ steps.verify.outputs.decision }}
           REASON: ${{ steps.verify.outputs.reason }}
           PR_NUMBER: ${{ steps.verify.outputs.pr-number }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -1314,7 +1319,11 @@ jobs:
           echo "  ✅ All commits authored by dependabot[bot] and signed by GitHub"
 
           # Guard 4: the base branch must require status checks
-          RULES_JSON=$(gh api "repos/$REPO/rules/branches/$BASE_REF" 2>/dev/null || echo '[]')
+          # All pages of the rules (a rule on a later page would otherwise be missed).
+          # pipefail (in this subshell only): a failed read becomes [], not gh's error body.
+          if ! RULES_JSON=$(set -o pipefail; gh api --paginate "repos/$REPO/rules/branches/$BASE_REF?per_page=100" 2>/dev/null | jq -s 'add // []'); then
+            RULES_JSON='[]'
+          fi
           RULESET_CHECKS=$(jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[]?] | length' <<< "$RULES_JSON" 2>/dev/null || echo 0)
           CLASSIC_CHECKS=$(gh api "repos/$REPO/branches/$BASE_REF" \
             --jq 'if (.protection.required_status_checks.enforcement_level // "off") == "off" then 0 else ([.protection.required_status_checks.contexts[]?] | length) end' 2>/dev/null || echo 0)
