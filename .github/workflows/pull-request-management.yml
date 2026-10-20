@@ -6,9 +6,11 @@
 #  and branch deletion. All configuration is centralized in modular .github/env/ files.
 #
 #  Triggers:
-#  - pull_request (opened, reopened, ready_for_review, closed): same-repo PRs
+#  - pull_request (opened, reopened, ready_for_review, synchronize, closed): same-repo
+#    PRs; `synchronize` only reports the check on the new head (see below)
 #  - workflow_run of "Auto-merge Trigger" (auto-merge-trigger.yml): fork PRs, when
-#    its "📨 Queue fork PR management" job ran for one of the same four events
+#    its "📨 Queue fork PR management" job ran for opened, reopened,
+#    ready_for_review or closed
 #  No `pull_request_target`: GitHub disables it by default on public repositories
 #  (workflow execution protections).
 #
@@ -80,12 +82,15 @@ name: PR Management
 # --------------------------------------------------------------------
 # Trigger Configuration
 #
-# `synchronize` is intentionally NOT included (for either path). It fires on every
-# push to a PR and the only work it would do (re-applying labels + re-checking the
-# default assignee) is idempotent — both persist from the `opened` run. Skipping
-# it lets maintainers manually override auto-applied labels without the workflow
-# fighting back on the next commit. For fork PRs, the trigger's PR management job
-# fires only on these same four events.
+# `synchronize` runs the same-repo job so that "🔧 PR Management (Same Repo)"
+# reports on every head commit. A check run belongs to one commit, so a ruleset
+# that requires this check would otherwise block any PR pushed to after it was
+# opened (the new head never gets the check). On `synchronize` the job does no
+# work: labels and the default assignee persist from the `opened` run, and not
+# re-applying them lets maintainers override auto-applied labels without the
+# workflow fighting back on the next commit. A fork PR's `pull_request` runs
+# skip the same-repo job, which satisfies a required check, so the trigger's
+# fork PR management job still fires only on the other four events.
 #
 # zizmor's dangerous-triggers audit flags every `workflow_run` trigger. Here it
 # only feeds the fork lookup job, which uses no artifacts, outputs or code from
@@ -94,7 +99,7 @@ name: PR Management
 # --------------------------------------------------------------------
 on: # zizmor: ignore[dangerous-triggers] see "Trigger Configuration" above
   pull_request:
-    types: [opened, reopened, ready_for_review, closed]
+    types: [opened, reopened, ready_for_review, synchronize, closed]
   workflow_run:
     workflows: ["Auto-merge Trigger"]
     types: [completed]
@@ -108,7 +113,10 @@ permissions: {}
 # same PR cancels an in-flight run. It is set on the working jobs, not the
 # workflow, because every Auto-merge Trigger run starts a run here, and a run
 # that has nothing to do must never cancel one that is doing work. The fork
-# lookup job has none for the same reason.
+# lookup job has none for the same reason. For the same reason the same-repo
+# job's `synchronize` runs have a group of their own: a push right after a PR
+# opens must not cancel the run that labels it, and a newer push cancelling an
+# older push's run is fine (that commit is no longer the head).
 # --------------------------------------------------------------------
 
 jobs:
@@ -128,7 +136,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     concurrency:
-      group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number }}${{ github.event.action == 'synchronize' && '-push' || '' }}
       cancel-in-progress: true
     # Explicit write scopes: GitHub grants them to same-repo pull_request runs,
     # including Dependabot's (whose default token is otherwise read-only).
@@ -194,10 +202,11 @@ jobs:
 
       # --------------------------------------------------------------------
       # Apply branch/title-based labels (chore, feature, bug, etc.)
+      # Not on synchronize: see "Trigger Configuration" above
       # --------------------------------------------------------------------
       - name: 🏷️ Apply labels based on patterns
         id: apply-labels
-        if: github.event.action != 'closed' && env.APPLY_TYPE_LABELS == 'true'
+        if: github.event.action != 'closed' && github.event.action != 'synchronize' && env.APPLY_TYPE_LABELS == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -320,10 +329,11 @@ jobs:
 
       # --------------------------------------------------------------------
       # Assign default assignee if PR has none
+      # Not on synchronize: see "Trigger Configuration" above
       # --------------------------------------------------------------------
       - name: 👤 Assign default assignee
         id: assign-assignee
-        if: github.event.action != 'closed'
+        if: github.event.action != 'closed' && github.event.action != 'synchronize'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -630,7 +640,13 @@ jobs:
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "$PR_ACTION" != "closed" ]; then
+          if [ "$PR_ACTION" = "synchronize" ]; then
+            {
+              echo "## 📋 Actions Taken"
+              echo ""
+              echo "None: new commits only. Labels and the default assignee were set when the PR opened; this run reports the check on the new head."
+            } >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$PR_ACTION" != "closed" ]; then
             {
               echo "## 📋 Actions Taken"
               echo ""
