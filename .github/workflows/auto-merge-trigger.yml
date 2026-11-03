@@ -7,7 +7,7 @@
 #           - "Auto-merge on Approval" (auto-merge-on-approval.yml): reviews and
 #             PR changes that can flip the approval-based auto-merge decision
 #           - "Dependabot Auto-merge" (dependabot-auto-merge.yml): Dependabot PRs
-#             opened, updated or reopened
+#             opened, updated, reopened or retargeted
 #           - "PR Management" (pull-request-management.yml): fork PRs opened,
 #             reopened, marked ready or closed (same-repo PRs run it directly)
 #
@@ -52,14 +52,16 @@ on:
     # - synchronize: new head. Approvals only count for the commit they reviewed,
     #   so this revokes the App's arming until the new head is approved; on a
     #   Dependabot PR it also catches a push by anyone else (revocation)
-    # - edited: title (WIP) or base branch (required checks), gated below
+    # - edited: title (WIP) or base branch (required checks), gated below; a
+    #   retargeted Dependabot PR is re-evaluated against its new base
     # - labeled/unlabeled: the opt-in label and WIP labels
     # - ready_for_review/converted_to_draft: draft state
     # - review_requested/review_request_removed: pending reviews
     # - reopened: a reopened PR may need arming (or labeling) again
     # - auto_merge_enabled: a manual arming with "Changes Requested" outstanding
     #   (the App's own arming fires it too; that evaluation finds it already
-    #   enabled, and never cancels the apply job that armed it)
+    #   enabled and queues a no-op re-check behind the apply job that armed it,
+    #   never cancelling it)
     # - closed: fork PR cache cleanup (PR Management)
     # `auto_merge_disabled` is deliberately absent: re-evaluating it would re-arm a
     # PR a maintainer just disarmed. Use a WIP label to hold a PR instead.
@@ -135,15 +137,19 @@ jobs:
   # Hand off to "Dependabot Auto-merge"
   #
   # opened/reopened: evaluate a Dependabot PR. synchronize: Dependabot rebased
-  # it (re-evaluate) or someone else pushed to it (revoke). The consumer
-  # re-checks all of this from the API: the PR's author, branch and commits.
+  # it (re-evaluate) or someone else pushed to it (revoke). edited (base only):
+  # someone retargeted it, which keeps the head but changes the branch rules
+  # and the commits it merges, so the new base is checked (revoke if it fails).
+  # The consumer re-checks all of this from the API: the PR's author, branch,
+  # base and commits.
   # ----------------------------------------------------------------------------------
   dependabot:
     # Consumers match this exact name: keep it in sync with dependabot-auto-merge.yml
     name: 📨 Queue Dependabot auto-merge
     if: |
       github.event_name == 'pull_request' &&
-      contains(fromJSON('["opened", "synchronize", "reopened"]'), github.event.action) &&
+      (contains(fromJSON('["opened", "synchronize", "reopened"]'), github.event.action) ||
+        (github.event.action == 'edited' && github.event.changes.base)) &&
       github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-26.04

@@ -63,13 +63,19 @@ runs:
           exit 1
         fi
 
-        # Extract all exported variables to JSON for workflow compatibility
+        # Extract the settings the env files define to JSON. Only those: the
+        # runner's own environment (HOME, PATH, RUNNER_*, GITHUB_*) stays out,
+        # because jobs that load env-json can run on another runner or OS.
+        # The files are the ones the loader reads (it skips 99-local.env in CI).
         echo "📦 Extracting environment variables to JSON..."
-        ENV_JSON=$(env | grep -E '^[A-Z_][A-Z0-9_]*=' | while IFS='=' read -r key value; do
-          # Escape special characters in value for JSON
-          escaped_value=$(printf '%s' "$value" | jq -Rs '.')
-          echo "{\"$key\": $escaped_value}"
-        done | jq -s 'add // {}')
+        ENV_KEYS=$(for env_file in .github/env/*.env; do
+          [[ "${CI:-false}" == "true" && "$(basename "$env_file")" == "99-local.env" ]] && continue
+          sed -n -E 's/^[[:space:]]*(export[[:space:]]+)?([A-Z_][A-Z0-9_]*)=.*/\2/p' "$env_file"
+        done | LC_ALL=C sort -u)
+        ENV_JSON=$(while IFS= read -r key; do
+          [[ -n "$key" && -n "${!key+set}" ]] || continue
+          printf '%s' "${!key}" | jq -Rs --arg key "$key" '{($key): .}'
+        done <<< "$ENV_KEYS" | jq -s 'add // {}')
 
         TOTAL_COUNT=$(echo "$ENV_JSON" | jq 'keys | length')
         echo "✅ Extracted $TOTAL_COUNT variables"
