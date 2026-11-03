@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -83,9 +82,9 @@ func validateErrorLeakage(t *testing.T, err error, sensitiveData string, maxLen 
 	}
 }
 
-// createEmailTestServer creates a standard test server for email testing
-func createEmailTestServer(t *testing.T, validateFunc func(*testing.T, Email)) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// newEmailTestHandler returns a standard test handler for email testing
+func newEmailTestHandler(t *testing.T, validateFunc func(*testing.T, Email)) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Errorf("Failed to read request body: %v", err)
@@ -106,7 +105,7 @@ func createEmailTestServer(t *testing.T, validateFunc func(*testing.T, Email)) *
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, `{"To":"test@example.com","SubmittedAt":"2023-01-01T00:00:00Z","MessageID":"123","ErrorCode":0,"Message":"OK"}`)
-	}))
+	})
 }
 
 // validateEmailAddressFields validates email address fields for security issues
@@ -181,9 +180,9 @@ func createBatchEmails(batchSize int, emailDomain string) []Email {
 	return emails
 }
 
-// createBatchTestServer creates a test server for batch email testing
-func createBatchTestServer(t *testing.T, expectedBatchSize int) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// newBatchTestHandler returns a test handler for batch email testing
+func newBatchTestHandler(t *testing.T, expectedBatchSize int) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Errorf("Failed to read request body: %v", err)
@@ -219,7 +218,7 @@ func createBatchTestServer(t *testing.T, expectedBatchSize int) *httptest.Server
 			return
 		}
 		_, _ = w.Write(respJSON)
-	}))
+	})
 }
 
 // validateBatchResponse validates batch email response
@@ -266,15 +265,7 @@ func FuzzEmailAddressValidation(f *testing.F) {
 			TextBody: "Test body",
 		}
 
-		server := createEmailTestServer(t, validateEmailAddressFields)
-		defer server.Close()
-
-		client := &Client{
-			HTTPClient:   &http.Client{},
-			ServerToken:  testServerToken,
-			AccountToken: testAccountToken,
-			BaseURL:      server.URL,
-		}
+		client := newFuzzTestClient(newEmailTestHandler(t, validateEmailAddressFields))
 
 		response, err := client.SendEmail(context.Background(), email)
 		validateErrorLeakage(t, err, emailAddr, 100)
@@ -319,15 +310,7 @@ func FuzzEmailHeaders(f *testing.F) {
 			Headers:  headers,
 		}
 
-		server := createEmailTestServer(t, validateEmailHeaders)
-		defer server.Close()
-
-		client := &Client{
-			HTTPClient:   &http.Client{},
-			ServerToken:  testServerToken,
-			AccountToken: testAccountToken,
-			BaseURL:      server.URL,
-		}
+		client := newFuzzTestClient(newEmailTestHandler(t, validateEmailHeaders))
 
 		_, err := client.SendEmail(context.Background(), email)
 		validateErrorLeakage(t, err, headerValue, 100)
@@ -362,15 +345,7 @@ func FuzzEmailAttachments(f *testing.F) {
 			Attachments: []Attachment{attachment},
 		}
 
-		server := createEmailTestServer(t, validateEmailAttachments)
-		defer server.Close()
-
-		client := &Client{
-			HTTPClient:   &http.Client{},
-			ServerToken:  testServerToken,
-			AccountToken: testAccountToken,
-			BaseURL:      server.URL,
-		}
+		client := newFuzzTestClient(newEmailTestHandler(t, validateEmailAttachments))
 
 		_, err := client.SendEmail(context.Background(), email)
 		validateErrorLeakage(t, err, content, 100)
@@ -391,15 +366,7 @@ func FuzzEmailBatch(f *testing.F) {
 		normalizedSize := normalizeBatchSize(batchSize)
 		emails := createBatchEmails(normalizedSize, emailDomain)
 
-		server := createBatchTestServer(t, normalizedSize)
-		defer server.Close()
-
-		client := &Client{
-			HTTPClient:   &http.Client{},
-			ServerToken:  testServerToken,
-			AccountToken: testAccountToken,
-			BaseURL:      server.URL,
-		}
+		client := newFuzzTestClient(newBatchTestHandler(t, normalizedSize))
 
 		responses, err := client.SendEmailBatch(context.Background(), emails)
 

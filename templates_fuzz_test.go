@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -85,9 +84,9 @@ func validateQueryInjection(t *testing.T, query string) {
 	}
 }
 
-// createTemplateValidationServer creates a test server for template validation
-func createTemplateValidationServer(t *testing.T) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// newTemplateValidationHandler returns a test handler for template validation
+func newTemplateValidationHandler(t *testing.T) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Errorf("Failed to read request body: %v", err)
@@ -108,7 +107,7 @@ func createTemplateValidationServer(t *testing.T) *httptest.Server {
 		w.WriteHeader(http.StatusOK)
 		respJSON, _ := json.Marshal(response) //nolint:musttag // ValidateTemplateResponse has appropriate JSON tags
 		_, _ = w.Write(respJSON)
-	}))
+	})
 }
 
 // validateTemplateResponse validates template validation response
@@ -138,9 +137,9 @@ func validateQueryParameters(t *testing.T, parsedQuery url.Values, templateType,
 	}
 }
 
-// createTemplateQueryServer creates a test server for template query testing
-func createTemplateQueryServer(t *testing.T, templateType, layoutTemplate string) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// newTemplateQueryHandler returns a test handler for template query testing
+func newTemplateQueryHandler(t *testing.T, templateType, layoutTemplate string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.RawQuery
 		validateQueryInjection(t, query)
 
@@ -169,7 +168,7 @@ func createTemplateQueryServer(t *testing.T, templateType, layoutTemplate string
 		w.WriteHeader(http.StatusOK)
 		respJSON, _ := json.Marshal(response) //nolint:musttag // templatesResponse has appropriate JSON tags
 		_, _ = w.Write(respJSON)
-	}))
+	})
 }
 
 // validateTemplateQueryResponse validates template query response
@@ -212,9 +211,9 @@ func validateTemplatedEmail(t *testing.T, sentEmail TemplatedEmail) {
 	}
 }
 
-// createTemplatedEmailServer creates a test server for templated email testing
-func createTemplatedEmailServer(t *testing.T) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// newTemplatedEmailHandler returns a test handler for templated email testing
+func newTemplatedEmailHandler(t *testing.T) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Errorf("Failed to read request body: %v", err)
@@ -240,7 +239,7 @@ func createTemplatedEmailServer(t *testing.T) *httptest.Server {
 		w.WriteHeader(http.StatusOK)
 		respJSON, _ := json.Marshal(response) //nolint:musttag // EmailResponse has appropriate JSON tags
 		_, _ = w.Write(respJSON)
-	}))
+	})
 }
 
 // validateTemplatedEmailResponse validates templated email response
@@ -283,9 +282,9 @@ func createTemplateBatchEmails(batchSize int, templateID int64, templateAlias st
 	return emails
 }
 
-// createTemplateBatchServer creates a test server for batch templated email testing
-func createTemplateBatchServer(t *testing.T, expectedBatchSize int) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// newTemplateBatchHandler returns a test handler for batch templated email testing
+func newTemplateBatchHandler(t *testing.T, expectedBatchSize int) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Errorf("Failed to read request body: %v", err)
@@ -316,7 +315,7 @@ func createTemplateBatchServer(t *testing.T, expectedBatchSize int) *httptest.Se
 		w.WriteHeader(http.StatusOK)
 		respJSON, _ := json.Marshal(responses) //nolint:musttag // EmailResponse slice has appropriate JSON tags
 		_, _ = w.Write(respJSON)
-	}))
+	})
 }
 
 // validateTemplateBatchResponse validates batch templated email response
@@ -361,15 +360,7 @@ func FuzzTemplateValidation(f *testing.F) {
 			InlineCSSForHTMLTestRender: true,
 		}
 
-		server := createTemplateValidationServer(t)
-		defer server.Close()
-
-		client := &Client{
-			HTTPClient:   &http.Client{},
-			ServerToken:  testServerToken,
-			AccountToken: testAccountToken,
-			BaseURL:      server.URL,
-		}
+		client := newFuzzTestClient(newTemplateValidationHandler(t))
 
 		response, err := client.ValidateTemplate(context.Background(), validateBody)
 		validateTemplateErrorLeakage(t, err, []string{subject, textBody, htmlBody})
@@ -392,15 +383,7 @@ func FuzzTemplateQueryParams(f *testing.F) {
 	f.Add(int64(25), int64(50), "test", "unicode-layout-test")
 
 	f.Fuzz(func(t *testing.T, count, offset int64, templateType, layoutTemplate string) {
-		server := createTemplateQueryServer(t, templateType, layoutTemplate)
-		defer server.Close()
-
-		client := &Client{
-			HTTPClient:   &http.Client{},
-			ServerToken:  testServerToken,
-			AccountToken: testAccountToken,
-			BaseURL:      server.URL,
-		}
+		client := newFuzzTestClient(newTemplateQueryHandler(t, templateType, layoutTemplate))
 
 		templates, total, err := client.GetTemplatesFiltered(context.Background(), count, offset, templateType, layoutTemplate)
 
@@ -443,15 +426,7 @@ func FuzzTemplatedEmail(f *testing.F) {
 			InlineCSS:     true,
 		}
 
-		server := createTemplatedEmailServer(t)
-		defer server.Close()
-
-		client := &Client{
-			HTTPClient:   &http.Client{},
-			ServerToken:  testServerToken,
-			AccountToken: testAccountToken,
-			BaseURL:      server.URL,
-		}
+		client := newFuzzTestClient(newTemplatedEmailHandler(t))
 
 		response, err := client.SendTemplatedEmail(context.Background(), templatedEmail)
 
@@ -478,15 +453,7 @@ func FuzzTemplateBatch(f *testing.F) {
 		normalizedSize := normalizeTemplateBatchSize(batchSize)
 		emails := createTemplateBatchEmails(normalizedSize, templateID, templateAlias)
 
-		server := createTemplateBatchServer(t, normalizedSize)
-		defer server.Close()
-
-		client := &Client{
-			HTTPClient:   &http.Client{},
-			ServerToken:  testServerToken,
-			AccountToken: testAccountToken,
-			BaseURL:      server.URL,
-		}
+		client := newFuzzTestClient(newTemplateBatchHandler(t, normalizedSize))
 
 		responses, err := client.SendTemplatedEmailBatch(context.Background(), emails)
 
