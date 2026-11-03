@@ -1,6 +1,8 @@
 package postmark
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +12,51 @@ import (
 	"strings"
 	"testing"
 )
+
+// fuzzTestBaseURL is the BaseURL given to fuzz test clients. Requests to it
+// never leave the process, so the host does not need to resolve.
+const fuzzTestBaseURL = "http://postmark.fuzz.test"
+
+// inMemoryTransport is an http.RoundTripper that serves every request with
+// handler inside the process, without opening a socket.
+//
+// Fuzz targets run thousands of iterations per second. Starting an
+// httptest.Server per iteration leaves its ports in TIME_WAIT, which exhausts
+// the ephemeral port range on fast CI runners ("bind: address already in use").
+type inMemoryTransport struct {
+	handler http.Handler
+}
+
+// RoundTrip writes req in HTTP/1.1 wire format and parses it back, so handler
+// receives the request a real server would, then records handler's response.
+func (rt inMemoryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	var wire bytes.Buffer
+	if err := req.Write(&wire); err != nil {
+		return nil, err
+	}
+
+	serverReq, err := http.ReadRequest(bufio.NewReader(&wire))
+	if err != nil {
+		return nil, err
+	}
+
+	recorder := httptest.NewRecorder()
+	rt.handler.ServeHTTP(recorder, serverReq)
+
+	res := recorder.Result()
+	res.Request = req
+	return res, nil
+}
+
+// newFuzzTestClient returns a Client whose requests are served in memory by handler
+func newFuzzTestClient(handler http.Handler) *Client {
+	return &Client{
+		HTTPClient:   &http.Client{Transport: inMemoryTransport{handler: handler}},
+		ServerToken:  testServerToken,
+		AccountToken: testAccountToken,
+		BaseURL:      fuzzTestBaseURL,
+	}
+}
 
 // FuzzDoRequestJSONUnmarshal tests the JSON unmarshaling logic in doRequest
 // with various malformed and edge case JSON inputs
@@ -27,20 +74,12 @@ func FuzzDoRequestJSONUnmarshal(f *testing.F) {
 	f.Add(`{"nested":{"deep":{"value":true}}}`)
 
 	f.Fuzz(func(t *testing.T, jsonResponse string) {
-		// Create a test server that returns the fuzzed JSON
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Respond with the fuzzed JSON
+		client := newFuzzTestClient(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_, _ = io.WriteString(w, jsonResponse)
 		}))
-		defer server.Close()
-
-		client := &Client{
-			HTTPClient:   &http.Client{},
-			ServerToken:  testServerToken,
-			AccountToken: testAccountToken,
-			BaseURL:      server.URL,
-		}
 
 		var result map[string]interface{}
 
@@ -73,22 +112,15 @@ func FuzzAPIErrorHandling(f *testing.F) {
 	f.Fuzz(func(t *testing.T, statusCode int64, errorResponse string) {
 		// Ensure status code is in valid HTTP error range
 		if statusCode < 400 || statusCode > 599 {
-			statusCode = 400 + (statusCode % 200) // Normalize to 400-599 range
+			// Normalize to 400-599; the extra +200 keeps negative inputs in range
+			statusCode = 400 + ((statusCode%200)+200)%200
 		}
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		client := newFuzzTestClient(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(int(statusCode))
 			_, _ = io.WriteString(w, errorResponse)
 		}))
-		defer server.Close()
-
-		client := &Client{
-			HTTPClient:   &http.Client{},
-			ServerToken:  testServerToken,
-			AccountToken: testAccountToken,
-			BaseURL:      server.URL,
-		}
 
 		var result map[string]interface{}
 
@@ -132,7 +164,7 @@ func FuzzJSONPayloadMarshaling(f *testing.F) {
 			return
 		}
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		client := newFuzzTestClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Verify the request has proper headers
 			if r.Header.Get("Content-Type") != "application/json" {
 				t.Errorf("Expected Content-Type: application/json, got %s", r.Header.Get("Content-Type"))
@@ -154,14 +186,6 @@ func FuzzJSONPayloadMarshaling(f *testing.F) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = io.WriteString(w, `{"success":true}`)
 		}))
-		defer server.Close()
-
-		client := &Client{
-			HTTPClient:   &http.Client{},
-			ServerToken:  testServerToken,
-			AccountToken: testAccountToken,
-			BaseURL:      server.URL,
-		}
 
 		var result map[string]interface{}
 

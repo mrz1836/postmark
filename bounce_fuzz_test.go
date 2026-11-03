@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -51,9 +50,9 @@ func validateURLEncoding(t *testing.T, query, paramName, paramValue string) {
 	}
 }
 
-// createBounceTestServer creates a test server for bounce testing
-func createBounceTestServer(t *testing.T, paramName, paramValue string) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// newBounceTestHandler returns a test handler for bounce testing
+func newBounceTestHandler(t *testing.T, paramName, paramValue string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.RawQuery
 		validateInjectionPatterns(t, query)
 		validateURLEncoding(t, query, paramName, paramValue)
@@ -61,7 +60,7 @@ func createBounceTestServer(t *testing.T, paramName, paramValue string) *httptes
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, `{"TotalCount":0,"Bounces":[]}`)
-	}))
+	})
 }
 
 // validateBounceQueryParams checks that GetBounces query parameters are encoded and complete
@@ -136,19 +135,11 @@ func FuzzGetBouncedTagsJSON(f *testing.F) {
 	f.Add(`["tag1",null,"tag3"]`)
 
 	f.Fuzz(func(t *testing.T, jsonArray string) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		client := newFuzzTestClient(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_, _ = io.WriteString(w, jsonArray)
 		}))
-		defer server.Close()
-
-		client := &Client{
-			HTTPClient:   &http.Client{},
-			ServerToken:  testServerToken,
-			AccountToken: testAccountToken,
-			BaseURL:      server.URL,
-		}
 
 		// Test the GetBouncedTags function which has custom JSON handling
 		tags, err := client.GetBouncedTags(context.Background())
@@ -191,21 +182,13 @@ func FuzzBounceQueryParams(f *testing.F) {
 			options[optKey] = optValue
 		}
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		client := newFuzzTestClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			validateBounceQueryParams(t, r.URL.RawQuery)
 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_, _ = io.WriteString(w, `{"TotalCount":0,"Bounces":[]}`)
 		}))
-		defer server.Close()
-
-		client := &Client{
-			HTTPClient:   &http.Client{},
-			ServerToken:  testServerToken,
-			AccountToken: testAccountToken,
-			BaseURL:      server.URL,
-		}
 
 		// Test GetBounces with fuzzed parameters
 		bounces, total, err := client.GetBounces(context.Background(), count, offset, options)
@@ -247,15 +230,7 @@ func FuzzBounceQueryParamsInjection(f *testing.F) {
 			paramName: paramValue,
 		}
 
-		server := createBounceTestServer(t, paramName, paramValue)
-		defer server.Close()
-
-		client := &Client{
-			HTTPClient:   &http.Client{},
-			ServerToken:  testServerToken,
-			AccountToken: testAccountToken,
-			BaseURL:      server.URL,
-		}
+		client := newFuzzTestClient(newBounceTestHandler(t, paramName, paramValue))
 
 		_, _, err := client.GetBounces(context.Background(), 10, 0, options)
 		validateErrorResponse(t, err, paramValue)
@@ -274,19 +249,11 @@ func FuzzBounceJSONStructure(f *testing.F) {
 	f.Add(`null`)
 
 	f.Fuzz(func(t *testing.T, bounceJSON string) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		client := newFuzzTestClient(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_, _ = io.WriteString(w, bounceJSON)
 		}))
-		defer server.Close()
-
-		client := &Client{
-			HTTPClient:   &http.Client{},
-			ServerToken:  testServerToken,
-			AccountToken: testAccountToken,
-			BaseURL:      server.URL,
-		}
 
 		bounces, total, err := client.GetBounces(context.Background(), 10, 0, nil)
 
