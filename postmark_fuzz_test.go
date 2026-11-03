@@ -112,7 +112,8 @@ func FuzzAPIErrorHandling(f *testing.F) {
 	f.Fuzz(func(t *testing.T, statusCode int64, errorResponse string) {
 		// Ensure status code is in valid HTTP error range
 		if statusCode < 400 || statusCode > 599 {
-			statusCode = 400 + (statusCode % 200) // Normalize to 400-599 range
+			// Normalize to 400-599; the extra +200 keeps negative inputs in range
+			statusCode = 400 + ((statusCode%200)+200)%200
 		}
 
 		client := newFuzzTestClient(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
