@@ -79,6 +79,9 @@ on:
       race-detection-enabled:
         description: "Whether race detection is enabled"
         value: ${{ jobs.setup-config.outputs.race-detection-enabled }}
+      release-runner:
+        description: "Runner for the release job (RELEASE_RUNNER, or the primary runner when unset)"
+        value: ${{ jobs.setup-config.outputs.release-runner }}
       secondary-runner:
         description: "Secondary runner OS"
         value: ${{ jobs.setup-config.outputs.secondary-runner }}
@@ -215,6 +218,7 @@ jobs:
       magefile-exists: ${{ steps.config.outputs.magefile-exists }}
       primary-runner: ${{ steps.config.outputs.primary-runner }}
       race-detection-enabled: ${{ steps.config.outputs.race-detection-enabled }}
+      release-runner: ${{ steps.config.outputs.release-runner }}
       secondary-runner: ${{ steps.config.outputs.secondary-runner }}
       security-scans-enabled: ${{ steps.config.outputs.security-scans-enabled }}
       nancy-enabled: ${{ steps.config.outputs.nancy-enabled }}
@@ -682,6 +686,16 @@ jobs:
           echo "primary-runner=${{ env.PRIMARY_RUNNER }}" >> $GITHUB_OUTPUT
           echo "secondary-runner=${{ env.SECONDARY_RUNNER }}" >> $GITHUB_OUTPUT
 
+          # Release runner: RELEASE_RUNNER, or PRIMARY_RUNNER when unset, read from
+          # the environment rather than expression-interpolated. The release steps
+          # run in bash, so a Windows runner is refused here, not at release time.
+          RELEASE="${RELEASE_RUNNER:-$PRIMARY_RUNNER}"
+          if [[ "$(printf '%s' "$RELEASE" | tr '[:upper:]' '[:lower:]')" == windows* ]]; then
+            echo "::error title=Unsupported release runner::RELEASE_RUNNER must be a Linux or macOS runner; the release steps run in bash."
+            exit 1
+          fi
+          echo "release-runner=$RELEASE" >> $GITHUB_OUTPUT
+
           # Check if .mage.yaml exists
           if [ -f ".mage.yaml" ]; then
             echo "magefile-exists=true" >> $GITHUB_OUTPUT
@@ -863,6 +877,7 @@ jobs:
           echo "|---------|-------|-------------|" >> $GITHUB_STEP_SUMMARY
           echo "| **Primary Runner** | \`${{ env.PRIMARY_RUNNER }}\` | Main OS for CI jobs |" >> $GITHUB_STEP_SUMMARY
           echo "| **Secondary Runner** | \`${{ env.SECONDARY_RUNNER }}\` | Additional OS for compatibility testing |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Release Runner** | \`${{ steps.config.outputs.release-runner }}\` | Runner for the release job (v* tags) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Primary Go Version** | \`${{ env.GO_PRIMARY_VERSION }}\` | Main Go version for builds |" >> $GITHUB_STEP_SUMMARY
           echo "| **Secondary Go Version** | \`${{ env.GO_SECONDARY_VERSION }}\` | Additional Go version for testing |" >> $GITHUB_STEP_SUMMARY
           echo "| **Unique Go Versions** | $UNIQUE_GO_VERSIONS | Deduplicated list of Go versions |" >> $GITHUB_STEP_SUMMARY

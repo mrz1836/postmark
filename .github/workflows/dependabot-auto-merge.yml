@@ -10,8 +10,9 @@
 #
 #  Triggers: Completion of "Auto-merge Trigger" (auto-merge-trigger.yml), whose
 #  permission-less `pull_request` run queues this workflow when a Dependabot PR is
-#  opened, updated (synchronize) or reopened. No `pull_request_target`: GitHub
-#  disables it by default on public repositories (workflow execution protections).
+#  opened, updated (synchronize), reopened or retargeted (base branch edited).
+#  No `pull_request_target`: GitHub disables it by default on public repositories
+#  (workflow execution protections).
 #
 #  Event flow (privilege grows only on the default branch's copy):
 #    pull_request (Dependabot PR) → auto-merge-trigger.yml: no permissions, no secrets,
@@ -69,7 +70,8 @@
 #    push (dismiss stale approvals, or require approval of the most recent
 #    push): GitHub then drops the bot approval whatever the workflows do (see
 #    .github/docs/auto-merge-github-app.md)
-#  - The approval and auto-merge are pinned to the verified head commit
+#  - The approval and auto-merge are pinned to the verified head commit and base
+#    branch. Retargeting the PR re-evaluates it against the new base's rules
 #
 #  Maintainer: @mrz1836
 #
@@ -84,7 +86,9 @@ name: Dependabot Auto-merge
 # from the PR, so a PR cannot change what runs here or what the `auto-merge`
 # environment exposes to it. It runs with this workflow's own token and secrets
 # even though the trigger's Dependabot run had neither. No job checks out or runs
-# PR code: the only checkout is the default branch's `.github/env` + load-env.
+# PR code: the only checkout is the default branch's `.github/env` + load-env, in
+# the read-only `verify` job. No job that can write (`analyze`, `apply`) has a
+# checkout or a workspace at all: `analyze` gets the configuration from `verify`.
 #
 # The trigger's run is untrusted: its jobs run the PR's copy of
 # auto-merge-trigger.yml, so anyone who can push to the PR controls whether it
@@ -115,8 +119,13 @@ permissions: {}
 # - `analyze` cancels an older analysis of the same PR.
 # - `apply` must never be cancelled halfway (e.g. after approving, before arming):
 #   applies queue instead, and each one re-checks the PR on fresh data first.
-#   GitHub keeps one pending job per group, so a newer apply replaces an older
-#   one that is still waiting; the newer one carries the fresher evaluation.
+#   GitHub keeps one pending job per group: the last apply to arrive replaces
+#   one still waiting. That isn't always the freshest evaluation: a revocation
+#   that skips `analyze` can arrive before an older commit's slower approval.
+#   So an approval, or a skip-untrusted-actor revocation (whose apply can keep
+#   an approval), whose head moved or whose PR was retargeted during its
+#   analysis never joins the queue, nor does an approval whose PR couldn't be
+#   re-read; and every apply re-checks the head and base before acting.
 # --------------------------------------------------------------------
 
 # --------------------------------------------------------------------
@@ -128,11 +137,16 @@ jobs:
   # ----------------------------------------------------------------------------------
   # Verify the PR and derive the Dependabot metadata (read-only GITHUB_TOKEN)
   #
+  # When `analyze` will run, this job also loads the default branch's
+  # .github/env configuration and hands it down as `env-json`, so the job that
+  # writes labels and comments never checks anything out.
+  #
   # Ends with one `result`:
   #   analyze             → a genuine Dependabot PR on the triggering commit;
   #                         `analyze` decides what to do with it
   #   revoke-foreign-push → the PR has a commit Dependabot didn't produce
-  #   manual-no-metadata  → Dependabot's metadata can't be read: manual review
+  #   manual-no-metadata  → Dependabot's metadata can't be read, or the PR isn't
+  #                         exactly the one commit it describes: manual review
   #   revoke-unverified   → the PR is known, but a GitHub API read failed before
   #                         it was verified: revoke (fail closed, re-run to retry)
   #   skip-*              → not a PR this workflow acts on, or no longer at the
@@ -153,7 +167,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       actions: read # Required: Confirm the trigger's Dependabot job ran (wake-up filter)
-      contents: read # Required: Read commits (author, signature, message)
+      contents: read # Required: Read commits (author, signature, message) + sparse checkout of the default branch's env files
       pull-requests: read # Required: Re-read the PR and list its commits
     outputs:
       # The step's `decision`, not its `result`: actions/github-script sets its
@@ -173,11 +187,15 @@ jobs:
       package-ecosystem: ${{ steps.verify.outputs.package-ecosystem }}
       previous-version: ${{ steps.verify.outputs.previous-version }}
       new-version: ${{ steps.verify.outputs.new-version }}
+      # The default branch's .github/env configuration, for `analyze` (empty
+      # unless `analyze` will run)
+      env-json: ${{ steps.load-env.outputs.env-json }}
 
     steps:
       # --------------------------------------------------------------------
       # Resolve and verify the PR, then read the Dependabot metadata from
-      # its verified head commit. No checkout: API reads only.
+      # its verified head commit. API reads only: the checkout below is the
+      # default branch's config, never the PR.
       # --------------------------------------------------------------------
       - name: 🔐 Verify PR and derive Dependabot metadata
         id: verify
@@ -469,9 +487,6 @@ jobs:
             } catch (error) {
               return unverified('list the PR commits', error);
             }
-            if (commits.length === 0) {
-              return finish('manual-no-metadata', `PR #${pr.number} has no commits`, verified);
-            }
             const foreign = commits.filter(c => !isDependabotCommit(c));
             if (foreign.length > 0) {
               console.log('🚫 Commits not authored by Dependabot and signed by GitHub:');
@@ -483,18 +498,22 @@ jobs:
             console.log(`✅ All ${commits.length} commit(s) authored by ${DEPENDABOT} and signed by GitHub`);
 
             // ——————————————————————————————————————————————————————————————————
-            // 5. Dependabot metadata from the verified head commit's message.
+            // 5. Dependabot metadata from the verified head commit's message. It
+            //    only describes that commit, so the PR must be exactly that one
+            //    commit: Dependabot always force-pushes a single fresh commit.
+            //    More can still pass step 4 (a retarget to an older base pulls in
+            //    squash-merged Dependabot commits, each signed by GitHub), and
+            //    the head's metadata would then classify changes it doesn't
+            //    describe (e.g. an earlier major update as this patch).
             // ——————————————————————————————————————————————————————————————————
-            let headCommit = commits.find(c => c.sha === pr.head.sha);
-            if (!headCommit) {
-              try {
-                ({ data: headCommit } = await github.rest.repos.getCommit({ owner, repo, ref: pr.head.sha }));
-              } catch (error) {
-                return unverified('read the head commit', error);
-              }
+            if (commits.length !== 1) {
+              return finish('manual-no-metadata', `PR #${pr.number} has ${commits.length} commits; the head commit's metadata only describes itself, so it needs a manual review`, verified);
             }
-            if (!isDependabotCommit(headCommit)) {
-              return finish('revoke-foreign-push', `Head commit ${pr.head.sha} wasn't produced by Dependabot`, verified);
+            const [headCommit] = commits;
+            if (headCommit.sha !== pr.head.sha) {
+              // The PR read matched this run's head, so the commit list is stale
+              // or out of sync with it: fail closed, as for a failed read.
+              return unverified('match the PR commits to the head', new Error(`the PR's only commit is ${headCommit.sha}, not ${pr.head.sha}`));
             }
             const metadata = parseDependabotCommit(headCommit.commit?.message ?? '', pr.head.ref, pr.title ?? '');
             if (!metadata) {
@@ -520,6 +539,35 @@ jobs:
             console.log(`🌐 Ecosystem: ${ecosystem || '<unknown>'}`);
             console.log(`⬆️ Version: ${deps[0].from || '?'} → ${deps[0].to || '?'}`);
             return finish('analyze', `Verified Dependabot PR #${pr.number} at ${pr.head.sha}`, outputs);
+
+      # --------------------------------------------------------------------
+      # Load the configuration for `analyze`, here in the read-only job: the
+      # job that writes labels and comments gets it as an output and never
+      # checks anything out. Same condition as `analyze` itself, so it runs
+      # exactly when `analyze` needs it. A failure here doesn't stop this job
+      # (its result still reaches `analyze` and `apply`): `analyze` then finds
+      # no configuration and fails, and `apply` revokes. Fail closed, as when
+      # loading failed inside `analyze`.
+      # --------------------------------------------------------------------
+      - name: 📥 Checkout code (sparse)
+        if: contains(fromJSON('["analyze", "revoke-foreign-push"]'), steps.verify.outputs.decision)
+        continue-on-error: true
+        # SECURITY: on workflow_run, github.sha is the latest commit on the DEFAULT
+        # branch, the same commit this workflow file came from, so the local
+        # ./.github/actions/load-env action is never a PR-controlled version.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github/env
+            .github/actions/load-env
+
+      - name: 🌍 Load environment variables
+        id: load-env
+        if: contains(fromJSON('["analyze", "revoke-foreign-push"]'), steps.verify.outputs.decision)
+        continue-on-error: true
+        uses: ./.github/actions/load-env
 
       # --------------------------------------------------------------------
       # Summary (always)
@@ -548,9 +596,12 @@ jobs:
   # ----------------------------------------------------------------------------------
   # Analyze the Dependabot PR (GITHUB_TOKEN only — never sees the App key)
   #
+  # No checkout and no workspace: this job can write labels and comments, so
+  # the .github/env configuration comes from `verify` (read-only) as an output.
+  #
   # Workflow phases (each preserved as a step):
-  #   🌍 Load environment       → reads .github/env/*
-  #   🔧 Extract configuration  → exports all DEPENDABOT_* vars to env
+  #   🔧 Extract configuration  → exports all DEPENDABOT_* vars to env (from
+  #                               the .github/env/* that `verify` loaded)
   #   📋 Log dependency details → trace logging (metadata from `verify`)
   #   🔒 Check for security     → classify security vs non-security
   #   🏢 Check same owner       → are all deps owned by this repo's owner?
@@ -574,7 +625,7 @@ jobs:
       group: ${{ github.workflow }}-analyze-${{ needs.verify.outputs.pr-number }}
       cancel-in-progress: true
     permissions:
-      contents: read # Required: Sparse checkout of the default branch for env files + read branch rules
+      contents: read # Required: Read the base branch and its rules (merge guards)
       pull-requests: write # Required: Comment on and label Dependabot PRs
       issues: write # Required: Add labels and alert comments via the issues API
     env:
@@ -584,40 +635,30 @@ jobs:
       action: ${{ steps.guard.outputs.action || needs.verify.outputs.result }}
       manual-review-label: ${{ steps.config.outputs.manual-review-label }}
       auto-merge-labels: ${{ steps.config.outputs.auto-merge-labels }}
+      # "true" only for an approval or a skip-untrusted-actor revocation whose
+      # head moved or whose PR was retargeted during the analysis, or for an
+      # approval whose PR couldn't be re-read
+      stale: ${{ steps.head.outputs.stale }}
 
     steps:
       # --------------------------------------------------------------------
-      # Check out code to access env file
-      # --------------------------------------------------------------------
-      - name: 📥 Checkout code (sparse)
-        # SECURITY: on workflow_run, github.sha is the latest commit on the DEFAULT
-        # branch, the same commit this workflow file came from, so the local
-        # ./.github/actions/load-env action is never a PR-controlled version.
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-          sparse-checkout: |
-            .github/env
-            .github/actions/load-env
-
-      # --------------------------------------------------------------------
-      # Load and parse environment file
-      # --------------------------------------------------------------------
-      - name: 🌍 Load environment variables
-        id: load-env
-        uses: ./.github/actions/load-env
-
-      # --------------------------------------------------------------------
-      # Extract Dependabot configuration up-front
+      # Extract Dependabot configuration up-front (loaded by `verify` from
+      # the default branch's .github/env)
       # --------------------------------------------------------------------
       - name: 🔧 Extract configuration
         id: config
         env:
-          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
+          ENV_JSON: ${{ needs.verify.outputs.env-json }}
           APP_CLIENT_ID: ${{ vars.AUTO_MERGE_APP_CLIENT_ID }}
         run: |
           echo "📋 Extracting Dependabot configuration from environment..."
+
+          # Fail closed without a configuration: the analysis then fails, and
+          # `apply` revokes instead of approving
+          if [[ -z "$ENV_JSON" ]] || ! jq -e 'type == "object" and length > 0' <<< "$ENV_JSON" > /dev/null 2>&1; then
+            echo "❌ ERROR: no configuration from the verify job (env-json is empty or not a JSON object)" >&2
+            exit 1
+          fi
 
           # Validate required configuration
           MAINTAINER=$(echo "$ENV_JSON" | jq -r '.DEPENDABOT_MAINTAINER_USERNAME')
@@ -1247,19 +1288,24 @@ jobs:
       #      the PR's commits before this job starts, so the revocation holds
       #      whoever triggered the run and even if a step here fails. This step
       #      never runs for it.
-      #   2. Only runs Dependabot itself triggered may approve: the trigger
-      #      run's actor (GitHub's workflow_run payload) is dependabot[bot].
-      #   3. Every commit must be authored by dependabot[bot], committed by
+      #   2. Every commit must be authored by dependabot[bot], committed by
       #      GitHub (web-flow) and carry a verified signature. Author emails
       #      can be spoofed; GitHub's signature on the commit cannot. `verify`
       #      checked this; it is re-checked here in case of a push since then.
-      #   4. The base branch must require status checks (ruleset or classic
+      #   3. The base branch must require status checks (ruleset or classic
       #      branch protection). Otherwise "auto-merge" would merge before CI.
-      #   5. The base branch's rulesets must require an approval AND drop it on
+      #   4. The base branch's rulesets must require an approval AND drop it on
       #      a new push (dismiss stale approvals, or require approval of the
       #      most recent push). Revoking after someone else pushes needs the
       #      PR-side trigger to run, and the pusher controls that file, so
       #      GitHub itself must make an approval of older content worthless.
+      #   5. Only runs Dependabot itself triggered may approve: the trigger
+      #      run's actor (GitHub's workflow_run payload) is dependabot[bot].
+      #      Checked last: `apply` keeps an App approval of the current head
+      #      when only this guard fails (and the PR still targets the base
+      #      checked here), so a run someone else triggered (a retarget, a
+      #      reopen) must first find the commits and the CURRENT base's rules
+      #      sound. A base that fails revokes it.
       # Any action other than auto-merge-* also makes `apply` revoke a bot
       # approval and auto-merge left by an earlier evaluation, so a later push
       # (by Dependabot or anyone else) never rides an approval of older content.
@@ -1299,12 +1345,7 @@ jobs:
             finish "$ACTION" "⏭️ Planned action '$ACTION' does not approve or merge — guards not needed"
           fi
 
-          # Guard 2: only Dependabot-triggered runs may approve
-          if [[ "$ACTOR" != "dependabot[bot]" ]]; then
-            finish skip-untrusted-actor "🚫 Run triggered by '$ACTOR', not dependabot[bot] — leaving for manual review"
-          fi
-
-          # Guard 3: commit provenance (re-check)
+          # Guard 2: commit provenance (re-check)
           if ! FOREIGN=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/commits" \
               --jq '.[] | select((.author.login // "") != "dependabot[bot]" or (.committer.login // "") != "web-flow" or (.commit.verification.verified | not)) | .sha'); then
             finish skip-foreign-commits "❌ Could not list PR commits — failing closed"
@@ -1318,21 +1359,26 @@ jobs:
           fi
           echo "  ✅ All commits authored by dependabot[bot] and signed by GitHub"
 
-          # Guard 4: the base branch must require status checks
+          # Guard 3: the base branch must require status checks
+          # URL-encoded: `#` and `%` are valid in branch names, and unencoded would
+          # end the path or be decoded, so another branch's rules would be read.
+          BASE_PATH=$(jq -rn --arg branch "$BASE_REF" '$branch | @uri')
           # All pages of the rules (a rule on a later page would otherwise be missed).
-          # pipefail (in this subshell only): a failed read becomes [], not gh's error body.
-          if ! RULES_JSON=$(set -o pipefail; gh api --paginate "repos/$REPO/rules/branches/$BASE_REF?per_page=100" 2>/dev/null | jq -s 'add // []'); then
-            RULES_JSON='[]'
+          # pipefail (in this subshell only): a failed read must fail, not pass on
+          # gh's error body. Either read failing fails closed: on error gh prints
+          # that body on stdout, which the numeric checks below would skip past.
+          if ! RULES_JSON=$(set -o pipefail; gh api --paginate "repos/$REPO/rules/branches/$BASE_PATH?per_page=100" 2>/dev/null | jq -s 'add // []') ||
+             ! CLASSIC_CHECKS=$(gh api "repos/$REPO/branches/$BASE_PATH" \
+               --jq 'if (.protection.required_status_checks.enforcement_level // "off") == "off" then 0 else ([.protection.required_status_checks.contexts[]?] | length) end' 2>/dev/null); then
+            finish skip-no-required-checks "❌ Could not read the rules of '$BASE_REF' — failing closed"
           fi
           RULESET_CHECKS=$(jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[]?] | length' <<< "$RULES_JSON" 2>/dev/null || echo 0)
-          CLASSIC_CHECKS=$(gh api "repos/$REPO/branches/$BASE_REF" \
-            --jq 'if (.protection.required_status_checks.enforcement_level // "off") == "off" then 0 else ([.protection.required_status_checks.contexts[]?] | length) end' 2>/dev/null || echo 0)
           echo "  Required checks on '$BASE_REF': rulesets=$RULESET_CHECKS classic=$CLASSIC_CHECKS"
           if [[ "${RULESET_CHECKS:-0}" -eq 0 && "${CLASSIC_CHECKS:-0}" -eq 0 ]]; then
             finish skip-no-required-checks "🚫 '$BASE_REF' requires no status checks — auto-merge would merge before CI"
           fi
 
-          # Guard 5: a new push must void the bot approval. A pusher who also edits
+          # Guard 4: a new push must void the bot approval. A pusher who also edits
           # the PR-side trigger stops the revocation, so the base branch has to
           # require an approval (else an armed auto-merge merges whatever is pushed)
           # and drop it on push. Classic branch protection's review settings
@@ -1346,6 +1392,12 @@ jobs:
           if [[ "$APPROVALS_VOIDED_ON_PUSH" != "true" ]]; then
             echo "::warning title=Approvals survive new pushes on $BASE_REF::Dependabot auto-merge is off until a ruleset on $BASE_REF requires at least one approval and turns on \"Dismiss stale pull request approvals when new commits are pushed\" (or \"Require approval of the most recent reviewable push\"). Otherwise someone who pushes to the PR and edits the PR-side trigger could ride the bot approval. See .github/docs/auto-merge-github-app.md"
             finish skip-stale-approvals-kept "🚫 '$BASE_REF' keeps approvals after new pushes (or requires none) — a bot approval could cover code pushed later"
+          fi
+
+          # Guard 5: only Dependabot-triggered runs may approve. Last, so it only
+          # decides once the commits and the current base passed (see above).
+          if [[ "$ACTOR" != "dependabot[bot]" ]]; then
+            finish skip-untrusted-actor "🚫 Run triggered by '$ACTOR', not dependabot[bot] — leaving for manual review"
           fi
 
           finish "$ACTION" "✅ All merge guards passed"
@@ -1762,6 +1814,56 @@ jobs:
           echo "🕐 Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
           echo "✅ Analysis completed!"
 
+      # --------------------------------------------------------------------
+      # Last, for an approval or a skip-untrusted-actor revocation (whose apply
+      # can keep an App approval of the head): is the PR still on the analyzed
+      # commit and base? If not, `apply` would only skip (an approval) or revoke
+      # on stale grounds, even a newer evaluation's approval, and joining its
+      # queue would still replace the pending apply of the newer evaluation
+      # (GitHub keeps one pending job per group: the last to arrive, not the
+      # freshest evaluation). A retarget keeps the head, and its own evaluation
+      # may skip `analyze` (e.g. manual-no-metadata), leaving this one running
+      # to displace its revocation. So it stays out. So does an approval when
+      # the PR can't be re-read (fail closed: re-run to retry), while a
+      # revocation then goes ahead: `apply` keeps an approval only on the head
+      # and base this run verified. Other revocations always go ahead, and
+      # `apply` keeps no approval for them. Never fails the job (that would
+      # turn the decision into a revoke).
+      # --------------------------------------------------------------------
+      - name: 📌 Confirm the head and base before approving or keeping an approval
+        id: head
+        if: startsWith(steps.guard.outputs.action, 'auto-merge-') || steps.guard.outputs.action == 'skip-untrusted-actor'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          ACTION: ${{ steps.guard.outputs.action }}
+          VERIFIED_SHA: ${{ needs.verify.outputs.head-sha }}
+          VERIFIED_BASE: ${{ needs.verify.outputs.base-ref }}
+        run: |
+          if [[ "$ACTION" == auto-merge-* ]]; then NOT_APPLIED="Not approved"; else NOT_APPLIED="Not applied"; fi
+          # One read for both; branch names can't contain spaces, so the line splits cleanly
+          if PR_REF=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '"\(.head.sha) \(.base.ref)"' 2>/dev/null) &&
+             read -r CURRENT_SHA CURRENT_BASE <<< "$PR_REF" && [[ -n "$CURRENT_SHA" ]]; then
+            if [[ "$CURRENT_SHA" != "$VERIFIED_SHA" ]]; then
+              echo "⏭️ Head moved from $VERIFIED_SHA to $CURRENT_SHA — $ACTION stays out of the apply queue; the run for the new commit decides"
+              echo "stale=true" >> "$GITHUB_OUTPUT"
+              echo "⏭️ $NOT_APPLIED: the PR moved on to \`$CURRENT_SHA\` during the analysis; the run for that commit decides." >> "$GITHUB_STEP_SUMMARY"
+            elif [[ "$CURRENT_BASE" != "$VERIFIED_BASE" ]]; then
+              echo "⏭️ Base changed from ${VERIFIED_BASE:-<unknown>} to $CURRENT_BASE — $ACTION stays out of the apply queue; the run for the retarget decides"
+              echo "stale=true" >> "$GITHUB_OUTPUT"
+              echo "⏭️ $NOT_APPLIED: the PR was retargeted to \`$CURRENT_BASE\` during the analysis; the run for the retarget decides." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "✅ PR #$PR_NUMBER is still at $VERIFIED_SHA on $VERIFIED_BASE"
+            fi
+          elif [[ "$ACTION" == auto-merge-* ]]; then
+            # Unconfirmed is stale: queued anyway, it could displace a pending revocation
+            echo "::warning title=Dependabot PR #$PR_NUMBER not approved::Couldn't re-read the PR to confirm its head and base, so the approval stays out of the apply queue. Re-run this workflow to retry."
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+            echo "⚠️ Not approved: couldn't re-read the PR to confirm its head and base. Re-run this workflow to retry." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "⚠️ Couldn't re-read PR #$PR_NUMBER — revoking anyway; the apply job keeps an approval only on $VERIFIED_SHA and ${VERIFIED_BASE:-<unknown>}"
+          fi
+
   # ----------------------------------------------------------------------------------
   # Apply: approve + arm auto-merge, or revoke, with a GitHub App token
   #
@@ -1775,9 +1877,10 @@ jobs:
   #             auto-merge after a push by someone else), then dismiss the App's
   #             approvals. Only ever on a same-repo Dependabot PR. A failed call
   #             doesn't skip the rest: everything is attempted, then the job fails
-  #             and the PR comment says what's left. Once the head has moved, a
-  #             newer evaluation decides it: an App approval of the current head
-  #             stands, and only authorization for older commits is revoked.
+  #             and the PR comment says what's left. Only an evaluation of the
+  #             current head and base that failed nothing but the actor guard
+  #             keeps an App approval of that head; any other revokes it too,
+  #             including one that judged an older head or base (fail closed).
   #
   # SECURITY: this is the only job that can read the App private key. Every step in
   # a job can read every secret the job uses (they sit in the runner's memory), so
@@ -1794,11 +1897,16 @@ jobs:
     needs: [verify, analyze]
     # No successful analysis needed: revoking must hold even if `analyze` fails,
     # which would otherwise leave an earlier approval + auto-merge armed. Approving
-    # requires one (see DECISION).
+    # requires one (see DECISION). An approval or a skip-untrusted-actor
+    # revocation whose head moved or whose PR was retargeted during the
+    # analysis, or an approval whose PR couldn't be re-read, stays out of the
+    # queue (see "Confirm the head and base before approving or keeping an
+    # approval").
     if: |
       !cancelled() &&
       vars.AUTO_MERGE_APP_CLIENT_ID != '' &&
-      contains(fromJSON('["analyze", "revoke-foreign-push", "manual-no-metadata", "revoke-unverified"]'), needs.verify.outputs.result)
+      contains(fromJSON('["analyze", "revoke-foreign-push", "manual-no-metadata", "revoke-unverified"]'), needs.verify.outputs.result) &&
+      needs.analyze.outputs.stale != 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     # Queue, never cancel: see "Concurrency Control" at the top
@@ -1813,6 +1921,8 @@ jobs:
       # Verified by the `verify` job from GitHub's payload and the API
       PR_NUMBER: ${{ needs.verify.outputs.pr-number }}
       VERIFIED_SHA: ${{ needs.verify.outputs.head-sha }}
+      # The base whose rules the merge guards checked
+      VERIFIED_BASE: ${{ needs.verify.outputs.base-ref }}
       # Exactly one of the two steps below runs
       DECISION: ${{ (needs.verify.outputs.result == 'analyze' && needs.analyze.result == 'success' && startsWith(needs.analyze.outputs.action, 'auto-merge-')) && 'approve' || 'revoke' }}
 
@@ -1828,6 +1938,8 @@ jobs:
           private-key: ${{ secrets.AUTO_MERGE_APP_PRIVATE_KEY }}
           # Least privilege: no owner/repositories inputs = this repository only, and
           # only the two permissions approving and merging need. Revoked at job end.
+          # No Workflows permission: a PR that changes .github/workflows/ can only be
+          # armed while its branch is current for those files (see the App docs).
           permission-contents: write
           permission-pull-requests: write
 
@@ -1855,10 +1967,12 @@ jobs:
           outcome() { echo "outcome=$1" >> "$GITHUB_OUTPUT"; }
 
           # Re-read the PR right before acting: it must still be an open, same-repo
-          # Dependabot PR on the exact commit the verify job checked.
+          # Dependabot PR on the exact commit the verify job checked, targeting the
+          # base whose rules the merge guards checked.
           PR_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER")
           STATE=$(jq -r '.state' <<< "$PR_JSON")
           CURRENT_SHA=$(jq -r '.head.sha' <<< "$PR_JSON")
+          CURRENT_BASE=$(jq -r '.base.ref // ""' <<< "$PR_JSON")
           ARMED=$(jq -r '.auto_merge != null' <<< "$PR_JSON")
           AUTHOR=$(jq -r '.user.login // ""' <<< "$PR_JSON")
           HEAD_REPO=$(jq -r '.head.repo.full_name // ""' <<< "$PR_JSON")
@@ -1875,6 +1989,13 @@ jobs:
           if [[ "$CURRENT_SHA" != "$VERIFIED_SHA" ]]; then
             echo "⏭️ Head moved from $VERIFIED_SHA to $CURRENT_SHA — the run for the new commit decides"
             outcome skipped-head-moved
+            exit 0
+          fi
+          # A retarget keeps the head (so --match-head-commit still passes) but can
+          # change the rules that apply and the commits the PR merges
+          if [[ -z "$VERIFIED_BASE" || "$CURRENT_BASE" != "$VERIFIED_BASE" ]]; then
+            echo "⏭️ Base changed from ${VERIFIED_BASE:-<unknown>} to ${CURRENT_BASE:-<unknown>} — the run for the retarget decides"
+            outcome skipped-base-changed
             exit 0
           fi
 
@@ -1932,6 +2053,15 @@ jobs:
             echo "$MERGE_OUTPUT"
             echo "ℹ️ Auto-merge already enabled by another run — treating as success"
             outcome already-enabled
+          elif grep -qi "refusing to allow a GitHub App to create or update workflow" <<< "$MERGE_OUTPUT"; then
+            # The App has no Workflows permission, so GitHub only lets it merge
+            # workflow-file contents that already exist on a branch. Usually the base
+            # changed a workflow file this PR also changes; a rebase fixes it.
+            echo "$MERGE_OUTPUT"
+            echo "⚠️ PR approved, but GitHub refused to let the App arm auto-merge for a workflow-file change"
+            echo "   (usually the base branch changed a workflow file this PR also changes)."
+            echo "   Comment '@dependabot rebase' (that run re-approves and arms), or merge manually when CI passes."
+            outcome approved-workflow-files
           else
             echo "$MERGE_OUTPUT"
             echo "⚠️ PR approved, but enabling auto-merge failed."
@@ -1981,7 +2111,7 @@ jobs:
               WHY="This Dependabot PR has commits that Dependabot didn't produce"
             fi
           elif [[ "$VERIFY_RESULT" == "manual-no-metadata" ]]; then
-            WHY="Dependabot's update metadata couldn't be read from commit $SHORT_SHA"
+            WHY="Dependabot's update metadata couldn't be read from commit $SHORT_SHA, or doesn't cover every commit in this PR"
           elif [[ "$VERIFY_RESULT" == "revoke-unverified" ]]; then
             WHY="Commit $SHORT_SHA couldn't be verified (a GitHub API read failed)"
           elif [[ "$ANALYZE_RESULT" != "success" ]]; then
@@ -2006,6 +2136,7 @@ jobs:
           fi
           STATE=$(jq -r '.state' <<< "$PR_JSON")
           CURRENT_SHA=$(jq -r '.head.sha' <<< "$PR_JSON")
+          CURRENT_BASE=$(jq -r '.base.ref // ""' <<< "$PR_JSON")
           ARMED_BY=$(jq -r 'if .auto_merge == null then "" else (.auto_merge.enabled_by.login // "unknown") end' <<< "$PR_JSON")
           AUTHOR=$(jq -r '.user.login // ""' <<< "$PR_JSON")
           HEAD_REPO=$(jq -r '.head.repo.full_name // ""' <<< "$PR_JSON")
@@ -2035,11 +2166,20 @@ jobs:
           fi
 
           # An App approval of the current head was made by an evaluation that
-          # Dependabot triggered and that verified that exact commit. It stands when
-          # this run judged other content (the head has moved since), or when only
-          # who triggered this run is in question (skip-untrusted-actor). Unreadable
-          # reviews can't show one, so the arming is revoked below (fail closed).
-          if [[ "$CURRENT_SHA" != "$VERIFIED_SHA" || "$ACTION" == "skip-untrusted-actor" ]]; then
+          # Dependabot triggered and that verified that exact commit on the base
+          # the PR targeted then (the review records the commit, not the base). It
+          # stands only when this run vouches for that commit on the current base:
+          # only who triggered this run is in question (skip-untrusted-actor: the
+          # actor guard runs last, so the commits and the verified base's rules
+          # passed), on the head and base this run verified. A run that judged
+          # another commit or base vouches for nothing, and it may have displaced
+          # the newer evaluation's own revocation in the queue (e.g. a retarget's,
+          # which skips `analyze` and its stale check), so it revokes an approval
+          # of the current head too. Fail closed: re-running the latest evaluation
+          # restores a sound one. Unreadable reviews can't show one, so the arming
+          # is revoked below.
+          if [[ "$CURRENT_SHA" == "$VERIFIED_SHA" && "$ACTION" == "skip-untrusted-actor" &&
+                -n "$VERIFIED_BASE" && "$CURRENT_BASE" == "$VERIFIED_BASE" ]]; then
             if grep -q " $CURRENT_SHA\$" <<< "$APPROVALS"; then
               echo "✅ $APP_BOT approved the current head $CURRENT_SHA in an evaluation Dependabot triggered — nothing to revoke"
               outcome kept-current
@@ -2047,11 +2187,11 @@ jobs:
             elif [[ "$REVIEWS_READ" != "true" ]]; then
               echo "⚠️ Can't check for an App approval of the current head $CURRENT_SHA, so revoking anyway"
             fi
-          fi
-          if [[ "$CURRENT_SHA" != "$VERIFIED_SHA" && "$REVIEWS_READ" == "true" ]]; then
-            echo "📌 Head moved from $VERIFIED_SHA to $CURRENT_SHA, which no App approval covers yet"
           elif [[ "$CURRENT_SHA" != "$VERIFIED_SHA" ]]; then
-            echo "📌 Head moved from $VERIFIED_SHA to $CURRENT_SHA"
+            echo "📌 Head moved from $VERIFIED_SHA to $CURRENT_SHA since this evaluation, so no App approval is kept (re-run the latest run for $CURRENT_SHA to re-evaluate it)"
+            WHY="$WHY, and the PR has since moved on to ${CURRENT_SHA:0:7}, which this evaluation can't vouch for"
+          elif [[ "$ACTION" == "skip-untrusted-actor" ]]; then
+            echo "📌 Base changed from ${VERIFIED_BASE:-<unknown>} to ${CURRENT_BASE:-<unknown>} since this evaluation, so no App approval is kept"
           fi
 
           # 1. Disarm first: that alone stops the automatic merge, whatever the
@@ -2175,10 +2315,12 @@ jobs:
             enabled)                  DESC="✅ Approved and auto-merge enabled" ;;
             already-enabled)          DESC="✅ Approved; auto-merge was already enabled" ;;
             approved-ready-for-merge) DESC="⚠️ Approved, but enabling auto-merge failed — merge manually when CI passes" ;;
+            approved-workflow-files)  DESC="⚠️ Approved, but GitHub refused to arm auto-merge for a workflow-file change (usually the base changed the same file). Comment \`@dependabot rebase\`, or merge manually when CI passes" ;;
             failed-approve)           DESC="❌ Approval failed" ;;
             skipped-not-open)         DESC="⏭️ Skipped (PR no longer open)" ;;
             skipped-not-dependabot)   DESC="⏭️ Skipped (no longer a same-repo Dependabot PR)" ;;
             skipped-head-moved)       DESC="⏭️ Skipped (head moved — the newer run decides)" ;;
+            skipped-base-changed)     DESC="⏭️ Skipped (PR retargeted — the run for the new base decides)" ;;
             revoked)                  DESC="🚫 Bot approval dismissed and/or auto-merge disabled: $REVOKE_REASON" ;;
             revoke-incomplete)        DESC="❌ Revocation incomplete: could not ${REVOKE_FAILED:-finish}. A bot approval or auto-merge may still be in place — check the PR" ;;
             kept-current)             DESC="✅ Nothing revoked: the App's approval of the current head (from an evaluation Dependabot triggered) stands" ;;

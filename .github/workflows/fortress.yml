@@ -518,7 +518,8 @@ jobs:
     uses: ./.github/workflows/fortress-release.yml
     with:
       env-json: ${{ needs.setup.outputs.env-json }}
-      primary-runner: ${{ needs.setup.outputs.primary-runner }}
+      # RELEASE_RUNNER, resolved by setup (falls back to the primary runner)
+      primary-runner: ${{ needs.setup.outputs.release-runner || needs.setup.outputs.primary-runner }}
       go-primary-version: ${{ needs.setup.outputs.go-primary-version }}
       golangci-lint-version: ${{ needs.code-quality.outputs.golangci-lint-version }}
       go-sum-file: ${{ needs.setup.outputs.go-sum-file }}

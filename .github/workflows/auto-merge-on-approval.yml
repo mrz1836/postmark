@@ -95,8 +95,9 @@ jobs:
   #   🔍 Evaluate conditions     → decides enable / disable / skip
   #   📊 Generate summary        → always
   #
-  # "enable" / "disable" only mean `apply` must run; `apply` re-derives the action
-  # from fresh data, then enables/disables auto-merge and posts comments/labels.
+  # "enable" / "disable" / "already-enabled" only mean `apply` must run (see its
+  # `if`); `apply` re-derives the action from fresh data, then enables/disables
+  # auto-merge and posts comments/labels.
   # ----------------------------------------------------------------------------------
   evaluate:
     name: 🤖 Auto-merge on Approval
@@ -203,11 +204,15 @@ jobs:
           if [[ -z "$MIN_APPROVALS" ]] || [[ "$MIN_APPROVALS" == "null" ]]; then
             MIN_APPROVALS="1"  # Default to 1 approval
           fi
-          # Fail closed: a non-number would make every approval comparison false
-          if ! [[ "$MIN_APPROVALS" =~ ^[0-9]+$ ]]; then
-            echo "❌ AUTO_MERGE_MIN_APPROVALS must be a whole number (got '$MIN_APPROVALS')"
+          # Fail closed: a non-number would make every approval comparison false.
+          # At most 9 digits, so no consumer's arithmetic can overflow.
+          if ! [[ "$MIN_APPROVALS" =~ ^[0-9]{1,9}$ ]]; then
+            echo "❌ AUTO_MERGE_MIN_APPROVALS must be a whole number of at most 9 digits (got '$MIN_APPROVALS')"
             exit 1
           fi
+          # Plain decimal from here on: the evaluator reads "010" as 10, but bash
+          # (the apply job's re-check) as octal 8, and fails on "08" or "09"
+          MIN_APPROVALS=$((10#$MIN_APPROVALS))
 
           MERGE_TYPES=$(echo "$ENV_JSON" | jq -r '.AUTO_MERGE_ALLOWED_MERGE_TYPES')
           DEFAULT_MERGE_TYPE=$(echo "$MERGE_TYPES" | cut -d',' -f1)
@@ -594,6 +599,8 @@ jobs:
             else
               APPLY_DESC="⏭️ Not applied: the GitHub App is not configured (\`AUTO_MERGE_APP_CLIENT_ID\` is unset)."
             fi
+          elif [[ "$ACTION" == "already-enabled" && -n "$APP_CLIENT_ID" ]]; then
+            APPLY_DESC="Re-checked by the **apply** job (GitHub App) after any apply still in progress — see its summary below."
           else
             APPLY_DESC="Nothing to apply."
           fi
@@ -646,9 +653,18 @@ jobs:
   apply:
     name: 🚀 Apply auto-merge decision
     needs: evaluate
+    # "already-enabled" runs too, as a no-op re-check queued behind any apply in
+    # flight. That apply may have re-checked just before a change that clears
+    # the last blocker (e.g. WIP removed) and still disable after this
+    # evaluation read the PR as armed. Nothing else would repair that:
+    # `auto_merge_disabled` doesn't trigger an evaluation. The reverse (an
+    # apply that arms just after a blocker appears) repairs itself: the arming
+    # fires `auto_merge_enabled`, whose evaluation disables.
+    # An allowlist, never a denylist: the re-check doesn't repeat the bot and
+    # fork guards, so every action here must come after them in `evaluate`.
     if: |
       vars.AUTO_MERGE_APP_CLIENT_ID != '' &&
-      contains(fromJSON('["enable", "disable"]'), needs.evaluate.outputs.action)
+      contains(fromJSON('["enable", "disable", "already-enabled"]'), needs.evaluate.outputs.action)
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     # Queue, never cancel: see "Concurrency Control" at the top
@@ -672,6 +688,8 @@ jobs:
           private-key: ${{ secrets.AUTO_MERGE_APP_PRIVATE_KEY }}
           # Least privilege: no owner/repositories inputs = this repository only, and
           # only the two permissions merging needs. Revoked at job end.
+          # No Workflows permission: a PR that changes .github/workflows/ can only be
+          # armed while its branch is current for those files (see the App docs).
           permission-contents: write
           permission-pull-requests: write
 
@@ -697,6 +715,12 @@ jobs:
           # pipefail: a failed review listing below must fail this step (and so
           # skip enabling/disabling), not count as zero approvals
           set -o pipefail
+          # `evaluate` hands over a plain decimal. Anything else (empty, a leading
+          # zero bash reads as octal) would skip the approvals blocker: fail closed.
+          if ! [[ "$MIN_APPROVALS" =~ ^(0|[1-9][0-9]{0,8})$ ]]; then
+            echo "❌ Minimum approvals '$MIN_APPROVALS' isn't a plain decimal number"
+            exit 1
+          fi
           PR_JSON=$(gh api "repos/$REPO/pulls/$PR_NUMBER")
           read -r STATE CURRENT_SHA ARMED ARMED_BY_APP DRAFT PENDING_REVIEWS HAS_LABEL IS_WIP < <(jq -r \
             --arg app_bot "$APP_BOT" --arg label "$AUTOMERGE_LABEL" --arg wip "$WIP_LABELS" '
@@ -851,6 +875,21 @@ jobs:
             echo "ℹ️  Auto-merge already enabled by another workflow run"
             outcome already-enabled
             exit 0
+          elif grep -qi "refusing to allow a GitHub App to create or update workflow" <<< "$MERGE_OUTPUT"; then
+            # The App has no Workflows permission, so GitHub only lets it merge
+            # workflow-file contents that already exist on a branch. Usually the base
+            # changed a workflow file this PR also changes; updating the branch fixes it.
+            echo "⚠️ GitHub refused to let the App arm auto-merge: $MERGE_OUTPUT"
+            echo "   Usually the base branch changed a workflow file this PR also changes."
+            if [[ "$COMMENT_ON_ENABLE" == "true" ]]; then
+              gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" --silent -f body="⚠️ **Auto-merge not enabled**
+
+          Merging this PR would write workflow-file contents that no branch of this repository has yet, usually because the base branch also changed a workflow file this PR changes. GitHub only lets the auto-merge App do that with the Workflows permission, which it deliberately doesn't have.
+
+          Update the branch, then approve the new commit (auto-merge is enabled again), or merge this PR by hand." || echo "⚠️ Could not post the failure comment"
+            fi
+            outcome refused-workflow-files
+            exit 0
           else
             echo "❌ Failed to enable auto-merge: $MERGE_OUTPUT"
             if [[ "$COMMENT_ON_ENABLE" == "true" ]]; then
@@ -973,16 +1012,17 @@ jobs:
             OUTCOME="no-change"
           fi
           case "$OUTCOME" in
-            enabled)         DESC="✅ Auto-merge enabled" ;;
-            already-enabled) DESC="✅ Auto-merge was already enabled" ;;
-            disabled)        DESC="🛑 Auto-merge disabled ($REASON)" ;;
-            not-enabled)     DESC="ℹ️ Auto-merge was not enabled" ;;
-            no-change)       DESC="⏭️ Nothing to do on fresh data ($REASON)" ;;
-            failed)          DESC="❌ Failed to enable auto-merge" ;;
-            failed-disable)  DESC="❌ Failed to disable auto-merge" ;;
-            token-failed)    DESC="❌ Could not create the GitHub App token (App installed? key set in the 'auto-merge' environment?)" ;;
-            recheck-failed)  DESC="❌ Could not re-read the PR before acting — nothing was changed" ;;
-            *)               DESC="❓ Unknown outcome: ${OUTCOME:-none}" ;;
+            enabled)                DESC="✅ Auto-merge enabled" ;;
+            already-enabled)        DESC="✅ Auto-merge was already enabled" ;;
+            disabled)               DESC="🛑 Auto-merge disabled ($REASON)" ;;
+            not-enabled)            DESC="ℹ️ Auto-merge was not enabled" ;;
+            no-change)              DESC="⏭️ Nothing to do on fresh data ($REASON)" ;;
+            failed)                 DESC="❌ Failed to enable auto-merge" ;;
+            refused-workflow-files) DESC="⚠️ GitHub refused to enable auto-merge for a workflow-file change (usually the base changed the same file). Update the branch and re-approve, or merge by hand" ;;
+            failed-disable)         DESC="❌ Failed to disable auto-merge" ;;
+            token-failed)           DESC="❌ Could not create the GitHub App token (App installed? key set in the 'auto-merge' environment?)" ;;
+            recheck-failed)         DESC="❌ Could not re-read the PR before acting — nothing was changed" ;;
+            *)                      DESC="❓ Unknown outcome: ${OUTCOME:-none}" ;;
           esac
           {
             echo "## 🚀 Apply Outcome — PR #$PR_NUMBER"

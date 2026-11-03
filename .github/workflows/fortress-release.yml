@@ -21,7 +21,7 @@ on:
         required: true
         type: string
       primary-runner:
-        description: "Primary runner OS to use"
+        description: "Runner for the release job: RELEASE_RUNNER, or PRIMARY_RUNNER when unset (Linux or macOS)"
         required: true
         type: string
       go-primary-version:

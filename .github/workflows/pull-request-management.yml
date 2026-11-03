@@ -21,8 +21,10 @@
 #  ══════════════════════════════════════════════════════════════════════════════
 #
 #  Neither path ever executes PR code: every action goes through the GitHub REST
-#  API, and the only checkout is a sparse one of `.github/env` and the load-env
-#  action from a protected branch (never the PR head).
+#  API. The only checkout is the same-repo job's sparse one of `.github/env` and
+#  the load-env action from the base branch (never the PR head). The fork path
+#  has no checkout: its read-only lookup job reads those files from the default
+#  branch through the API, and the job that writes has no workspace.
 #
 #  ┌─────────────────────────────────────────────────────────────────────────────┐
 #  │ SAME-REPO PRs → `pull_request`, job pr-management-same-repo                 │
@@ -49,6 +51,9 @@
 #  │     env: and quoted "$VAR"s or jq --arg, never ${{ }} in a script.          │
 #  │  ✅ Only GITHUB_TOKEN is exposed. No custom secrets are referenced.         │
 #  │  ✅ Narrower permissions than same-repo: no `contents: write`.              │
+#  │  ✅ No checkout: the read-only lookup job reads the default branch's        │
+#  │     config through the API and hands it down; the job that writes never     │
+#  │     has a workspace.                                                        │
 #  └─────────────────────────────────────────────────────────────────────────────┘
 #
 #  Job structure (one path does work per PR event, the other skips):
@@ -58,12 +63,14 @@
 #    │           cache cleanup on close, branch deletion on merge.
 #    │
 #    ├─ pr-management-fork-lookup → workflow_run, head repository != github.repository
-#    │     Permissions: actions:read, pull-requests:read
-#    │     Work: finds and re-reads the fork PR (or skips, with the reason)
+#    │     Permissions: actions:read, contents:read, pull-requests:read
+#    │     Work: finds and re-reads the fork PR (or skips, with the reason), then
+#    │           loads the default branch's config through the API (no checkout)
 #    │
 #    └─ pr-management-fork        → needs the lookup to have found the PR
-#          Permissions: actions:write, contents:read, issues:write, pull-requests:write
-#                       (NOT contents:write — fork branches can't be deleted from base)
+#          Permissions: actions:write, issues:write, pull-requests:write
+#                       (NO contents at all: no checkout, and fork branches
+#                       can't be deleted from base)
 #          Work: fork+triage labels, default assignee, fork welcome notice,
 #                 cache cleanup on close. NO branch deletion. NO type labels —
 #                 those require pre-merge code review.
@@ -95,7 +102,8 @@ name: PR Management
 # zizmor's dangerous-triggers audit flags every `workflow_run` trigger. Here it
 # only feeds the fork lookup job, which uses no artifacts, outputs or code from
 # the triggering run: it re-reads the PR from the API, skips anything ambiguous,
-# and the work job only checks out the default branch's config.
+# and reads the default branch's config through the API. No job on this path
+# checks anything out.
 # --------------------------------------------------------------------
 on: # zizmor: ignore[dangerous-triggers] see "Trigger Configuration" above
   pull_request:
@@ -761,6 +769,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       actions: read # Required: Confirm the trigger's fork PR management job ran (wake-up filter)
+      contents: read # Required: Read the default branch's .github/env configuration through the API
       pull-requests: read # Required: Find and re-read the fork PR
     outputs:
       proceed: ${{ steps.pr.outputs.proceed }}
@@ -770,6 +779,9 @@ jobs:
       assignee-count: ${{ steps.pr.outputs.assignee-count }}
       head-repo: ${{ steps.pr.outputs.head-repo }}
       title: ${{ steps.pr.outputs.title }}
+      # The default branch's .github/env configuration, for the work job (empty
+      # unless it will run)
+      env-json: ${{ steps.load-env.outputs.env-json }}
 
     steps:
       # --------------------------------------------------------------------
@@ -857,6 +869,61 @@ jobs:
             core.setOutput('proceed', 'true');
 
       # --------------------------------------------------------------------
+      # Load the configuration for the work job, here in the read-only job,
+      # and without a checkout: the fork path reads everything through the
+      # API. On workflow_run, context.sha (github.sha) is the latest commit on
+      # the DEFAULT branch, the same commit this workflow file came from. From
+      # it come only the files the load-env action reads (.github/env's loader
+      # and *.env files, and the action itself), written to this job's empty
+      # workspace. Fork code is never fetched or executed.
+      # --------------------------------------------------------------------
+      - name: 📥 Fetch default-branch configuration (API)
+        if: steps.pr.outputs.proceed == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { owner, repo } = context.repo;
+            const ref = context.sha;
+            const workspace = process.env.GITHUB_WORKSPACE;
+
+            // One regular file at `ref`, written under the workspace at the same path
+            const fetchFile = async (filePath) => {
+              const { data } = await github.rest.repos.getContent({ owner, repo, path: filePath, ref });
+              if (Array.isArray(data) || data.type !== 'file' || data.encoding !== 'base64') {
+                throw new Error(`${filePath} at ${ref} is not a regular file the API returns in full`);
+              }
+              const target = path.join(workspace, filePath);
+              fs.mkdirSync(path.dirname(target), { recursive: true });
+              fs.writeFileSync(target, Buffer.from(data.content, 'base64'));
+            };
+
+            // The loader and every *.env file in .github/env, as load-env.sh reads them
+            const { data: entries } = await github.rest.repos.getContent({ owner, repo, path: '.github/env', ref });
+            if (!Array.isArray(entries)) {
+              throw new Error(`.github/env at ${ref} is not a directory`);
+            }
+            const names = entries
+              .filter(e => e.type === 'file' && !e.name.includes('/') && e.name !== '.' && e.name !== '..')
+              .map(e => e.name)
+              .filter(name => name === 'load-env.sh' || name.endsWith('.env'));
+            if (!names.includes('load-env.sh')) {
+              throw new Error(`.github/env/load-env.sh not found at ${ref}`);
+            }
+            for (const name of names) {
+              await fetchFile(`.github/env/${name}`);
+            }
+            await fetchFile('.github/actions/load-env/action.yml');
+            console.log(`📥 Fetched ${names.length} file(s) from .github/env and the load-env action at ${ref}`);
+
+      - name: 🌍 Load environment variables
+        id: load-env
+        if: steps.pr.outputs.proceed == 'true'
+        uses: ./.github/actions/load-env
+
+      # --------------------------------------------------------------------
       # Summary when there is nothing to do (the next job summarizes the rest)
       # --------------------------------------------------------------------
       - name: 📊 Generate lookup summary
@@ -881,9 +948,10 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-fork-${{ needs.pr-management-fork-lookup.outputs.pr-number }}
       cancel-in-progress: true
+    # No checkout and no workspace: this job can write, so the .github/env
+    # configuration comes from the read-only lookup job as an output.
     permissions:
       actions: write # Required: Delete GitHub Actions caches for closed PRs
-      contents: read # Sparse checkout of the default branch only — no write needed
       issues: write # Required: Create fork/triage labels lazily if missing
       pull-requests: write # Required: Apply labels, assign reviewers, post comments
     env:
@@ -895,34 +963,21 @@ jobs:
 
     steps:
       # --------------------------------------------------------------------
-      # SECURITY-CRITICAL CHECKOUT — default branch + sparse + no fetch-depth
-      #
-      # On workflow_run, github.sha is the latest commit on the DEFAULT branch,
-      # the same commit this workflow file came from. Fork code is never checked
-      # out or executed.
-      # --------------------------------------------------------------------
-      - name: 📥 Checkout default branch (sparse)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-          sparse-checkout: |
-            .github/env
-            .github/actions/load-env
-
-      - name: 🌍 Load environment variables
-        id: load-env
-        uses: ./.github/actions/load-env
-
-      # --------------------------------------------------------------------
-      # Extract fork-management configuration (single jq pass)
+      # Extract fork-management configuration (single jq pass) from the
+      # default branch's .github/env, loaded by the lookup job
       # --------------------------------------------------------------------
       - name: 🔧 Extract configuration
         env:
-          ENV_JSON: ${{ steps.load-env.outputs.env-json }}
+          ENV_JSON: ${{ needs.pr-management-fork-lookup.outputs.env-json }}
         run: |
           echo "📋 Extracting fork PR management configuration..."
+
+          # Fail closed without a configuration (the defaults below are for
+          # unset keys, not for a missing configuration)
+          if [[ -z "$ENV_JSON" ]] || ! jq -e 'type == "object" and length > 0' <<< "$ENV_JSON" > /dev/null 2>&1; then
+            echo "❌ ERROR: no configuration from the lookup job (env-json is empty or not a JSON object)" >&2
+            exit 1
+          fi
 
           {
             echo "DEFAULT_ASSIGNEE=$(echo "$ENV_JSON" | jq -r '.PR_MANAGEMENT_DEFAULT_ASSIGNEE // ""')"
@@ -1206,5 +1261,5 @@ jobs:
 
           {
             echo "---"
-            echo "**Security:** This job ran from the default branch via **workflow_run** with a **default-branch sparse checkout only**. PR code was **not** checked out or executed."
+            echo "**Security:** This job ran from the default branch via **workflow_run** with **no checkout** (its configuration was read from the default branch through the API by the lookup job). PR code was **not** checked out or executed."
           } >> "$GITHUB_STEP_SUMMARY"
