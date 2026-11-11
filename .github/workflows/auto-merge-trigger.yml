@@ -95,6 +95,15 @@ jobs:
     #
     # Same-repo PRs only: the evaluator never auto-merges fork PRs.
     #
+    # Human-authored PRs only: the evaluator ends every bot PR at
+    # `skip-bot` (AUTO_MERGE_SKIP_BOT_PRS=true in .github/env; it uses
+    # the same bot test), and Dependabot PRs belong to Dependabot
+    # Auto-merge (the job below). Without this, every label, review
+    # request and App approval/arming on a Dependabot PR started
+    # three runners (this job, the evaluator, Dependabot Auto-merge's
+    # verify) that all found nothing to do. A repository that sets
+    # AUTO_MERGE_SKIP_BOT_PRS=false must drop these two conditions.
+    #
     # `pull_request_review:submitted` fires for every review state:
     # "approved", "changes_requested" and "commented". Only the first
     # two affect auto-merge state. A run whose jobs are all skipped
@@ -112,7 +121,9 @@ jobs:
     # and a closed PR has nothing to arm.
     # ----------------------------------------------------------------
     if: |
-      github.event.pull_request.head.repo.full_name == github.repository && (
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.type != 'Bot' &&
+      !endsWith(github.event.pull_request.user.login, '[bot]') && (
         (github.event_name == 'pull_request' &&
           github.event.action != 'opened' &&
           github.event.action != 'closed' && (
