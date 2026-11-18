@@ -2,9 +2,11 @@ package postmark
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -148,17 +150,16 @@ func FuzzGetBouncedTagsJSON(f *testing.F) {
 		if err != nil {
 			validateJSONError(t, err)
 		} else {
-			// If successful, validate the result
-			for _, tag := range tags {
-				// Tags should not be excessively long (potential DoS protection)
-				if len(tag) > 1000 {
-					t.Errorf("Tag is excessively long: %d characters", len(tag))
-				}
+			// The response body is supplied by the fuzzer itself, so its size is not
+			// a property of the client. Instead, check that the client agrees with
+			// the standard library: a successful call must yield exactly what
+			// encoding/json decodes from the same input.
+			var want []string
+			if jsonErr := json.Unmarshal([]byte(jsonArray), &want); jsonErr != nil {
+				t.Fatalf("client accepted input that encoding/json rejects (%v): %q", jsonErr, jsonArray)
 			}
-
-			// Result should not have excessive number of tags
-			if len(tags) > 10000 {
-				t.Errorf("Excessive number of tags returned: %d", len(tags))
+			if !reflect.DeepEqual(tags, want) {
+				t.Errorf("tags mismatch: got %q, want %q", tags, want)
 			}
 		}
 	})
