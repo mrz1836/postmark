@@ -12,6 +12,7 @@ All GitHub Actions workflows in this repository are powered by modular configura
 These configuration files control everything from:
 - **Go version matrix** (test on multiple versions or just one)
 - **Runner selection** (Ubuntu or macOS, your wallet decides), with an optional separate runner for releases (`RELEASE_RUNNER`)
+- **Release publishing** (on by default; `ENABLE_RELEASE=false` runs every check on a `v*` tag but skips the release job, for a repository that publishes its releases with its own workflow)
 - **Feature toggles** (coverage, fuzzing, linting, race detection, benchmarks)
 - **Security tool versions** (gitleaks, nancy, govulncheck)
 - **Auto-merge behaviors** (how aggressive should the bots be?)

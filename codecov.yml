@@ -7,6 +7,10 @@ codecov:
 # ----------------------
 coverage:
   status:
+    project:
+      default:
+        target: auto
+        threshold: 2% # Same tolerance as the flag status below; without it, any drop fails
     patch: false
   range: 70..90 # The First number represents red, and the second represents green
   # (default is 70..100)

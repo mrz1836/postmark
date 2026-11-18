@@ -1267,7 +1267,12 @@ jobs:
                 echo "[View Release](https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }})"
               } >> final-report.md
             elif [[ "$RELEASE_RESULT" == "skipped" ]]; then
-              echo "⏭️ Release was skipped (likely due to test failures)" >> final-report.md
+              # ENABLE_RELEASE comes from env-json (expanded into the environment above); only an explicit false is off
+              if [[ "${ENABLE_RELEASE:-true}" == "false" ]]; then
+                echo "⏭️ Release publishing is off for this repository (\`ENABLE_RELEASE=false\`), which publishes its releases with its own workflow" >> final-report.md
+              else
+                echo "⏭️ Release was skipped (likely due to test failures)" >> final-report.md
+              fi
             elif [[ "$RELEASE_RESULT" == "failure" ]]; then
               echo "❌ Release creation failed - check logs for details" >> final-report.md
             fi
