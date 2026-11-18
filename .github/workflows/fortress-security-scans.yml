@@ -98,7 +98,8 @@ jobs:
   security-scans:
     name: 🔒 Security Scans
     runs-on: ${{ inputs.primary-runner }}
-    timeout-minutes: 10
+    # Minutes, from SECURITY_SCAN_TIMEOUT_MINUTES (10-security.env); override in 90-project.env.
+    timeout-minutes: ${{ fromJSON(fromJSON(inputs.env-json).SECURITY_SCAN_TIMEOUT_MINUTES || '10') }}
     if: ${{ inputs.enable-nancy || inputs.enable-govulncheck || inputs.enable-gitleaks || inputs.enable-osv }}
     permissions:
       contents: read # All scans

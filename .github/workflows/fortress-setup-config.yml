@@ -79,6 +79,9 @@ on:
       race-detection-enabled:
         description: "Whether race detection is enabled"
         value: ${{ jobs.setup-config.outputs.race-detection-enabled }}
+      release-enabled:
+        description: "Whether the release job publishes on v* tags (ENABLE_RELEASE, true when unset)"
+        value: ${{ jobs.setup-config.outputs.release-enabled }}
       release-runner:
         description: "Runner for the release job (RELEASE_RUNNER, or the primary runner when unset)"
         value: ${{ jobs.setup-config.outputs.release-runner }}
@@ -218,6 +221,7 @@ jobs:
       magefile-exists: ${{ steps.config.outputs.magefile-exists }}
       primary-runner: ${{ steps.config.outputs.primary-runner }}
       race-detection-enabled: ${{ steps.config.outputs.race-detection-enabled }}
+      release-enabled: ${{ steps.config.outputs.release-enabled }}
       release-runner: ${{ steps.config.outputs.release-runner }}
       secondary-runner: ${{ steps.config.outputs.secondary-runner }}
       security-scans-enabled: ${{ steps.config.outputs.security-scans-enabled }}
@@ -696,6 +700,16 @@ jobs:
           fi
           echo "release-runner=$RELEASE" >> $GITHUB_OUTPUT
 
+          # Release publishing: ENABLE_RELEASE, or true when unset, read from the
+          # environment rather than expression-interpolated. false runs every check
+          # on a v* tag and skips only the release job.
+          RELEASE_ENABLED="${ENABLE_RELEASE:-true}"
+          if [[ "$RELEASE_ENABLED" != "true" && "$RELEASE_ENABLED" != "false" ]]; then
+            echo "::error title=Invalid ENABLE_RELEASE::ENABLE_RELEASE must be true or false (got: $RELEASE_ENABLED)."
+            exit 1
+          fi
+          echo "release-enabled=$RELEASE_ENABLED" >> $GITHUB_OUTPUT
+
           # Check if .mage.yaml exists
           if [ -f ".mage.yaml" ]; then
             echo "magefile-exists=true" >> $GITHUB_OUTPUT
@@ -878,6 +892,7 @@ jobs:
           echo "| **Primary Runner** | \`${{ env.PRIMARY_RUNNER }}\` | Main OS for CI jobs |" >> $GITHUB_STEP_SUMMARY
           echo "| **Secondary Runner** | \`${{ env.SECONDARY_RUNNER }}\` | Additional OS for compatibility testing |" >> $GITHUB_STEP_SUMMARY
           echo "| **Release Runner** | \`${{ steps.config.outputs.release-runner }}\` | Runner for the release job (v* tags) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Release Publishing** | $([ "${{ steps.config.outputs.release-enabled }}" == "true" ] && echo "✅ Enabled" || echo "❌ Disabled") | $([ "${{ steps.config.outputs.release-enabled }}" == "true" ] && echo "GitHub release on v* tags (\`ENABLE_RELEASE\`)" || echo "Checks run on v* tags; release job skipped (\`ENABLE_RELEASE=false\`)") |" >> $GITHUB_STEP_SUMMARY
           echo "| **Primary Go Version** | \`${{ env.GO_PRIMARY_VERSION }}\` | Main Go version for builds |" >> $GITHUB_STEP_SUMMARY
           echo "| **Secondary Go Version** | \`${{ env.GO_SECONDARY_VERSION }}\` | Additional Go version for testing |" >> $GITHUB_STEP_SUMMARY
           echo "| **Unique Go Versions** | $UNIQUE_GO_VERSIONS | Deduplicated list of Go versions |" >> $GITHUB_STEP_SUMMARY
@@ -934,7 +949,15 @@ jobs:
           echo "| **Static Analysis** | $([ "${{ env.ENABLE_STATIC_ANALYSIS }}" == "true" ] && echo "✅" || echo "❌") | $([ "${{ env.ENABLE_STATIC_ANALYSIS }}" == "true" ] && echo "go vet" || echo "Skipped") |" >> $GITHUB_STEP_SUMMARY
           echo "| **YAML Linting** | $([ "${{ env.ENABLE_YAML_LINT }}" == "true" ] && echo "✅" || echo "❌") | $([ "${{ env.ENABLE_YAML_LINT }}" == "true" ] && echo "yamlfmt" || echo "Skipped") |" >> $GITHUB_STEP_SUMMARY
           echo "| **Redis Service** | $([ "${{ steps.redis-config.outputs.redis-enabled }}" == "true" ] && echo "✅" || echo "❌") | $([ "${{ steps.redis-config.outputs.redis-enabled }}" == "true" ] && echo "Redis ${{ env.REDIS_VERSION }}" || echo "Not available") |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Go Docs** | $([ "${{ env.ENABLE_GODOCS_PUBLISHING }}" == "true" ] && echo "✅" || echo "❌") | $([ "${{ env.ENABLE_GODOCS_PUBLISHING }}" == "true" ] && echo "Publish to pkg.go.dev" || echo "Skipped") |" >> $GITHUB_STEP_SUMMARY
+          # Go docs are published by the release job, so ENABLE_RELEASE=false skips them too
+          if [[ "${{ env.ENABLE_GODOCS_PUBLISHING }}" != "true" ]]; then
+            GODOCS_STATUS="❌"; GODOCS_IMPACT="Skipped"
+          elif [[ "${{ steps.config.outputs.release-enabled }}" == "false" ]]; then
+            GODOCS_STATUS="❌"; GODOCS_IMPACT="Skipped (release publishing off)"
+          else
+            GODOCS_STATUS="✅"; GODOCS_IMPACT="Publish to pkg.go.dev"
+          fi
+          echo "| **Go Docs** | $GODOCS_STATUS | $GODOCS_IMPACT |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "</details>" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

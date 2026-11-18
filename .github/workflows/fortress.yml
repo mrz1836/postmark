@@ -506,9 +506,11 @@ jobs:
     needs: [setup, test-suite, security, code-quality, pre-commit]
     # Only run on successful tag pushes from same repository (not forks)
     # Allow release even if test-suite was skipped (when ENABLE_GO_TESTS=false)
+    # Skip only on ENABLE_RELEASE=false (the repository publishes its own releases); no output still releases
     if: |
       !cancelled() &&
       startsWith(github.ref, 'refs/tags/v') &&
+      needs.setup.outputs.release-enabled != 'false' &&
       needs.setup.outputs.is-fork-pr != 'true' &&
       needs.setup.result == 'success' &&
       (needs.test-suite.result == 'success' || needs.test-suite.result == 'skipped') &&
